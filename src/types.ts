@@ -1,0 +1,93 @@
+export type ContentKind = 'movie' | 'series';
+
+export interface ParsedStremioId {
+  rawId: string;
+  imdbId: string;
+  kind: ContentKind;
+  season?: number;
+  episode?: number;
+  videoId?: string;
+}
+
+export interface StatusTile {
+  name: string;
+  description: string;
+  externalUrl?: string;
+  isAction?: boolean;
+}
+
+export interface ArrMovieStatus {
+  state: 'not_added' | 'added' | 'downloaded' | 'missing' | 'unavailable';
+  monitored?: boolean;
+  hasFile?: boolean;
+  reason?: string;
+}
+
+export interface ArrEpisodeStatus {
+  state:
+    | 'series_not_added'
+    | 'series_added'
+    | 'episode_monitored'
+    | 'episode_downloaded'
+    | 'episode_missing'
+    | 'unavailable';
+  monitored?: boolean;
+  hasFile?: boolean;
+  reason?: string;
+}
+
+export interface AddActionResult {
+  ok: boolean;
+  service: 'radarr' | 'sonarr';
+  title: string;
+  summary: string;
+  detail?: string;
+  alreadyExisted?: boolean;
+}
+
+export interface RadarrMovieRecord {
+  id: number;
+  title: string;
+  imdbId?: string;
+  tmdbId?: number;
+  monitored?: boolean;
+  hasFile?: boolean;
+  movieFile?: { id: number } | null;
+  year?: number;
+}
+
+export interface RadarrLookupRecord {
+  title: string;
+  imdbId?: string;
+  tmdbId: number;
+  year?: number;
+}
+
+export interface SonarrSeriesRecord {
+  id: number;
+  title: string;
+  imdbId?: string;
+  tvdbId?: number;
+  monitored?: boolean;
+  statistics?: {
+    episodeFileCount?: number;
+    episodeCount?: number;
+    totalEpisodeCount?: number;
+  };
+}
+
+export interface SonarrEpisodeRecord {
+  id: number;
+  seasonNumber: number;
+  episodeNumber: number;
+  monitored?: boolean;
+  hasFile?: boolean;
+  episodeFileId?: number;
+}
+
+export interface SonarrLookupRecord {
+  title: string;
+  year?: number;
+  imdbId?: string;
+  tvdbId?: number;
+}
