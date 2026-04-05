@@ -1,0 +1,85 @@
+# ${TAG}
+
+## Install
+
+**Download:** [`stremio-addarr-install.tar.gz`](https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz)
+**Checksum:** [`stremio-addarr-install.tar.gz.sha256`](https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz.sha256)
+
+---
+
+## Quick Raspberry Pi install
+
+```bash
+# Download
+curl -LO https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz
+
+# Optional: verify checksum
+curl -LO https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz.sha256
+sha256sum -c stremio-addarr-install.tar.gz.sha256
+
+# Extract to /opt/stremio-addarr (files owned by pi)
+sudo mkdir -p /opt/stremio-addarr
+sudo tar -xzf stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
+sudo chown -R pi:pi /opt/stremio-addarr
+
+# Install production dependencies
+cd /opt/stremio-addarr
+npm ci --omit=dev
+
+# Configure
+cp .env.example .env && nano .env
+
+# Install and start systemd service
+sudo cp deploy/stremio-addarr.service.example /etc/systemd/system/stremio-addarr.service
+sudo systemctl daemon-reload && sudo systemctl enable --now stremio-addarr
+```
+
+> Replace `pi` with your actual service account username if different.
+> See [README.md](https://github.com/${REPO}/blob/${TAG}/README.md) for the full setup guide.
+
+---
+
+## Hosting (Android TV compatible)
+
+| Mode | Description |
+|------|-------------|
+| **DuckDNS + Caddy + Let's Encrypt** | Default recommended. Free dynamic DNS, automatic HTTPS via Caddy. Requires router port forwarding (80/443). |
+| **Tailscale Funnel** | No port forwarding needed. Public HTTPS via `*.ts.net`. |
+
+See the full hosting guide: [README_HOST.md](https://github.com/${REPO}/blob/${TAG}/README_HOST.md)
+
+---
+
+## Install in Stremio
+
+Once the add-on is running and your hostname resolves, open this URL on your Android TV or any Stremio client:
+
+```
+https://YOUR-HOSTNAME/manifest.json
+```
+
+---
+
+## Upgrade from a previous release
+
+```bash
+# Download
+curl -LO https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz
+
+# Extract over existing installation (preserves your .env)
+cd /opt/stremio-addarr
+sudo tar -xzf ~/stremio-addarr-install.tar.gz --strip-components=1
+sudo chown -R pi:pi /opt/stremio-addarr
+npm ci --omit=dev
+sudo systemctl restart stremio-addarr
+
+# Verify
+curl http://127.0.0.1:7010/healthz
+```
+
+---
+
+## Documentation
+
+- [README.md](https://github.com/${REPO}/blob/${TAG}/README.md) — full setup guide
+- [README_HOST.md](https://github.com/${REPO}/blob/${TAG}/README_HOST.md) — hosting setup (DuckDNS + Caddy and Tailscale Funnel)

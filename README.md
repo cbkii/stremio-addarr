@@ -61,11 +61,15 @@ sha256sum -c stremio-addarr-install.tar.gz.sha256
 # Extract to /opt/stremio-addarr
 sudo mkdir -p /opt/stremio-addarr
 sudo tar -xzf stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
+# Give the service user (pi) ownership so npm ci and the service can write to the directory
+sudo chown -R pi:pi /opt/stremio-addarr
 cd /opt/stremio-addarr
 
 # Install production dependencies
 npm ci --omit=dev
 ```
+
+> Replace `pi:pi` with your actual username and group if different (check with `whoami` and `id -gn`).
 
 Continue with the sections below to configure and run the add-on.
 
@@ -147,6 +151,7 @@ If you haven't already extracted the release (section 3), do so now:
 ```bash
 sudo mkdir -p /opt/stremio-addarr
 sudo tar -xzf stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
+sudo chown -R pi:pi /opt/stremio-addarr
 cd /opt/stremio-addarr
 npm ci --omit=dev
 ```
@@ -275,9 +280,10 @@ No secrets are exposed in any diagnostic output.
 # Download the new release
 curl -LO https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz
 
-# Extract over existing installation
+# Extract over existing installation (preserves your .env)
 cd /opt/stremio-addarr
 sudo tar -xzf ~/stremio-addarr-install.tar.gz --strip-components=1
+sudo chown -R pi:pi /opt/stremio-addarr
 
 # Update dependencies
 npm ci --omit=dev
@@ -314,6 +320,7 @@ Your `.env` file is preserved — the archive does not include `.env`.
 |---------|-----|-------------|
 | **Tag push** | `git tag v1.2.3 && git push origin v1.2.3` | Standard release from main branch |
 | **Manual dispatch** | Actions → Release → Run workflow → enter version | Release without pushing a tag locally |
+| **Manual dispatch (dry run)** | Actions → Release → Run workflow → enable "Dry run" | Test build/package without publishing |
 | **PR comment** | Comment `/release` on a PR | Release from a PR branch (maintainers only) |
 | **PR comment dry-run** | Comment `/release-dry-run` on a PR | Test the build/package without publishing |
 
