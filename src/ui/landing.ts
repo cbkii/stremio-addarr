@@ -13,15 +13,26 @@ function minimalHtml(title: string, body: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body>${body}</body></html>`;
 }
 
-export function renderActionConfirmPage(parsed: ParsedStremioId, actionPath: string): string {
+/**
+ * Renders a minimal confirm/action form.
+ * When autoSubmit=true (ACTION_CONFIRM=false), a script auto-submits the POST
+ * immediately so the user never has to click — while keeping the GET safe.
+ * When autoSubmit=false (ACTION_CONFIRM=true), shows an explicit confirm button.
+ */
+export function renderActionConfirmPage(
+  parsed: ParsedStremioId,
+  actionPath: string,
+  autoSubmit: boolean
+): string {
   const kind = parsed.kind === 'movie' ? 'movie' : 'series';
   const title = parsed.kind === 'movie' ? 'Add to Radarr?' : 'Add to Sonarr?';
   const backUrl = escapeHtml(
     `stremio:///detail/${kind}/${parsed.imdbId}/${parsed.videoId ?? parsed.imdbId}`
   );
+  const autoScript = autoSubmit ? '<script>document.forms[0].submit();</script>' : '';
   return minimalHtml(
     title,
-    `<p>${escapeHtml(parsed.rawId)}</p>` +
+    autoScript +
       `<form method="post" action="${escapeHtml(actionPath)}">` +
       `<button type="submit">Add + Search</button> ` +
       `<a href="${backUrl}">Cancel</a></form>`
@@ -34,6 +45,14 @@ export function renderActionResultPage(result: AddActionResult, returnUrl: strin
   return minimalHtml(
     `${prefix}${result.title}`,
     `<p>${escapeHtml(result.summary)}${escapeHtml(detail)}</p>` +
+      `<p><a href="${escapeHtml(returnUrl)}">&#8592; Back to Stremio</a></p>`
+  );
+}
+
+export function renderActionErrorPage(message: string, returnUrl: string): string {
+  return minimalHtml(
+    'Action Error',
+    `<p>${escapeHtml(message)}</p>` +
       `<p><a href="${escapeHtml(returnUrl)}">&#8592; Back to Stremio</a></p>`
   );
 }

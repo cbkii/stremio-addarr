@@ -19,25 +19,23 @@ export class ArrStatusService {
       const tiles: StatusTile[] = [];
       switch (status.state) {
         case 'downloaded':
-          tiles.push({ name: 'Arr', description: 'Radarr • Downloaded' });
-          break;
-        case 'added':
-          tiles.push({ name: 'Arr', description: 'Radarr • Added' });
+          tiles.push({ name: 'Radarr • Downloaded', description: 'File on disk' });
           break;
         case 'missing':
-          tiles.push({ name: 'Arr', description: 'Radarr • Missing' });
+          tiles.push({ name: 'Radarr • Missing', description: 'Monitored, searching' });
+          break;
+        case 'added':
+          tiles.push({ name: 'Radarr • Added', description: 'In library' });
           break;
         case 'not_added':
-          tiles.push({ name: 'Arr', description: 'Radarr • Not Added' });
           tiles.push({
-            name: 'Arr',
-            description: 'Add to Radarr + Search',
+            name: 'Add to Radarr + Search',
             externalUrl: `${this.config.publicBaseUrl}/action/movie/${encodeURIComponent(parsed.rawId)}`,
             isAction: true
           });
           break;
         case 'unavailable':
-          tiles.push({ name: 'Arr', description: 'Radarr • Unavailable' });
+          tiles.push({ name: 'Arr Offline', description: 'Radarr unreachable' });
           break;
       }
       return tiles;
@@ -47,25 +45,23 @@ export class ArrStatusService {
     const tiles: StatusTile[] = [];
     switch (status.state) {
       case 'episode_downloaded':
-        tiles.push({ name: 'Arr', description: 'Sonarr • Episode Downloaded' });
+        tiles.push({ name: 'Sonarr • Episode Downloaded', description: 'Episode on disk' });
         break;
       case 'episode_missing':
-        tiles.push({ name: 'Arr', description: 'Sonarr • Episode Missing' });
+        tiles.push({ name: 'Sonarr • Episode Missing', description: 'Monitored, searching' });
         break;
       case 'series_added':
-        tiles.push({ name: 'Arr', description: 'Sonarr • Series Added' });
+        tiles.push({ name: 'Sonarr • Series Added', description: 'Series in library' });
         break;
       case 'series_not_added':
-        tiles.push({ name: 'Arr', description: 'Sonarr • Series Not Added' });
         tiles.push({
-          name: 'Arr',
-          description: 'Add to Sonarr + Search',
+          name: 'Add to Sonarr + Search',
           externalUrl: `${this.config.publicBaseUrl}/action/series/${encodeURIComponent(parsed.rawId)}`,
           isAction: true
         });
         break;
       case 'unavailable':
-        tiles.push({ name: 'Arr', description: 'Sonarr • Unavailable' });
+        tiles.push({ name: 'Arr Offline', description: 'Sonarr unreachable' });
         break;
     }
 

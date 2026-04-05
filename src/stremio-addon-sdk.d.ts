@@ -29,7 +29,7 @@ declare module 'stremio-addon-sdk' {
 
   export class addonBuilder {
     constructor(manifest: Manifest);
-    defineStreamHandler(handler: (args: StreamHandlerArgs) => Promise<{ streams: Stream[] }> | { streams: Stream[] }): void;
+    defineStreamHandler(handler: (args: StreamHandlerArgs) => Promise<{ streams: Stream[]; cacheMaxAge?: number; staleRevalidate?: number }> | { streams: Stream[]; cacheMaxAge?: number; staleRevalidate?: number }): void;
     getInterface(): unknown;
   }
 
