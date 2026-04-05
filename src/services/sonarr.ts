@@ -13,6 +13,7 @@ export class SonarrClient {
   private readonly http: JsonHttpClient;
   private readonly seriesCache: TtlCache<SonarrSeriesRecord[]>;
   private readonly episodeCache: TtlCache<SonarrEpisodeRecord[]>;
+  private readonly queueCache: TtlCache<Array<{ episodeId?: number; seriesId?: number }>>;
 
   constructor(
     private readonly config: AppConfig,
@@ -27,6 +28,7 @@ export class SonarrClient {
       });
     this.seriesCache = new TtlCache<SonarrSeriesRecord[]>(config.statusCacheTtlMs);
     this.episodeCache = new TtlCache<SonarrEpisodeRecord[]>(config.statusCacheTtlMs);
+    this.queueCache = new TtlCache<Array<{ episodeId?: number; seriesId?: number }>>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
   }
 
   async getEpisodeStatus(imdbId: string, season?: number, episode?: number): Promise<ArrEpisodeStatus> {
@@ -57,7 +59,12 @@ export class SonarrClient {
         return { state: 'episode_downloaded', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: true };
       }
 
-      const isDownloading = await this.isEpisodeQueued(match.id, series.id);
+      let isDownloading = false;
+      try {
+        isDownloading = await this.isEpisodeQueued(match.id, series.id);
+      } catch {
+        isDownloading = false;
+      }
       if (isDownloading) {
         return { state: 'episode_downloading', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: false };
       }
@@ -168,6 +175,14 @@ export class SonarrClient {
 
   async triggerEpisodeSearch(imdbId: string, season?: number, episode?: number): Promise<AddActionResult> {
     const status = await this.getEpisodeStatus(imdbId, season, episode);
+    if (status.state === 'unavailable') {
+      return {
+        ok: false,
+        service: 'sonarr',
+        title: 'Sonarr unavailable',
+        summary: status.reason ?? 'Sonarr status check failed.'
+      };
+    }
     if (status.state === 'series_not_added') {
       return {
         ok: false,
@@ -227,14 +242,44 @@ export class SonarrClient {
   invalidateCache(): void {
     this.seriesCache.clear();
     this.episodeCache.clear();
+    this.queueCache.clear();
   }
 
   private async isEpisodeQueued(episodeId: number, seriesId: number): Promise<boolean> {
-    const queue = await this.http.get<
-      { records?: Array<{ episodeId?: number; seriesId?: number }> } | Array<{ episodeId?: number; seriesId?: number }>
-    >('/api/v3/queue?page=1&pageSize=100&includeUnknownSeriesItems=true');
-    const records = Array.isArray(queue) ? queue : (queue.records ?? []);
+    const records = await this.listQueueRecords();
     return records.some((item) => item.episodeId === episodeId || (item.seriesId === seriesId && item.episodeId == null));
+  }
+
+  private async listQueueRecords(): Promise<Array<{ episodeId?: number; seriesId?: number }>> {
+    const cached = this.queueCache.get('records');
+    if (cached) {
+      return cached;
+    }
+
+    const results: Array<{ episodeId?: number; seriesId?: number }> = [];
+    const pageSize = 250;
+    for (let page = 1; page <= 20; page++) {
+      const response = await this.http.get<
+        { records?: Array<{ episodeId?: number; seriesId?: number }>; totalRecords?: number }
+        | Array<{ episodeId?: number; seriesId?: number }>
+      >(`/api/v3/queue?page=${page}&pageSize=${pageSize}&includeUnknownSeriesItems=true`);
+      const records = Array.isArray(response) ? response : (response.records ?? []);
+      results.push(...records);
+
+      if (records.length === 0) {
+        break;
+      }
+      if (!Array.isArray(response) && typeof response.totalRecords === 'number' && results.length >= response.totalRecords) {
+        break;
+      }
+
+      if (records.length < pageSize && (Array.isArray(response) || typeof response.totalRecords !== 'number')) {
+        break;
+      }
+    }
+
+    this.queueCache.set('records', results);
+    return results;
   }
 
   private async listSeries(): Promise<SonarrSeriesRecord[]> {

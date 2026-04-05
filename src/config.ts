@@ -232,7 +232,7 @@ export function loadConfig(): AppConfig {
     }
   }
 
-  if (!config.kodi.packageName) {
+  if (config.kodi.enabled && !config.kodi.packageName) {
     throw new Error('KODI_PACKAGE must not be empty.');
   }
 
