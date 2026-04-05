@@ -13,57 +13,75 @@ export class ArrStatusService {
     this.sonarr = new SonarrClient(config);
   }
 
+  getRadarrClient(): RadarrClient {
+    return this.radarr;
+  }
+
+  getSonarrClient(): SonarrClient {
+    return this.sonarr;
+  }
+
   async buildTiles(parsed: ParsedStremioId): Promise<StatusTile[]> {
     if (parsed.kind === 'movie') {
+      if (!this.config.radarr.enabled) return [];
       const status = await this.radarr.getMovieStatus(parsed.imdbId);
       const tiles: StatusTile[] = [];
       switch (status.state) {
         case 'downloaded':
-          tiles.push({ name: 'Arr', description: 'Radarr • Downloaded' });
+          tiles.push({ name: 'Radarr', description: 'Radarr • Downloaded' });
           break;
         case 'added':
-          tiles.push({ name: 'Arr', description: 'Radarr • Added' });
+          tiles.push({ name: 'Radarr', description: 'Radarr • Added' });
           break;
         case 'missing':
-          tiles.push({ name: 'Arr', description: 'Radarr • Missing' });
+          tiles.push({ name: 'Radarr', description: 'Radarr • Missing' });
+          if (!this.config.radarr.searchOnAdd) {
+            tiles.push({
+              name: 'Radarr',
+              description: 'Search in Radarr',
+              externalUrl: `${this.config.publicBaseUrl}/action/movie/${encodeURIComponent(parsed.rawId)}`,
+              isAction: true
+            });
+          }
           break;
         case 'not_added':
           tiles.push({
-            name: 'Arr',
+            name: 'Radarr',
             description: 'Add to Radarr + Search',
             externalUrl: `${this.config.publicBaseUrl}/action/movie/${encodeURIComponent(parsed.rawId)}`,
             isAction: true
           });
           break;
         case 'unavailable':
-          tiles.push({ name: 'Arr', description: 'Radarr • Unavailable' });
+          tiles.push({ name: 'Radarr', description: 'Radarr • Unavailable' });
           break;
       }
       return tiles;
     }
 
+    if (!this.config.sonarr.enabled) return [];
     const status = await this.sonarr.getEpisodeStatus(parsed.imdbId, parsed.season, parsed.episode);
     const tiles: StatusTile[] = [];
     switch (status.state) {
       case 'episode_downloaded':
-        tiles.push({ name: 'Arr', description: 'Sonarr • Episode Downloaded' });
+        tiles.push({ name: 'Sonarr', description: 'Sonarr • Episode Downloaded' });
         break;
       case 'episode_missing':
-        tiles.push({ name: 'Arr', description: 'Sonarr • Episode Missing' });
+        tiles.push({ name: 'Sonarr', description: 'Sonarr • Episode Missing' });
         break;
       case 'series_added':
-        tiles.push({ name: 'Arr', description: 'Sonarr • Series Added' });
+        tiles.push({ name: 'Sonarr', description: 'Sonarr • Series Added' });
         break;
       case 'series_not_added':
         tiles.push({
-          name: 'Arr',
+          name: 'Sonarr',
           description: 'Add to Sonarr + Search',
           externalUrl: `${this.config.publicBaseUrl}/action/series/${encodeURIComponent(parsed.rawId)}`,
           isAction: true
         });
         break;
       case 'unavailable':
-        tiles.push({ name: 'Arr', description: 'Sonarr • Unavailable' });
+        tiles.push({ name: 'Sonarr', description: 'Sonarr • Unavailable' });
         break;
     }
 

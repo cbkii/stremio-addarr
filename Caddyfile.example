@@ -1,4 +1,34 @@
+# ─── LAN HTTPS with Caddy (Raspberry Pi) ────────────────────────────────────
+#
+# Prerequisites:
+#   1. Install Caddy: https://caddyserver.com/docs/install#debian-ubuntu-raspbian
+#   2. Add your Pi's hostname to your LAN DNS or /etc/hosts on each client.
+#      Examples:
+#        - 192.168.1.50  stremio-addarr.lan    (router DNS / Pi-hole)
+#        - Use a .local mDNS name if your network supports it
+#   3. Install Caddy's local CA cert on Android TV so the HTTPS cert is trusted.
+#      Run:  caddy trust    (on the Pi, after first start)
+#      Or copy /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+#      to Android TV via adb or a file manager and install it as a user CA.
+#
+# Config location: /etc/caddy/Caddyfile
+# Reload:          sudo systemctl reload caddy
+# ─────────────────────────────────────────────────────────────────────────────
+
 stremio-addarr.lan {
+    # Caddy uses TLS internal (its own local CA) by default for .lan hostnames.
+    # For a custom domain with a public CA, remove the tls directive.
+    tls internal
+
     encode zstd gzip
     reverse_proxy 127.0.0.1:7010
 }
+
+# ─── Notes ───────────────────────────────────────────────────────────────────
+# - Set PUBLIC_BASE_URL=https://stremio-addarr.lan in your .env file.
+# - Stremio Android TV v9 requires HTTPS for remote add-ons.
+# - The addon itself (Node on port 7010) never needs to be exposed directly;
+#   all traffic goes through Caddy.
+# - If Radarr/Sonarr are on the same Pi, they can still use http://127.0.0.1
+#   for internal traffic — only the addon's public URL needs HTTPS.
+

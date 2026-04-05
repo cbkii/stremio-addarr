@@ -1,6 +1,6 @@
 import type { AppConfig } from '../config.js';
 import { TtlCache } from '../lib/cache.js';
-import { JsonHttpClient } from '../lib/http.js';
+import { friendlyErrorMessage, JsonHttpClient } from '../lib/http.js';
 import type {
   AddActionResult,
   ArrEpisodeStatus,
@@ -8,6 +8,10 @@ import type {
   SonarrLookupRecord,
   SonarrSeriesRecord
 } from '../types.js';
+
+export interface SonarrSystemStatus {
+  version: string;
+}
 
 export class SonarrClient {
   private readonly http: JsonHttpClient;
@@ -22,6 +26,15 @@ export class SonarrClient {
     });
     this.seriesCache = new TtlCache<SonarrSeriesRecord[]>(config.statusCacheTtlMs);
     this.episodeCache = new TtlCache<SonarrEpisodeRecord[]>(config.statusCacheTtlMs);
+  }
+
+  async ping(): Promise<boolean> {
+    try {
+      await this.http.get<SonarrSystemStatus>('/api/v3/system/status');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async getEpisodeStatus(imdbId: string, season?: number, episode?: number): Promise<ArrEpisodeStatus> {
@@ -54,11 +67,11 @@ export class SonarrClient {
       if (match.monitored) {
         return { state: 'episode_missing', monitored: true, hasFile: false };
       }
-      return { state: 'series_added', monitored: !!series.monitored, hasFile: false };
+      return { state: 'episode_missing', monitored: false, hasFile: false };
     } catch (error) {
       return {
         state: 'unavailable',
-        reason: error instanceof Error ? error.message : 'Unknown Sonarr error.'
+        reason: friendlyErrorMessage(error)
       };
     }
   }
@@ -74,19 +87,19 @@ export class SonarrClient {
       };
     }
 
-    const current = await this.findSeriesByImdbId(imdbId);
-    if (current) {
+    const existing = await this.findSeriesByImdbId(imdbId);
+    if (existing) {
       return {
         ok: true,
         service: 'sonarr',
         title: 'Already in Sonarr',
         summary: 'Series is already added to Sonarr.',
-        detail: current.title,
+        detail: existing.title,
         alreadyExisted: true
       };
     }
 
-    const lookup = await this.lookupSeries(imdbId);
+    const lookup = await this.lookupSeriesWithFallback(imdbId);
     if (!lookup) {
       return {
         ok: false,
@@ -94,6 +107,16 @@ export class SonarrClient {
         title: 'Series lookup failed',
         summary: 'Could not resolve the series in Sonarr lookup.',
         detail: `IMDb id: ${imdbId}`
+      };
+    }
+
+    if (!this.config.sonarr.rootFolderPath) {
+      return {
+        ok: false,
+        service: 'sonarr',
+        title: 'Configuration error',
+        summary: 'SONARR_ROOT_FOLDER_PATH is not set.',
+        detail: 'Set SONARR_ROOT_FOLDER_PATH in .env to a valid path.'
       };
     }
 
@@ -114,7 +137,18 @@ export class SonarrClient {
       }
     };
 
-    await this.http.post('/api/v3/series', payload);
+    try {
+      await this.http.post('/api/v3/series', payload);
+    } catch (error) {
+      return {
+        ok: false,
+        service: 'sonarr',
+        title: 'Add failed',
+        summary: friendlyErrorMessage(error),
+        detail: lookup.title
+      };
+    }
+
     this.seriesCache.clear();
 
     return {
@@ -150,10 +184,18 @@ export class SonarrClient {
     return series.find((item) => item.imdbId === imdbId);
   }
 
-  private async lookupSeries(imdbId: string): Promise<SonarrLookupRecord | null> {
-    const results = await this.http.get<SonarrLookupRecord[]>(
-      `/api/v3/series/lookup?term=${encodeURIComponent(`imdb:${imdbId}`)}`
-    );
-    return results.find((item) => item.imdbId === imdbId) ?? results[0] ?? null;
+  private async lookupSeriesWithFallback(imdbId: string): Promise<SonarrLookupRecord | null> {
+    // Primary: IMDb-specific lookup
+    try {
+      const results = await this.http.get<SonarrLookupRecord[]>(
+        `/api/v3/series/lookup?term=${encodeURIComponent(`imdb:${imdbId}`)}`
+      );
+      const match = results.find((item) => item.imdbId === imdbId) ?? results[0] ?? null;
+      if (match) return match;
+    } catch {
+      // fall through to return null — fallback text search is not implemented
+      // TODO: add text-based fallback lookup if IMDb lookup fails (e.g., term: title)
+    }
+    return null;
   }
 }

@@ -1,5 +1,13 @@
 export type ContentKind = 'movie' | 'series';
 
+export type ArrErrorKind =
+  | 'disabled'
+  | 'unreachable'
+  | 'auth_failed'
+  | 'invalid_config'
+  | 'not_found'
+  | 'unknown';
+
 export interface ParsedStremioId {
   rawId: string;
   imdbId: string;

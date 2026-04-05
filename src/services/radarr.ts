@@ -1,7 +1,11 @@
 import type { AppConfig } from '../config.js';
 import { TtlCache } from '../lib/cache.js';
-import { JsonHttpClient } from '../lib/http.js';
+import { friendlyErrorMessage, JsonHttpClient } from '../lib/http.js';
 import type { AddActionResult, ArrMovieStatus, RadarrLookupRecord, RadarrMovieRecord } from '../types.js';
+
+export interface RadarrSystemStatus {
+  version: string;
+}
 
 export class RadarrClient {
   private readonly http: JsonHttpClient;
@@ -14,6 +18,15 @@ export class RadarrClient {
       timeoutMs: config.requestTimeoutMs
     });
     this.moviesCache = new TtlCache<RadarrMovieRecord[]>(config.statusCacheTtlMs);
+  }
+
+  async ping(): Promise<boolean> {
+    try {
+      await this.http.get<RadarrSystemStatus>('/api/v3/system/status');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async getMovieStatus(imdbId: string): Promise<ArrMovieStatus> {
@@ -37,7 +50,7 @@ export class RadarrClient {
     } catch (error) {
       return {
         state: 'unavailable',
-        reason: error instanceof Error ? error.message : 'Unknown Radarr error.'
+        reason: friendlyErrorMessage(error)
       };
     }
   }
@@ -59,8 +72,18 @@ export class RadarrClient {
         ok: true,
         service: 'radarr',
         title: 'Already in Radarr',
-        summary: current.state === 'downloaded' ? 'Movie is already downloaded.' : 'Movie is already added.',
+        summary: current.state === 'downloaded' ? 'Movie is already downloaded.' : 'Movie is already added to Radarr.',
         alreadyExisted: true
+      };
+    }
+
+    if (current.state === 'unavailable') {
+      return {
+        ok: false,
+        service: 'radarr',
+        title: 'Radarr unavailable',
+        summary: current.reason ?? 'Could not reach Radarr.',
+        detail: 'Check RADARR_BASE_URL and that Radarr is running.'
       };
     }
 
@@ -72,6 +95,26 @@ export class RadarrClient {
         title: 'Movie lookup failed',
         summary: 'Could not resolve the movie in Radarr lookup.',
         detail: `IMDb id: ${imdbId}`
+      };
+    }
+
+    if (!lookup.tmdbId) {
+      return {
+        ok: false,
+        service: 'radarr',
+        title: 'Movie lookup failed',
+        summary: 'Radarr lookup did not return a TMDB id.',
+        detail: `IMDb id: ${imdbId}`
+      };
+    }
+
+    if (!this.config.radarr.rootFolderPath) {
+      return {
+        ok: false,
+        service: 'radarr',
+        title: 'Configuration error',
+        summary: 'RADARR_ROOT_FOLDER_PATH is not set.',
+        detail: 'Set RADARR_ROOT_FOLDER_PATH in .env to a valid path.'
       };
     }
 
@@ -90,7 +133,18 @@ export class RadarrClient {
       }
     };
 
-    await this.http.post('/api/v3/movie', payload);
+    try {
+      await this.http.post('/api/v3/movie', payload);
+    } catch (error) {
+      return {
+        ok: false,
+        service: 'radarr',
+        title: 'Add failed',
+        summary: friendlyErrorMessage(error),
+        detail: lookup.title
+      };
+    }
+
     this.moviesCache.clear();
 
     return {

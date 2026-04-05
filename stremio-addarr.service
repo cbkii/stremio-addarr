@@ -1,0 +1,41 @@
+# stremio-addarr.service — systemd unit for Raspberry Pi
+#
+# Installation:
+#   1. Copy this file to /etc/systemd/system/stremio-addarr.service
+#   2. Edit WorkingDirectory and ExecStart to match your install path
+#   3. Ensure .env is present in WorkingDirectory
+#   4. sudo systemctl daemon-reload
+#   5. sudo systemctl enable --now stremio-addarr
+#
+# Logs:
+#   sudo journalctl -u stremio-addarr -f
+#
+# Assumes Node.js 20+ is installed and the project has been built:
+#   npm install && npm run build
+
+[Unit]
+Description=stremio-addarr — Stremio Arr Status & Add Addon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/stremio-addarr
+EnvironmentFile=/home/pi/stremio-addarr/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stremio-addarr
+# Harden the process
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/home/pi/stremio-addarr
+
+[Install]
+WantedBy=multi-user.target
