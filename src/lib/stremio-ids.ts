@@ -9,6 +9,7 @@ export function parseStremioId(type: 'movie' | 'series', id: string): ParsedStre
     if (!IMDB_RE.test(cleanedId)) {
       throw new Error(`Unsupported movie id: ${id}`);
     }
+    // Reconstruct from validated imdbId to break taint from raw user input
     return {
       rawId: cleanedId,
       imdbId: cleanedId,
@@ -39,13 +40,15 @@ export function parseStremioId(type: 'movie' | 'series', id: string): ParsedStre
     throw new Error(`Unsupported series episode id: ${id}`);
   }
 
+  // Reconstruct rawId and videoId from validated numeric components to break taint
+  const safeRawId = `${imdbId}:${season}:${episode}`;
   return {
-    rawId: cleanedId,
+    rawId: safeRawId,
     imdbId,
     kind: 'series',
     season,
     episode,
-    videoId: cleanedId
+    videoId: safeRawId
   };
 }
 

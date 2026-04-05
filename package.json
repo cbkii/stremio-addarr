@@ -13,8 +13,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/index.js",
     "check": "npm run typecheck",
-    "test": "tsx --test test/**/*.test.ts",
-    "test:ci": "tsx --test test/**/*.test.ts --test-reporter=spec",
+    "test": "tsx --test test/*.test.ts",
+    "test:ci": "tsx --test test/*.test.ts --test-reporter=spec",
     "package:release": "node scripts/package-release.mjs"
   },
   "dependencies": {

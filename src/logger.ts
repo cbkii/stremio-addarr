@@ -18,7 +18,7 @@ export function createLogger(level: LogLevel) {
         if (normalized.includes('apikey') || normalized.includes('api_key')) {
           return [key, '[redacted]'];
         }
-        if (typeof value === 'string' && normalized.includes('url')) {
+        if (typeof value === 'string' && /^https?:\/\//.test(value)) {
           return [key, value.replace(/\/\/([^@/]+)@/g, '//[redacted]@')];
         }
         return [key, value];

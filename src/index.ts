@@ -17,15 +17,6 @@ export function createApp(config: AppConfig) {
 
   app.use((req, res, next) => {
     const start = Date.now();
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-
-    if (req.method === 'OPTIONS') {
-      res.status(204).end();
-      return;
-    }
-
     res.on('finish', () => {
       logger.info('request', {
         method: req.method,
@@ -34,6 +25,21 @@ export function createApp(config: AppConfig) {
         durationMs: Date.now() - start
       });
     });
+    next();
+  });
+
+  // CORS only for Stremio SDK JSON routes (manifest + stream), not action endpoints
+  app.use((req, res, next) => {
+    const isStremioRoute = req.path === '/manifest.json' || req.path.startsWith('/stream/');
+    if (isStremioRoute) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+    }
     next();
   });
 
@@ -59,13 +65,10 @@ export function createApp(config: AppConfig) {
     try {
       const rawId = decodeURIComponent(req.params.encodedId);
       const parsed = parseStremioId(kind, rawId);
-      if (config.actionConfirm) {
-        res.type('html').send(renderActionConfirmPage(parsed, req.path));
-        return;
-      }
-      const result = await statusService.triggerAdd(parsed);
-      const returnLink = statusService.buildReturnLink(parsed);
-      res.type('html').send(renderActionResultPage(result, returnLink));
+      // GET never performs side effects; always render the confirmation page.
+      // Construct action path from validated data rather than reflecting req.path.
+      const actionPath = `/action/${kind}/${encodeURIComponent(parsed.rawId)}`;
+      res.type('html').send(renderActionConfirmPage(parsed, actionPath));
     } catch (error) {
       logger.error('Action request failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -73,16 +76,16 @@ export function createApp(config: AppConfig) {
         encodedId: req.params.encodedId
       });
       res
-        .status(500)
+        .status(400)
         .type('html')
         .send(
           renderActionResultPage(
             {
               ok: false,
               service: kind === 'movie' ? 'radarr' : 'sonarr',
-              title: 'Action failed',
-              summary: 'The add action could not be completed.',
-              detail: 'Please verify Arr connectivity and try again.'
+              title: 'Invalid request',
+              summary: 'The action URL could not be parsed.',
+              detail: 'Please verify the link from Stremio is correct.'
             },
             '/'
           )

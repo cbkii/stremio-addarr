@@ -22,12 +22,25 @@ test('health route exposes version and service config', async () => {
   });
 });
 
-test('action route immediate flow handles failure with readable page', async () => {
-  const cfg = baseConfig();
+test('action GET always shows confirmation page regardless of actionConfirm flag', async () => {
+  const cfg = baseConfig(); // actionConfirm=false
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/action/movie/tt1234567`);
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /Confirm Add/);
+    assert.match(html, /Back to Stremio/);
+  });
+});
+
+test('action POST with disabled radarr shows failure page', async () => {
+  const cfg = baseConfig(); // radarr disabled
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/action/movie/tt1234567`, { method: 'POST' });
     assert.equal(res.status, 200);
     const html = await res.text();
     assert.match(html, /Radarr unavailable/);

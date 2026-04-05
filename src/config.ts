@@ -88,6 +88,9 @@ function ensureHttpUrl(name: string, value: string): string {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`Environment variable ${name} must start with http:// or https://.`);
   }
+  if (parsed.username || parsed.password) {
+    throw new Error(`Environment variable ${name} must not contain embedded credentials (userinfo).`);
+  }
   return stripTrailingSlash(parsed.toString());
 }
 

@@ -28,3 +28,8 @@ test('fails for invalid URL', () => {
   process.env.PUBLIC_BASE_URL = 'ftp://bad';
   assert.throws(() => loadConfig(), /PUBLIC_BASE_URL/);
 });
+
+test('fails for PUBLIC_BASE_URL with embedded credentials', () => {
+  process.env.PUBLIC_BASE_URL = 'http://user:pass@127.0.0.1:7010';
+  assert.throws(() => loadConfig(), /PUBLIC_BASE_URL/);
+});
