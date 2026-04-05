@@ -25,57 +25,66 @@ test('manifest endpoint shape sanity', async () => {
   });
 });
 
-test('stream handler returns no tiles when both services are disabled', async () => {
-  const app = createApp(baseConfig());
-  await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
-    assert.equal(response.status, 200);
-    const body = (await response.json()) as { streams: Array<{ name: string }> };
-    assert.equal(body.streams.length, 0);
-  });
-});
-
-test('stream handler returns no tiles when both services are unreachable', async () => {
+test('downloaded tile launches Kodi via externalUris when enabled', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
-  cfg.sonarr.enabled = true;
-
-  globalThis.fetch = (async () => {
-    throw new TypeError('fetch failed');
-  }) as typeof fetch;
-
-  const app = createApp(cfg);
-  await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
-    assert.equal(response.status, 200);
-    const body = (await response.json()) as { streams: Array<{ name: string }> };
-    assert.equal(body.streams.length, 0);
-  });
-});
-
-test('stream action URL is deterministic and does not leak API keys', async () => {
-  const cfg = baseConfig();
-  cfg.radarr.enabled = true;
-  cfg.publicBaseUrl = 'https://stremio-addarr.lan';
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    const path = new URL(url).pathname;
-    if (path === '/api/v3/system/status') {
-      return new Response('{}', { status: 200 });
-    }
-    if (path === '/api/v3/movie') {
-      return new Response('[]', { status: 200 });
-    }
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') return new Response('[{"id":9,"imdbId":"tt1234567","hasFile":true,"monitored":true}]', { status: 200 });
     return new Response('{}', { status: 200 });
   }) as typeof fetch;
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
-    assert.equal(response.status, 200);
-    const body = (await response.json()) as { streams: Array<{ externalUrl?: string }> };
-    assert.equal(body.streams[0].externalUrl, 'https://stremio-addarr.lan/action/movie/tt1234567');
+    const body = (await response.json()) as { streams: Array<{ name: string; externalUris?: Array<{ uri: string }> }> };
+    assert.equal(body.streams[0].name, '✅ Downloaded');
+    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/);
+  });
+});
+
+test('downloaded tile has no externalUris when Kodi is disabled', async () => {
+  const cfg = baseConfig();
+  cfg.kodi.enabled = false;
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') return new Response('[{"id":9,"imdbId":"tt1234567","hasFile":true,"monitored":true}]', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const body = (await response.json()) as { streams: Array<{ externalUris?: Array<{ uri: string }> }> };
+    assert.equal(body.streams[0].externalUris?.length ?? 0, 0);
+  });
+});
+
+test('missing movie tile triggers search action URL and does not expose secrets', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.publicBaseUrl = 'https://stremio-addarr.lan';
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    const path = parsed.pathname + parsed.search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') return new Response('[{"id":9,"imdbId":"tt1234567","hasFile":false,"monitored":true}]', { status: 200 });
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const body = (await response.json()) as { streams: Array<{ name: string; externalUrl?: string }> };
+    assert.equal(body.streams[0].name, '⭕🔍 Search on Radarr');
+    assert.equal(body.streams[0].externalUrl, 'https://stremio-addarr.lan/action/search/movie/tt1234567');
 
     const serialized = JSON.stringify(body);
     assert.ok(!serialized.includes('radarr-key'));

@@ -4,7 +4,6 @@ import { loadConfig, validateConfig, type AppConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
 import { parseStremioId } from './lib/stremio-ids.js';
-import { renderStremioBouncePage } from './ui/landing.js';
 
 function redactUrl(rawUrl: string): string {
   try {
@@ -126,33 +125,44 @@ export function createApp(config: AppConfig) {
     });
   });
 
-  app.get('/action/:kind/:encodedId', async (req, res) => {
+  app.get('/action/:action/:kind/:encodedId', async (req, res) => {
+    const action = req.params.action;
     const kind = req.params.kind;
     if (kind !== 'movie' && kind !== 'series') {
       res.status(400).json({ ok: false, error: 'Unsupported action kind.' });
       return;
     }
+    if (action !== 'search' && action !== 'add-search') {
+      res.status(400).json({ ok: false, error: 'Unsupported action.' });
+      return;
+    }
 
-    let returnUrl = 'stremio://';
     try {
       const rawId = decodeURIComponent(req.params.encodedId);
       const parsed = parseStremioId(kind, rawId);
-      returnUrl = statusService.buildReturnLink(parsed);
-      const result = await statusService.triggerAdd(parsed);
-      const message = result.ok ? result.title : `${result.title} — ${result.summary}`;
+      const result =
+        action === 'add-search'
+          ? await statusService.triggerAddAndSearch(parsed)
+          : await statusService.triggerSearch(parsed);
 
+      statusService.invalidateStatusCaches();
       res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Location', returnUrl);
-      res.status(303).type('html').send(renderStremioBouncePage(returnUrl, message));
+      res.json({
+        ok: result.ok,
+        action,
+        title: result.title,
+        summary: result.summary,
+        returnUrl: statusService.buildReturnLink(parsed)
+      });
     } catch (error) {
       logger.error('Action execution failed', {
         error: error instanceof Error ? error.message : String(error),
+        action,
         kind,
         encodedId: req.params.encodedId
       });
       res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Location', returnUrl);
-      res.status(303).type('html').send(renderStremioBouncePage(returnUrl, 'Action failed. Returning to Stremio.'));
+      res.status(500).json({ ok: false, action, error: 'Action failed' });
     }
   });
 

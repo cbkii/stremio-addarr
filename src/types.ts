@@ -15,11 +15,13 @@ export interface StatusTile {
   name: string;
   description?: string;
   externalUrl?: string;
+  externalUris?: Array<{ uri: string; name?: string }>;
   isAction?: boolean;
 }
 
 export interface ArrMovieStatus {
-  state: 'not_added' | 'added' | 'downloaded' | 'missing' | 'unavailable';
+  state: 'not_added' | 'added' | 'downloaded' | 'downloading' | 'missing' | 'unavailable';
+  movieId?: number;
   monitored?: boolean;
   hasFile?: boolean;
   reason?: string;
@@ -31,8 +33,11 @@ export interface ArrEpisodeStatus {
     | 'series_added'
     | 'episode_monitored'
     | 'episode_downloaded'
+    | 'episode_downloading'
     | 'episode_missing'
     | 'unavailable';
+  seriesId?: number;
+  episodeId?: number;
   monitored?: boolean;
   hasFile?: boolean;
   reason?: string;

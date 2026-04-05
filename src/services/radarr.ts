@@ -33,12 +33,17 @@ export class RadarrClient {
         return { state: 'not_added' };
       }
       if (existing.hasFile || existing.movieFile) {
-        return { state: 'downloaded', monitored: existing.monitored, hasFile: true };
+        return { state: 'downloaded', movieId: existing.id, monitored: existing.monitored, hasFile: true };
+      }
+
+      const isDownloading = await this.isMovieQueued(existing.id);
+      if (isDownloading) {
+        return { state: 'downloading', movieId: existing.id, monitored: existing.monitored, hasFile: false };
       }
       if (existing.monitored) {
-        return { state: 'missing', monitored: true, hasFile: false };
+        return { state: 'missing', movieId: existing.id, monitored: true, hasFile: false };
       }
-      return { state: 'added', monitored: false, hasFile: false };
+      return { state: 'added', movieId: existing.id, monitored: false, hasFile: false };
     } catch (error) {
       return {
         state: 'unavailable',
@@ -59,7 +64,7 @@ export class RadarrClient {
     }
 
     const current = await this.getMovieStatus(imdbId);
-    if (current.state === 'downloaded' || current.state === 'added' || current.state === 'missing') {
+    if (current.state === 'downloaded' || current.state === 'added' || current.state === 'missing' || current.state === 'downloading') {
       return {
         ok: true,
         service: 'radarr',
@@ -133,6 +138,59 @@ export class RadarrClient {
       summary: this.config.radarr.searchOnAdd ? 'Movie added and search triggered.' : 'Movie added.',
       detail: lookup.title
     };
+  }
+
+  async triggerMovieSearch(imdbId: string): Promise<AddActionResult> {
+    const status = await this.getMovieStatus(imdbId);
+    if (status.state === 'not_added') {
+      return {
+        ok: false,
+        service: 'radarr',
+        title: 'Not in Radarr',
+        summary: 'Movie is not added yet.'
+      };
+    }
+    if (status.state === 'downloaded') {
+      return {
+        ok: true,
+        service: 'radarr',
+        title: 'Already downloaded',
+        summary: 'Movie file already exists.',
+        alreadyExisted: true
+      };
+    }
+    if (!status.movieId) {
+      return {
+        ok: false,
+        service: 'radarr',
+        title: 'Search skipped',
+        summary: 'Could not resolve Radarr movie id.'
+      };
+    }
+
+    await this.http.post('/api/v3/command', {
+      name: 'MoviesSearch',
+      movieIds: [status.movieId]
+    });
+    this.moviesCache.clear();
+    return {
+      ok: true,
+      service: 'radarr',
+      title: 'Search triggered',
+      summary: 'Radarr movie search queued.'
+    };
+  }
+
+  invalidateCache(): void {
+    this.moviesCache.clear();
+  }
+
+  private async isMovieQueued(movieId: number): Promise<boolean> {
+    const queue = await this.http.get<{ records?: Array<{ movieId?: number }> } | Array<{ movieId?: number }>>(
+      '/api/v3/queue?page=1&pageSize=100&includeUnknownMovieItems=true'
+    );
+    const records = Array.isArray(queue) ? queue : (queue.records ?? []);
+    return records.some((item) => item.movieId === movieId);
   }
 
   private async listMovies(): Promise<RadarrMovieRecord[]> {

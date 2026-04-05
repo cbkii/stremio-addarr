@@ -14,6 +14,10 @@ export interface AppConfig {
   serviceHealthCacheTtlMs: number;
   streamCacheMaxAgeSec: number;
   streamStaleRevalidateSec: number;
+  kodi: {
+    enabled: boolean;
+    packageName: string;
+  };
   radarr: {
     enabled: boolean;
     baseUrl: string;
@@ -173,6 +177,10 @@ export function loadConfig(): AppConfig {
     serviceHealthCacheTtlMs,
     streamCacheMaxAgeSec,
     streamStaleRevalidateSec,
+    kodi: {
+      enabled: readBoolean('KODI_ENABLED', true),
+      packageName: readString('KODI_PACKAGE', 'org.xbmc.kodi')
+    },
     radarr: {
       enabled: readBoolean('RADARR_ENABLED', false),
       baseUrl: stripTrailingSlash(readString('RADARR_BASE_URL')),
@@ -222,6 +230,10 @@ export function loadConfig(): AppConfig {
     if (config.sonarr.languageProfileId <= 0) {
       throw new Error('SONARR_LANGUAGE_PROFILE_ID must be greater than 0.');
     }
+  }
+
+  if (!config.kodi.packageName) {
+    throw new Error('KODI_PACKAGE must not be empty.');
   }
 
   if (config.radarr.enabled) {

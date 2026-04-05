@@ -41,7 +41,7 @@ export class SonarrClient {
       }
 
       if (season == null || episode == null) {
-        return { state: 'series_added', monitored: !!series.monitored };
+        return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored };
       }
 
       const episodes = await this.listEpisodes(series.id);
@@ -50,16 +50,21 @@ export class SonarrClient {
       );
 
       if (!match) {
-        return { state: 'series_added', monitored: !!series.monitored, reason: 'Episode not found in Sonarr yet.' };
+        return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, reason: 'Episode not found in Sonarr yet.' };
       }
 
       if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
-        return { state: 'episode_downloaded', monitored: match.monitored, hasFile: true };
+        return { state: 'episode_downloaded', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: true };
+      }
+
+      const isDownloading = await this.isEpisodeQueued(match.id, series.id);
+      if (isDownloading) {
+        return { state: 'episode_downloading', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: false };
       }
       if (match.monitored) {
-        return { state: 'episode_missing', monitored: true, hasFile: false };
+        return { state: 'episode_missing', seriesId: series.id, episodeId: match.id, monitored: true, hasFile: false };
       }
-      return { state: 'series_added', monitored: !!series.monitored, hasFile: false };
+      return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, hasFile: false };
     } catch (error) {
       return {
         state: 'unavailable',
@@ -159,6 +164,77 @@ export class SonarrClient {
       summary: this.config.sonarr.searchOnAdd ? 'Series added and search triggered.' : 'Series added.',
       detail: lookup.title
     };
+  }
+
+  async triggerEpisodeSearch(imdbId: string, season?: number, episode?: number): Promise<AddActionResult> {
+    const status = await this.getEpisodeStatus(imdbId, season, episode);
+    if (status.state === 'series_not_added') {
+      return {
+        ok: false,
+        service: 'sonarr',
+        title: 'Not in Sonarr',
+        summary: 'Series is not added yet.'
+      };
+    }
+    if (status.state === 'episode_downloaded') {
+      return {
+        ok: true,
+        service: 'sonarr',
+        title: 'Already downloaded',
+        summary: 'Episode file already exists.',
+        alreadyExisted: true
+      };
+    }
+
+    if (status.episodeId) {
+      await this.http.post('/api/v3/command', {
+        name: 'EpisodeSearch',
+        episodeIds: [status.episodeId]
+      });
+      this.seriesCache.clear();
+      this.episodeCache.clear();
+      return {
+        ok: true,
+        service: 'sonarr',
+        title: 'Search triggered',
+        summary: 'Sonarr episode search queued.'
+      };
+    }
+
+    if (status.seriesId) {
+      await this.http.post('/api/v3/command', {
+        name: 'MissingEpisodeSearch',
+        seriesId: status.seriesId
+      });
+      this.seriesCache.clear();
+      this.episodeCache.clear();
+      return {
+        ok: true,
+        service: 'sonarr',
+        title: 'Search triggered',
+        summary: 'Sonarr missing-episode search queued.'
+      };
+    }
+
+    return {
+      ok: false,
+      service: 'sonarr',
+      title: 'Search skipped',
+      summary: 'Could not resolve Sonarr ids for search.'
+    };
+  }
+
+  invalidateCache(): void {
+    this.seriesCache.clear();
+    this.episodeCache.clear();
+  }
+
+  private async isEpisodeQueued(episodeId: number, seriesId: number): Promise<boolean> {
+    const queue = await this.http.get<
+      { records?: Array<{ episodeId?: number; seriesId?: number }> } | Array<{ episodeId?: number; seriesId?: number }>
+    >('/api/v3/queue?page=1&pageSize=100&includeUnknownSeriesItems=true');
+    const records = Array.isArray(queue) ? queue : (queue.records ?? []);
+    return records.some((item) => item.episodeId === episodeId || (item.seriesId === seriesId && item.episodeId == null));
   }
 
   private async listSeries(): Promise<SonarrSeriesRecord[]> {

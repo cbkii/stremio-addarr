@@ -84,21 +84,25 @@ test('root route returns tiny operator text only', async () => {
   });
 });
 
-test('action route performs add on GET and immediately returns to Stremio detail link', async () => {
+test('search action route triggers Radarr search and returns JSON only', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
+  const called: Array<{ path: string; method: string }> = [];
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const parsed = new URL(url);
     const path = parsed.pathname + (parsed.search || '');
+    called.push({ path, method: init?.method ?? 'GET' });
 
-    if (path === '/api/v3/movie') {
-      if (init?.method === 'GET' || !init?.method) return new Response('[]', { status: 200 });
-      return new Response('{}', { status: 201 });
+    if (path === '/api/v3/movie' && (init?.method === 'GET' || !init?.method)) {
+      return new Response('[{"id":100,"imdbId":"tt1234567","monitored":true}]', { status: 200 });
     }
-    if (path.startsWith('/api/v3/movie/lookup/imdb')) {
-      return new Response('[{"title":"Movie","imdbId":"tt1234567","tmdbId":100}]', { status: 200 });
+    if (path.startsWith('/api/v3/queue?')) {
+      return new Response('{"records":[]}', { status: 200 });
+    }
+    if (path === '/api/v3/command' && init?.method === 'POST') {
+      return new Response('{}', { status: 201 });
     }
     if (path === '/api/v3/system/status') {
       return new Response('{}', { status: 200 });
@@ -109,17 +113,17 @@ test('action route performs add on GET and immediately returns to Stremio detail
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/action/movie/tt1234567`, { redirect: 'manual' });
-    assert.equal(res.status, 303);
-    assert.equal(res.headers.get('location'), 'stremio:///detail/movie/tt1234567/tt1234567');
-
-    const html = await res.text();
-    assert.match(html, /Return to Stremio/);
-    assert.match(html, /Added to Radarr/);
+    const res = await ORIGINAL_FETCH(`${baseUrl}/action/search/movie/tt1234567`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { ok: boolean; action: string };
+    assert.equal(body.ok, true);
+    assert.equal(body.action, 'search');
   });
+
+  assert.ok(called.some((entry) => entry.path === '/api/v3/command' && entry.method === 'POST'));
 });
 
-test('action route preserves exact episode detail link context on return', async () => {
+test('add-search action route preserves exact episode detail link context in JSON', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
 
@@ -137,6 +141,15 @@ test('action route preserves exact episode detail link context on return', async
     if (path === '/api/v3/series' && init?.method === 'POST') {
       return new Response('{}', { status: 201 });
     }
+    if (path.startsWith('/api/v3/episode?seriesId=')) {
+      return new Response('[{"id":45,"seasonNumber":2,"episodeNumber":5,"monitored":true}]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue?')) {
+      return new Response('{"records":[]}', { status: 200 });
+    }
+    if (path === '/api/v3/command' && init?.method === 'POST') {
+      return new Response('{}', { status: 201 });
+    }
     if (path === '/api/v3/system/status') {
       return new Response('{}', { status: 200 });
     }
@@ -147,9 +160,10 @@ test('action route preserves exact episode detail link context on return', async
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const encoded = encodeURIComponent('tt7654321:2:5');
-    const res = await ORIGINAL_FETCH(`${baseUrl}/action/series/${encoded}`, { redirect: 'manual' });
-    assert.equal(res.status, 303);
-    assert.equal(res.headers.get('location'), 'stremio:///detail/series/tt7654321/tt7654321:2:5');
+    const res = await ORIGINAL_FETCH(`${baseUrl}/action/add-search/series/${encoded}`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { returnUrl: string };
+    assert.equal(body.returnUrl, 'stremio:///detail/series/tt7654321/tt7654321:2:5');
   });
 });
 
@@ -166,14 +180,17 @@ test('series action return link without episode preserves series detail context'
     if (path === '/api/v3/series' && (init?.method === 'GET' || !init?.method)) return new Response('[]', { status: 200 });
     if (path.startsWith('/api/v3/series/lookup?term=')) return new Response('[{"title":"Show","imdbId":"tt1111111","tvdbId":111}]', { status: 200 });
     if (path === '/api/v3/series' && init?.method === 'POST') return new Response('{}', { status: 201 });
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    if (path === '/api/v3/command' && init?.method === 'POST') return new Response('{}', { status: 201 });
 
     return new Response('[]', { status: 200 });
   }) as typeof fetch;
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/action/series/tt1111111`, { redirect: 'manual' });
-    assert.equal(res.status, 303);
-    assert.equal(res.headers.get('location'), 'stremio:///detail/series/tt1111111/tt1111111');
+    const res = await ORIGINAL_FETCH(`${baseUrl}/action/add-search/series/tt1111111`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { returnUrl: string };
+    assert.equal(body.returnUrl, 'stremio:///detail/series/tt1111111/tt1111111');
   });
 });
