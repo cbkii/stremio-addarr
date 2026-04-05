@@ -2,6 +2,8 @@
 
 Self-hosted, LAN-first Stremio add-on that shows **Radarr/Sonarr status** and provides one clear **Add + Search** action from Stremio item pages.
 
+**Primary deployment target: Raspberry Pi + systemd + Caddy on home LAN.**
+
 ## What it does
 
 - On **movie** pages (`tt...`):
@@ -16,6 +18,39 @@ Self-hosted, LAN-first Stremio add-on that shows **Radarr/Sonarr status** and pr
   - `Sonarr • Series Not Added` + `Add to Sonarr + Search`
 - Action tiles open a tiny server-side action route and return a TV-readable result page with a **Back to Stremio** link.
 
+## Deployment priority
+
+1. **Raspberry Pi + systemd** (primary — recommended)
+2. **Raspberry Pi + Docker**
+3. **Local development**
+4. Any public hosting (secondary — not the primary use case)
+
+## Quick start (Raspberry Pi)
+
+```bash
+# 1. Clone and install
+git clone https://github.com/cbkii/stremio-addarr /opt/stremio-addarr
+cd /opt/stremio-addarr
+npm ci
+
+# 2. Configure
+cp .env.example .env
+nano .env   # set RADARR_BASE_URL, RADARR_API_KEY, SONARR_BASE_URL, SONARR_API_KEY
+
+# 3. Build
+npm run build
+
+# 4. Install and start systemd service
+sudo cp deploy/stremio-addarr.service.example /etc/systemd/system/stremio-addarr.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now stremio-addarr
+
+# 5. Verify
+curl http://127.0.0.1:7010/healthz
+```
+
+Then follow the **Caddy reverse proxy** section to enable HTTPS for Android TV access.
+
 ## Supported Stremio model
 
 Primary resource: **`stream`** (officially supported).
@@ -23,7 +58,9 @@ Primary resource: **`stream`** (officially supported).
 Routes served:
 - `/manifest.json`
 - `/stream/:type/:id.json`
-- `/health`
+- `/healthz` — liveness probe
+- `/health` — legacy health + service status
+- `/status.json` — structured diagnostics (no secrets)
 - `/action/movie/:encodedId`
 - `/action/series/:encodedId`
 - `/`
@@ -43,6 +80,7 @@ This add-on does **not** inject undocumented native UI buttons.
 
 - `src/index.ts` – Express app, routes, CORS, action flow
 - `src/addon.ts` – Stremio manifest + stream handler
+- `src/config.ts` – env-driven config + validation
 - `src/services/radarr.ts` – Radarr status/add logic
 - `src/services/sonarr.ts` – Sonarr status/add logic
 - `src/services/status.ts` – tile orchestration + health aggregation
@@ -50,7 +88,6 @@ This add-on does **not** inject undocumented native UI buttons.
 - `src/lib/stremio-ids.ts` – ID parsing and deep links
 - `src/ui/landing.ts` – landing/action HTML pages
 - `test/*.test.ts` – unit/integration tests
-- `.github/workflows/*.yml` – CI and tag-release automation
 
 ## Environment variables
 
@@ -63,75 +100,97 @@ Copy `.env.example` to `.env` and set values.
 | `PUBLIC_BASE_URL` | yes | Public base URL Stremio will use for install and requests. |
 | `LOG_LEVEL` | no | `debug`, `info`, `warn`, `error`. |
 | `REQUEST_TIMEOUT_MS` | no | Arr request timeout in ms (>=1000). |
-| `STATUS_CACHE_TTL_MS` | no | status cache TTL ms (>=1000). |
+| `STATUS_CACHE_TTL_MS` | no | Status cache TTL ms (>=1000). |
 | `ACTION_CONFIRM` | no | `true` shows confirm page before side effects. |
-| `RADARR_ENABLED` | no | enable Radarr integration. |
-| `RADARR_BASE_URL` | when enabled | Radarr URL (http/https). |
+| `RADARR_ENABLED` | no | Enable Radarr integration. |
+| `RADARR_BASE_URL` | when enabled | Radarr URL (http/https). Same Pi: `http://127.0.0.1:7878`. |
 | `RADARR_API_KEY` | when enabled | Radarr API key. |
 | `RADARR_ROOT_FOLDER_PATH` | when enabled | Add target folder path. |
 | `RADARR_QUALITY_PROFILE_ID` | when enabled | Radarr quality profile ID. |
 | `RADARR_MINIMUM_AVAILABILITY` | no | e.g. `announced`, `released`. |
-| `RADARR_TAGS` | no | comma-separated tags. |
-| `RADARR_SEARCH_ON_ADD` | no | trigger search immediately. |
-| `SONARR_ENABLED` | no | enable Sonarr integration. |
-| `SONARR_BASE_URL` | when enabled | Sonarr URL (http/https). |
+| `RADARR_TAGS` | no | Comma-separated tags. |
+| `RADARR_SEARCH_ON_ADD` | no | Trigger search immediately. |
+| `SONARR_ENABLED` | no | Enable Sonarr integration. |
+| `SONARR_BASE_URL` | when enabled | Sonarr URL (http/https). Same Pi: `http://127.0.0.1:8989`. |
 | `SONARR_API_KEY` | when enabled | Sonarr API key. |
 | `SONARR_ROOT_FOLDER_PATH` | when enabled | Add target folder path. |
 | `SONARR_QUALITY_PROFILE_ID` | when enabled | Sonarr quality profile ID. |
 | `SONARR_LANGUAGE_PROFILE_ID` | when enabled | Sonarr language profile ID. |
-| `SONARR_SERIES_MONITOR` | no | monitor mode (`all`, etc). |
-| `SONARR_SEARCH_ON_ADD` | no | trigger missing episode search. |
-| `SONARR_TAGS` | no | comma-separated tags. |
-| `TMDB_API_KEY` | optional | reserved for fallback extensions. |
+| `SONARR_SERIES_MONITOR` | no | Monitor mode (`all`, `future`, `missing`, `unaired`, `none`). |
+| `SONARR_SEARCH_ON_ADD` | no | Trigger missing episode search. |
+| `SONARR_TAGS` | no | Comma-separated tags. |
+| `TMDB_API_KEY` | optional | Reserved for fallback extensions. |
+
+## Caddy reverse proxy
+
+HTTPS is **strongly recommended** when Stremio (on Android TV) runs on a different device than the add-on. Caddy provides automatic self-signed certificates for LAN hostnames with zero config.
+
+### Setup steps
+
+```bash
+# 1. Install Caddy (on the Pi)
+#    https://caddyserver.com/docs/install
+
+# 2. Copy the example Caddyfile
+sudo cp Caddyfile.example /etc/caddy/Caddyfile
+
+# 3. Add DNS resolution on the TV (or your LAN router/Pi-hole)
+#    On Android TV: Settings > Network > Hosts (or use Pi-hole)
+#    Or add to the TV's /etc/hosts: <Pi LAN IP> stremio-addarr.lan
+
+# 4. Reload Caddy
+sudo systemctl reload caddy
+
+# 5. Set in .env:
+#    PUBLIC_BASE_URL=https://stremio-addarr.lan
+```
+
+Caddy handles TLS termination and passes requests to `127.0.0.1:7010`. The Express app handles CORS for Stremio routes internally.
+
+## Install in Stremio
+
+1. Open your add-on landing page (`http://<pi-ip>:7010/`) and copy the manifest URL.
+2. Install using Stremio's add-on install flow, or paste the `stremio://` URL shown on the landing page.
+3. On Android TV: navigate to any movie or episode detail page and check the Arr status tile.
+
+## Android TV notes
+
+- The add-on uses `externalUrl` in the `stream` resource — Stremio opens these in the device browser.
+- Action pages and result pages are designed for TV remote navigation with large tap targets.
+- After adding, use the **← Back to Stremio** link to return; or press the TV remote back button.
+- The `stremio:///detail/...` deep link returns you to the item detail page.
+- If HTTPS is not configured, Stremio on Android TV may refuse to install the manifest from a remote IP.
+
+## Diagnostics
+
+| Endpoint | Description |
+|---|---|
+| `/healthz` | Lightweight liveness: `{"ok":true}` |
+| `/health` | Service health + version (legacy) |
+| `/status.json` | Full diagnostics: config, reachability, issues (no secrets) |
+
+`/status.json` includes:
+- `publicBaseUrlIsHttps` — whether HTTPS is configured
+- `radarr.reachable` / `sonarr.reachable` — live ping result
+- `configIssues` — human-readable warning strings
 
 ## Local development
 
 ```bash
 npm install
 cp .env.example .env
+# Edit .env with your Radarr/Sonarr credentials
 npm run dev
 ```
 
 Check routes:
 - `http://127.0.0.1:7010/`
+- `http://127.0.0.1:7010/healthz`
 - `http://127.0.0.1:7010/health`
+- `http://127.0.0.1:7010/status.json`
 - `http://127.0.0.1:7010/manifest.json`
 
-## Raspberry Pi / home-server production
-
-### Option A: systemd (recommended)
-
-```bash
-npm ci
-npm run build
-sudo cp deploy/stremio-addarr.service.example /etc/systemd/system/stremio-addarr.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now stremio-addarr
-sudo systemctl status stremio-addarr
-```
-
-### Option B: Docker
-
-```bash
-docker compose -f docker-compose.example.yml up -d --build
-```
-
-## HTTPS / reverse proxy: when it is needed
-
-A reverse proxy (Caddy, Nginx, Traefik, etc.) is **not always required**:
-
-- If Stremio and add-on run on the **same device** using `127.0.0.1`, direct HTTP may be enough.
-- If Stremio client (TV) is on a **different device**, use HTTPS on a LAN hostname reachable by the TV.
-
-`Caddyfile.example` is provided as a lightweight optional path because Caddy is simple for home LAN TLS (`tls internal`) and reverse proxying to `127.0.0.1:7010`.
-
-## Install in Stremio
-
-1. Open your add-on landing page (`/`) and copy `manifest.json` URL.
-2. Install using Stremio add-on install flow (or `stremio://` URL shown on landing page).
-3. Open a movie/episode detail page and check Arr status tile.
-
-## Testing & quality commands
+## Testing
 
 ```bash
 npm run typecheck
@@ -139,43 +198,42 @@ npm test
 npm run build
 ```
 
-## CI and release automation
+## CI and release
 
-- CI workflow: `.github/workflows/ci.yml` (push to `main`, PRs)
-- Release workflow: `.github/workflows/release.yml` on tags `v*.*.*`
-- Release artifacts generated by `npm run package:release`:
-  - `dist/stremio-addarr-source.tar.gz`
-  - `dist/stremio-addarr-bundle.tar.gz`
-  - `dist/checksums.txt`
-
-### Tag and publish release
+- CI workflow runs typecheck, tests, and build on every push/PR.
+- Release workflow triggers on `v*.*.*` tags.
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-## Upgrade steps
-
-1. Pull latest code.
-2. `npm ci`
-3. `npm run build`
-4. Restart service/container.
-5. Verify `/health` and `/manifest.json`.
-
 ## Troubleshooting
 
-- **Cannot install manifest**
-  - Verify `PUBLIC_BASE_URL` is reachable from TV.
-  - Prefer HTTPS LAN URL behind Caddy.
-- **Arr unreachable**
-  - Confirm network path and API keys.
-  - Check `/health` service status details.
-- **Item not resolving**
-  - Confirm IMDb ID exists in Stremio item context.
-  - Check Sonarr/Radarr lookup support for that title.
-- **Action tile opens but add fails**
-  - Verify root/profile IDs and Arr permissions.
-  - Check server logs for HTTP status detail.
-- **Back-to-Stremio flow behaves differently on TV browser**
-  - Use result page fallback link and remote back action.
+**Cannot install manifest / Stremio rejects the manifest URL**
+- Verify `PUBLIC_BASE_URL` is reachable from your TV's network.
+- If Stremio is on Android TV and the add-on is on a Pi, you need HTTPS. Set up Caddy.
+- Check `configIssues` in `/status.json` for specific warnings.
+
+**CORS error in browser / manifest fetch fails**
+- CORS is handled by Express for `/manifest.json` and `/stream/...` routes.
+- Do not add CORS headers in Caddy — it passes them through from Express.
+
+**Arr service unreachable**
+- Confirm `RADARR_BASE_URL` / `SONARR_BASE_URL` is reachable from the Pi.
+- If Arr is on another LAN host: use its fixed IP, e.g. `http://192.168.1.50:7878`.
+- Check `/status.json` for `radarr.detail` / `sonarr.detail` error classification (`auth_error`, `timeout`, `unreachable`, etc.).
+
+**Action works but item not added in Radarr/Sonarr**
+- Verify `RADARR_ROOT_FOLDER_PATH`, `RADARR_QUALITY_PROFILE_ID`, etc. match your Radarr/Sonarr setup.
+- Check Radarr/Sonarr logs for POST errors.
+- For Sonarr: ensure the series has a TVDB ID; for Radarr: ensure the movie has a TMDB ID.
+
+**TV page navigation quirks**
+- If the action page does not respond to remote clicks, try the TV's browser back button.
+- The confirm page submits a POST form — select the button with the D-pad and press OK/Enter.
+
+**HTTPS certificate warning on Android TV**
+- Caddy's `tls internal` generates a self-signed certificate. Android TV may warn on first install.
+- Accept the certificate once, or use Let's Encrypt with a real domain if you have one.
+- For LAN-only use, self-signed is sufficient.

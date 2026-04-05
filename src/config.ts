@@ -1,4 +1,5 @@
 import type { LogLevel } from './logger.js';
+import type { ConfigValidation } from './types.js';
 
 export interface AppConfig {
   appName: string;
@@ -163,4 +164,31 @@ export function loadConfig(): AppConfig {
   }
 
   return config;
+}
+
+export function validateConfig(config: AppConfig): ConfigValidation {
+  const issues: string[] = [];
+  let isHttps = false;
+
+  try {
+    const parsed = new URL(config.publicBaseUrl);
+    isHttps = parsed.protocol === 'https:';
+    const isLocalhost =
+      parsed.hostname === '127.0.0.1' ||
+      parsed.hostname === 'localhost' ||
+      parsed.hostname === '::1';
+    if (!isHttps && !isLocalhost) {
+      issues.push(
+        'PUBLIC_BASE_URL is not HTTPS — Stremio on remote devices may reject the manifest'
+      );
+    }
+  } catch {
+    issues.push('PUBLIC_BASE_URL is not a valid URL');
+  }
+
+  if (!config.radarr.enabled && !config.sonarr.enabled) {
+    issues.push('Neither Radarr nor Sonarr is enabled — add-on will show no useful tiles');
+  }
+
+  return { issues, isHttps };
 }

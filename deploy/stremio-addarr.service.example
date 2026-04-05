@@ -1,6 +1,8 @@
 [Unit]
-Description=stremio-addarr
-After=network.target
+Description=stremio-addarr – Stremio Arr Status & Add add-on
+Documentation=https://github.com/cbkii/stremio-addarr
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -11,6 +13,13 @@ Restart=on-failure
 RestartSec=5
 User=pi
 Group=pi
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/stremio-addarr
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

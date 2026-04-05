@@ -22,6 +22,63 @@ test('health route exposes version and service config', async () => {
   });
 });
 
+test('/healthz returns {ok:true} with status 200', async () => {
+  const cfg = baseConfig();
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/healthz`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { ok: boolean };
+    assert.equal(body.ok, true);
+  });
+});
+
+test('/status.json returns structured JSON with expected fields', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = false;
+  cfg.sonarr.enabled = false;
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/status.json`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.ok('name' in body);
+    assert.ok('version' in body);
+    assert.ok('publicBaseUrl' in body);
+    assert.ok('publicBaseUrlIsHttps' in body);
+    assert.ok('radarr' in body);
+    assert.ok('sonarr' in body);
+    assert.ok('configIssues' in body);
+    assert.ok(Array.isArray(body.configIssues));
+  });
+});
+
+test('/status.json does not contain API keys in response', async () => {
+  const cfg = baseConfig();
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/status.json`);
+    const text = await res.text();
+    assert.ok(!text.includes('radarr-key'), 'Should not expose radarr API key');
+    assert.ok(!text.includes('sonarr-key'), 'Should not expose sonarr API key');
+  });
+});
+
+test('landing page HTML does not contain API keys', async () => {
+  const cfg = baseConfig();
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/`);
+    const html = await res.text();
+    assert.ok(!html.includes('radarr-key'), 'Should not expose radarr API key');
+    assert.ok(!html.includes('sonarr-key'), 'Should not expose sonarr API key');
+  });
+});
+
 test('action GET always shows confirmation page regardless of actionConfirm flag', async () => {
   const cfg = baseConfig(); // actionConfirm=false
   const app = createApp(cfg);

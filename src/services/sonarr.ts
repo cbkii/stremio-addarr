@@ -102,6 +102,16 @@ export class SonarrClient {
       };
     }
 
+    if (!lookup.tvdbId) {
+      return {
+        ok: false,
+        service: 'sonarr',
+        title: 'Series lookup failed',
+        summary: 'Sonarr requires a TVDB ID but none was returned.',
+        detail: `IMDb id: ${imdbId}`
+      };
+    }
+
     const payload = {
       title: lookup.title,
       year: lookup.year,
@@ -119,8 +129,28 @@ export class SonarrClient {
       }
     };
 
-    await this.http.post('/api/v3/series', payload);
+    try {
+      await this.http.post('/api/v3/series', payload);
+    } catch (error) {
+      if (
+        error instanceof HttpError &&
+        error.status === 400 &&
+        /already been added/i.test(error.body)
+      ) {
+        this.seriesCache.clear();
+        this.episodeCache.clear();
+        return {
+          ok: true,
+          service: 'sonarr',
+          title: 'Already in Sonarr',
+          summary: 'Series is already added to Sonarr.',
+          alreadyExisted: true
+        };
+      }
+      throw error;
+    }
     this.seriesCache.clear();
+    this.episodeCache.clear();
 
     return {
       ok: true,
@@ -191,7 +221,12 @@ export class SonarrClient {
       return 'timeout';
     }
     if (error instanceof HttpError) {
+      if (error.status === 401 || error.status === 403) return 'auth_error';
+      if (error.status === 404) return 'not_found';
       return `http_${error.status}`;
+    }
+    if (error instanceof TypeError && /fetch|network|ECONNREFUSED/i.test(error.message)) {
+      return 'unreachable';
     }
     if (error instanceof Error) {
       return error.message;

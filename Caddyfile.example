@@ -1,12 +1,19 @@
-# Optional reverse proxy for LAN HTTPS installs.
-# Use only if your Stremio client is on a different device and needs HTTPS.
+# Caddy reverse proxy for stremio-addarr on Raspberry Pi LAN.
+#
+# Caddy provides automatic HTTPS with internal (self-signed) certificates,
+# which is sufficient for Stremio on Android TV over LAN.
+#
+# Prerequisites:
+#   1. Install Caddy: https://caddyserver.com/docs/install
+#   2. Ensure stremio-addarr.lan resolves to your Pi's LAN IP
+#      (add to /etc/hosts on the TV, or configure your LAN DNS).
+#   3. Copy this file to /etc/caddy/Caddyfile and reload Caddy.
+#
+# After setup, PUBLIC_BASE_URL in .env should be:
+#   PUBLIC_BASE_URL=https://stremio-addarr.lan
+
 stremio-addarr.lan {
     encode zstd gzip
     tls internal
-    header {
-        Access-Control-Allow-Origin *
-        Access-Control-Allow-Methods "GET,POST,OPTIONS"
-        Access-Control-Allow-Headers *
-    }
     reverse_proxy 127.0.0.1:7010
 }
