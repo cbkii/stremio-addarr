@@ -99,6 +99,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SHA=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" --jq '.head.sha')
+          if [[ -z "$SHA" || "$SHA" == "null" ]]; then
+            echo "::error::Could not resolve head SHA for PR ${{ github.event.issue.number }}."
+            exit 1
+          fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
   # ── Main release job ──────────────────────────────────────────────────
@@ -225,17 +229,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          git ls-remote --exit-code --tags origin "refs/tags/${TAG}" > /dev/null 2>&1
+          # Check by inspecting remote output rather than relying on exit codes,
+          # which can vary between git versions and error conditions.
+          REMOTE_REFS=$(git ls-remote --tags origin "refs/tags/${TAG}" 2>&1)
           LS_EXIT=$?
-          if [ $LS_EXIT -eq 0 ]; then
+          if [ $LS_EXIT -ne 0 ]; then
+            echo "::error::git ls-remote failed (exit code $LS_EXIT): ${REMOTE_REFS}"
+            exit 1
+          fi
+          if [ -n "$REMOTE_REFS" ]; then
             echo "::notice::Tag ${TAG} already exists on remote — skipping tag creation."
-          elif [ $LS_EXIT -eq 2 ]; then
-            # Exit code 2 from --exit-code means ref not found — safe to create
+          else
             git tag "${TAG}"
             git push origin "${TAG}"
-          else
-            echo "::error::git ls-remote failed (exit code $LS_EXIT). Check repository access."
-            exit 1
           fi
 
       - name: Check for existing release
