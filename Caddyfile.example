@@ -1,4 +1,12 @@
+# Optional reverse proxy for LAN HTTPS installs.
+# Use only if your Stremio client is on a different device and needs HTTPS.
 stremio-addarr.lan {
     encode zstd gzip
+    tls internal
+    header {
+        Access-Control-Allow-Origin *
+        Access-Control-Allow-Methods "GET,POST,OPTIONS"
+        Access-Control-Allow-Headers *
+    }
     reverse_proxy 127.0.0.1:7010
 }

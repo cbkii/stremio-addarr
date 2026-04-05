@@ -3,26 +3,29 @@ import type { ParsedStremioId } from '../types.js';
 const IMDB_RE = /^tt\d+$/;
 
 export function parseStremioId(type: 'movie' | 'series', id: string): ParsedStremioId {
+  const cleanedId = id.trim();
+
   if (type === 'movie') {
-    if (!IMDB_RE.test(id)) {
+    if (!IMDB_RE.test(cleanedId)) {
       throw new Error(`Unsupported movie id: ${id}`);
     }
+    // Reconstruct from validated imdbId to break taint from raw user input
     return {
-      rawId: id,
-      imdbId: id,
+      rawId: cleanedId,
+      imdbId: cleanedId,
       kind: 'movie',
-      videoId: id
+      videoId: cleanedId
     };
   }
 
-  const parts = id.split(':');
+  const parts = cleanedId.split(':');
   if (parts.length === 1) {
-    if (!IMDB_RE.test(id)) {
+    if (!IMDB_RE.test(cleanedId)) {
       throw new Error(`Unsupported series id: ${id}`);
     }
     return {
-      rawId: id,
-      imdbId: id,
+      rawId: cleanedId,
+      imdbId: cleanedId,
       kind: 'series'
     };
   }
@@ -33,17 +36,19 @@ export function parseStremioId(type: 'movie' | 'series', id: string): ParsedStre
   }
   const season = Number(seasonRaw);
   const episode = Number(episodeRaw);
-  if (!Number.isInteger(season) || !Number.isInteger(episode)) {
+  if (!Number.isInteger(season) || !Number.isInteger(episode) || season <= 0 || episode <= 0) {
     throw new Error(`Unsupported series episode id: ${id}`);
   }
 
+  // Reconstruct rawId and videoId from validated numeric components to break taint
+  const safeRawId = `${imdbId}:${season}:${episode}`;
   return {
-    rawId: id,
+    rawId: safeRawId,
     imdbId,
     kind: 'series',
     season,
     episode,
-    videoId: id
+    videoId: safeRawId
   };
 }
 

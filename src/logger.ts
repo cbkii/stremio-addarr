@@ -10,13 +10,29 @@ const levelOrder: Record<LogLevel, number> = {
 export function createLogger(level: LogLevel) {
   const threshold = levelOrder[level] ?? levelOrder.info;
 
+  function sanitize(extra?: Record<string, unknown>): Record<string, unknown> | undefined {
+    if (!extra) return undefined;
+    return Object.fromEntries(
+      Object.entries(extra).map(([key, value]) => {
+        const normalized = key.toLowerCase();
+        if (normalized.includes('apikey') || normalized.includes('api_key')) {
+          return [key, '[redacted]'];
+        }
+        if (typeof value === 'string' && /^https?:\/\//.test(value)) {
+          return [key, value.replace(/\/\/([^@/]+)@/g, '//[redacted]@')];
+        }
+        return [key, value];
+      })
+    );
+  }
+
   function write(current: LogLevel, message: string, extra?: Record<string, unknown>) {
     if (levelOrder[current] < threshold) return;
     const line = {
       time: new Date().toISOString(),
       level: current,
       message,
-      ...(extra ?? {})
+      ...(sanitize(extra) ?? {})
     };
     const text = JSON.stringify(line);
     if (current === 'error') {

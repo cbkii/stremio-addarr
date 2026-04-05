@@ -15,17 +15,22 @@ function streamFromTile(tile: StatusTile) {
 export function createAddonInterface(config: AppConfig) {
   const builder = new addonBuilder({
     id: 'org.cbkii.stremio-addarr',
-    version: '0.1.0',
+    version: config.version,
     name: 'Arr Status & Add',
     description: 'Shows Radarr/Sonarr status and adds the current movie or series from Stremio.',
+    catalogs: [],
     resources: ['stream'],
     types: ['movie', 'series'],
-    idPrefixes: ['tt']
+    idPrefixes: ['tt'],
+    behaviorHints: {
+      configurable: false,
+      configurationRequired: false
+    }
   });
 
   const statusService = new ArrStatusService(config);
 
-  builder.defineStreamHandler(async ({ type, id }) => {
+  builder.defineStreamHandler(async ({ type, id }: { type: string; id: string }) => {
     if (type !== 'movie' && type !== 'series') {
       return { streams: [] };
     }

@@ -16,3 +16,8 @@ test('parses episode ids', () => {
   assert.equal(parsed.episode, 4);
   assert.equal(toStremioDetailLink(parsed), 'stremio:///detail/series/tt7654321/tt7654321:2:4');
 });
+
+test('rejects malformed ids', () => {
+  assert.throws(() => parseStremioId('movie', 'bad-id'), /Unsupported movie id/);
+  assert.throws(() => parseStremioId('series', 'tt123:0:2'), /Unsupported series episode id/);
+});
