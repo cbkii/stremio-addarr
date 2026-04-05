@@ -225,11 +225,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" > /dev/null 2>&1; then
+          git ls-remote --exit-code --tags origin "refs/tags/${TAG}" > /dev/null 2>&1
+          LS_EXIT=$?
+          if [ $LS_EXIT -eq 0 ]; then
             echo "::notice::Tag ${TAG} already exists on remote — skipping tag creation."
-          else
+          elif [ $LS_EXIT -eq 2 ]; then
+            # Exit code 2 from --exit-code means ref not found — safe to create
             git tag "${TAG}"
             git push origin "${TAG}"
+          else
+            echo "::error::git ls-remote failed (exit code $LS_EXIT). Check repository access."
+            exit 1
           fi
 
       - name: Check for existing release

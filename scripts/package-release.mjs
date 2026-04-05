@@ -4,7 +4,8 @@
 //   dist/stremio-addarr-install.tar.gz.sha256
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 const STAGING = 'dist/staging';
 const ARCHIVE = 'dist/stremio-addarr-install.tar.gz';
@@ -43,10 +44,11 @@ for (const f of [ARCHIVE, CHECKSUM]) {
 mkdirSync(STAGING, { recursive: true });
 
 // ── Stage files into a clean directory tree ───────────────────────────────
+// Uses native fs APIs to avoid shell metacharacter risks.
 const stage = (src, dest) => {
   const target = `${STAGING}/${dest ?? src}`;
-  execSync(`mkdir -p "$(dirname "${target}")"`, { stdio: 'inherit' });
-  execSync(`cp -r "${src}" "${target}"`, { stdio: 'inherit' });
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(src, target, { recursive: true });
 };
 
 // Built runtime

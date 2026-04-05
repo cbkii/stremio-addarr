@@ -282,11 +282,11 @@ curl -L https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio
   -o ~/stremio-addarr-install.tar.gz
 
 # Extract over existing installation (preserves your .env)
-cd /opt/stremio-addarr
-sudo tar -xzf ~/stremio-addarr-install.tar.gz --strip-components=1
+sudo tar -xzf ~/stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
 sudo chown -R pi:pi /opt/stremio-addarr
 
 # Update dependencies
+cd /opt/stremio-addarr
 npm ci --omit=dev
 
 # Restart
