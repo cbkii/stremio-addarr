@@ -30,15 +30,15 @@ export function renderActionConfirmPage(
     `stremio:///detail/${kind}/${parsed.imdbId}/${parsed.videoId ?? parsed.imdbId}`
   );
   const autoScript = autoSubmit
-    ? '<script>document.forms[0].submit();</script>'
+    ? '<script>window.addEventListener("DOMContentLoaded",function(){document.forms[0]&&document.forms[0].submit();});</script>'
     : '';
   const submitLabel = autoSubmit ? 'Adding…' : 'Add + Search';
   return minimalHtml(
     title,
-    autoScript +
-      `<form method="post" action="${escapeHtml(actionPath)}">` +
+    `<form method="post" action="${escapeHtml(actionPath)}">` +
       `<button type="submit">${submitLabel}</button> ` +
-      `<a href="${backUrl}">Cancel</a></form>`
+      `<a href="${backUrl}">Cancel</a></form>` +
+      autoScript
   );
 }
 
