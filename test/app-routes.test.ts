@@ -48,6 +48,9 @@ test('/status.json returns structured JSON with expected fields', async () => {
     assert.ok('version' in body);
     assert.ok('publicBaseUrl' in body);
     assert.ok('publicBaseUrlIsHttps' in body);
+    assert.ok('serviceHealthCacheTtlMs' in body);
+    assert.ok('streamCacheMaxAge' in body);
+    assert.ok('streamStaleRevalidate' in body);
     assert.ok('radarr' in body);
     assert.ok('sonarr' in body);
     assert.ok('configIssues' in body);
@@ -67,94 +70,110 @@ test('/status.json does not contain API keys in response', async () => {
   });
 });
 
-test('root route returns JSON with expected fields and no API keys', async () => {
+test('root route returns tiny operator text only', async () => {
   const cfg = baseConfig();
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/`);
     assert.equal(res.status, 200);
-    const body = (await res.json()) as Record<string, unknown>;
-    assert.ok('ok' in body);
-    assert.ok('name' in body);
-    assert.ok('manifest' in body);
-    const text = JSON.stringify(body);
+    const text = await res.text();
+    assert.equal(text, 'stremio-addarr ok\n');
     assert.ok(!text.includes('radarr-key'), 'Should not expose radarr API key');
     assert.ok(!text.includes('sonarr-key'), 'Should not expose sonarr API key');
   });
 });
 
-test('action GET with actionConfirm=false shows auto-submit form (no direct add)', async () => {
-  const cfg = baseConfig(); // actionConfirm=false, radarr disabled
-  const app = createApp(cfg);
-
-  await withServer(app, async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/action/movie/tt1234567`);
-    assert.equal(res.status, 200);
-    const html = await res.text();
-    // Should be an auto-submit form — GET must not trigger the add operation
-    assert.match(html, /<form/);
-    assert.match(html, /document\.forms\[0\]\.submit/);
-    assert.match(html, /Back to Stremio|Cancel/);
-    // Must not already show a result from performing the add
-    assert.doesNotMatch(html, /Radarr unavailable/);
-  });
-});
-
-test('action GET with actionConfirm=true shows confirm form', async () => {
+test('action route performs add on GET and immediately returns to Stremio detail link', async () => {
   const cfg = baseConfig();
-  cfg.actionConfirm = true;
-  const app = createApp(cfg);
-
-  await withServer(app, async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/action/movie/tt1234567`);
-    assert.equal(res.status, 200);
-    const html = await res.text();
-    assert.match(html, /Add \+ Search/);
-    assert.match(html, /Cancel/);
-  });
-});
-
-test('action POST with disabled radarr shows failure page', async () => {
-  const cfg = baseConfig(); // radarr disabled
-  const app = createApp(cfg);
-
-  await withServer(app, async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/action/movie/tt1234567`, { method: 'POST' });
-    assert.equal(res.status, 200);
-    const html = await res.text();
-    assert.match(html, /Radarr unavailable/);
-    assert.match(html, /Back to Stremio/);
-  });
-});
-
-test('action route confirm flow requires POST side effect', async () => {
-  const cfg = baseConfig();
-  cfg.actionConfirm = true;
   cfg.radarr.enabled = true;
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const path = new URL(url).pathname + (new URL(url).search || '');
-    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    const parsed = new URL(url);
+    const path = parsed.pathname + (parsed.search || '');
+
     if (path === '/api/v3/movie') {
-      if (init?.method === 'GET') return new Response('[]', { status: 200 });
+      if (init?.method === 'GET' || !init?.method) return new Response('[]', { status: 200 });
       return new Response('{}', { status: 201 });
     }
     if (path.startsWith('/api/v3/movie/lookup/imdb')) {
       return new Response('[{"title":"Movie","imdbId":"tt1234567","tmdbId":100}]', { status: 200 });
     }
+    if (path === '/api/v3/system/status') {
+      return new Response('{}', { status: 200 });
+    }
+
     return new Response('[]', { status: 200 });
   }) as typeof fetch;
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const confirmRes = await ORIGINAL_FETCH(`${baseUrl}/action/movie/tt1234567`);
-    const confirmHtml = await confirmRes.text();
-    assert.match(confirmHtml, /Add \+ Search/);
+    const res = await ORIGINAL_FETCH(`${baseUrl}/action/movie/tt1234567`, { redirect: 'manual' });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), 'stremio:///detail/movie/tt1234567/tt1234567');
 
-    const executeRes = await ORIGINAL_FETCH(`${baseUrl}/action/movie/tt1234567`, { method: 'POST' });
-    const executeHtml = await executeRes.text();
-    assert.match(executeHtml, /Added to Radarr/);
+    const html = await res.text();
+    assert.match(html, /Return to Stremio/);
+    assert.match(html, /Added to Radarr/);
+  });
+});
+
+test('action route preserves exact episode detail link context on return', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const parsed = new URL(url);
+    const path = parsed.pathname + (parsed.search || '');
+
+    if (path === '/api/v3/series' && (init?.method === 'GET' || !init?.method)) {
+      return new Response('[]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/series/lookup?term=')) {
+      return new Response('[{"title":"Show","imdbId":"tt7654321","tvdbId":777}]', { status: 200 });
+    }
+    if (path === '/api/v3/series' && init?.method === 'POST') {
+      return new Response('{}', { status: 201 });
+    }
+    if (path === '/api/v3/system/status') {
+      return new Response('{}', { status: 200 });
+    }
+
+    return new Response('[]', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const encoded = encodeURIComponent('tt7654321:2:5');
+    const res = await ORIGINAL_FETCH(`${baseUrl}/action/series/${encoded}`, { redirect: 'manual' });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), 'stremio:///detail/series/tt7654321/tt7654321:2:5');
+  });
+});
+
+
+test('series action return link without episode preserves series detail context', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const parsed = new URL(url);
+    const path = parsed.pathname + (parsed.search || '');
+
+    if (path === '/api/v3/series' && (init?.method === 'GET' || !init?.method)) return new Response('[]', { status: 200 });
+    if (path.startsWith('/api/v3/series/lookup?term=')) return new Response('[{"title":"Show","imdbId":"tt1111111","tvdbId":111}]', { status: 200 });
+    if (path === '/api/v3/series' && init?.method === 'POST') return new Response('{}', { status: 201 });
+
+    return new Response('[]', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const res = await ORIGINAL_FETCH(`${baseUrl}/action/series/tt1111111`, { redirect: 'manual' });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), 'stremio:///detail/series/tt1111111/tt1111111');
   });
 });

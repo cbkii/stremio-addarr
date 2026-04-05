@@ -39,8 +39,8 @@ export function createAddonInterface(config: AppConfig) {
     const tiles = await statusService.buildTiles(parsed);
     return {
       streams: tiles.map(streamFromTile),
-      cacheMaxAge: 30,
-      staleRevalidate: 60
+      cacheMaxAge: config.streamCacheMaxAgeSec,
+      staleRevalidate: config.streamStaleRevalidateSec
     };
   });
 

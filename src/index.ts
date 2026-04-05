@@ -4,7 +4,7 @@ import { loadConfig, validateConfig, type AppConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
 import { parseStremioId } from './lib/stremio-ids.js';
-import { renderActionConfirmPage, renderActionResultPage, renderActionErrorPage } from './ui/landing.js';
+import { renderStremioBouncePage } from './ui/landing.js';
 
 function redactUrl(rawUrl: string): string {
   try {
@@ -28,7 +28,6 @@ export function createApp(config: AppConfig) {
 
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.urlencoded({ extended: false }));
 
   app.use((req, res, next) => {
     const start = Date.now();
@@ -43,7 +42,6 @@ export function createApp(config: AppConfig) {
     next();
   });
 
-  // CORS only for Stremio SDK JSON routes (manifest + stream), not action endpoints
   app.use((req, res, next) => {
     const isStremioRoute = req.path === '/manifest.json' || req.path.startsWith('/stream/');
     if (isStremioRoute) {
@@ -65,7 +63,6 @@ export function createApp(config: AppConfig) {
       name: config.appName,
       version: config.version,
       manifest: `${config.publicBaseUrl}/manifest.json`,
-      actionConfirm: config.actionConfirm,
       services: serviceHealth
     });
   });
@@ -93,9 +90,11 @@ export function createApp(config: AppConfig) {
       port: config.port,
       publicBaseUrl: config.publicBaseUrl,
       publicBaseUrlIsHttps: validation.isHttps,
-      actionConfirm: config.actionConfirm,
       statusCacheTtlMs: config.statusCacheTtlMs,
+      serviceHealthCacheTtlMs: config.serviceHealthCacheTtlMs,
       requestTimeoutMs: config.requestTimeoutMs,
+      streamCacheMaxAge: config.streamCacheMaxAgeSec,
+      streamStaleRevalidate: config.streamStaleRevalidateSec,
       radarr: {
         enabled: config.radarr.enabled,
         reachable: serviceHealth.radarr.reachable,
@@ -115,10 +114,7 @@ export function createApp(config: AppConfig) {
   app.get('/action/:kind/:encodedId', async (req, res) => {
     const kind = req.params.kind;
     if (kind !== 'movie' && kind !== 'series') {
-      res
-        .status(400)
-        .type('html')
-        .send(renderActionErrorPage('Unsupported action kind.', 'stremio://'));
+      res.status(400).json({ ok: false, error: 'Unsupported action kind.' });
       return;
     }
 
@@ -127,70 +123,26 @@ export function createApp(config: AppConfig) {
       const rawId = decodeURIComponent(req.params.encodedId);
       const parsed = parseStremioId(kind, rawId);
       returnUrl = statusService.buildReturnLink(parsed);
-      // GET must never perform a non-idempotent action.
-      // When ACTION_CONFIRM=false the page auto-submits via JS (one-click UX preserved).
-      // When ACTION_CONFIRM=true the user must explicitly click the confirm button.
-      const actionPath = `/action/${kind}/${encodeURIComponent(parsed.rawId)}`;
-      res
-        .type('html')
-        .send(renderActionConfirmPage(parsed, actionPath, !config.actionConfirm));
-    } catch (error) {
-      logger.error('Action request failed', {
-        error: error instanceof Error ? error.message : String(error),
-        kind,
-        encodedId: req.params.encodedId
-      });
-      res
-        .status(400)
-        .type('html')
-        .send(renderActionErrorPage('Invalid action request.', returnUrl));
-    }
-  });
-
-  app.post('/action/:kind/:encodedId', async (req, res) => {
-    const kind = req.params.kind;
-    if (kind !== 'movie' && kind !== 'series') {
-      res.status(400).send('Unsupported action kind.');
-      return;
-    }
-
-    try {
-      const rawId = decodeURIComponent(req.params.encodedId);
-      const parsed = parseStremioId(kind, rawId);
       const result = await statusService.triggerAdd(parsed);
-      const returnLink = statusService.buildReturnLink(parsed);
-      res.type('html').send(renderActionResultPage(result, returnLink));
+      const message = result.ok ? result.title : `${result.title} — ${result.summary}`;
+
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Location', returnUrl);
+      res.status(303).type('html').send(renderStremioBouncePage(returnUrl, message));
     } catch (error) {
       logger.error('Action execution failed', {
         error: error instanceof Error ? error.message : String(error),
         kind,
         encodedId: req.params.encodedId
       });
-      res
-        .status(500)
-        .type('html')
-        .send(
-          renderActionResultPage(
-            {
-              ok: false,
-              service: kind === 'movie' ? 'radarr' : 'sonarr',
-              title: 'Action failed',
-              summary: 'Could not complete add request.',
-              detail: 'Try again after checking Arr settings.'
-            },
-            'stremio://'
-          )
-        );
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Location', returnUrl);
+      res.status(303).type('html').send(renderStremioBouncePage(returnUrl, 'Action failed. Returning to Stremio.'));
     }
   });
 
   app.get('/', (_req, res) => {
-    res.json({
-      ok: true,
-      name: config.appName,
-      version: config.version,
-      manifest: `${config.publicBaseUrl}/manifest.json`
-    });
+    res.type('text/plain').send('stremio-addarr ok\n');
   });
 
   app.use('/', getRouter(addonInterface));

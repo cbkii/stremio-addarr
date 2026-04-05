@@ -14,6 +14,7 @@ test('loads valid config', () => {
   process.env.RADARR_ENABLED = 'true';
   process.env.RADARR_BASE_URL = 'http://127.0.0.1:7878';
   process.env.RADARR_API_KEY = 'abc';
+  process.env.RADARR_ROOT_FOLDER_PATH = '/movies';
 
   const config = loadConfig();
   assert.equal(config.radarr.enabled, true);
@@ -71,4 +72,40 @@ test('validateConfig has no neither-enabled warning when at least one service is
   cfg.radarr.enabled = true;
   const result = validateConfig(cfg);
   assert.ok(!result.issues.some((i) => /neither/i.test(i)));
+});
+
+
+test('fails for PUBLIC_BASE_URL with query string', () => {
+  process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:7010/?x=1';
+  assert.throws(() => loadConfig(), /must not include query or hash/);
+});
+
+test('enabled Radarr requires root folder path', () => {
+  process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:7010';
+  process.env.RADARR_ENABLED = 'true';
+  process.env.RADARR_BASE_URL = 'http://127.0.0.1:7878';
+  process.env.RADARR_API_KEY = 'abc';
+  process.env.RADARR_ROOT_FOLDER_PATH = '';
+  assert.throws(() => loadConfig(), /RADARR_ROOT_FOLDER_PATH/);
+});
+
+test('enabled Sonarr requires positive profile ids', () => {
+  process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:7010';
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_QUALITY_PROFILE_ID = '0';
+  assert.throws(() => loadConfig(), /SONARR_QUALITY_PROFILE_ID/);
+});
+
+
+test('fails for low service health cache ttl', () => {
+  process.env.SERVICE_HEALTH_CACHE_TTL_MS = '500';
+  assert.throws(() => loadConfig(), /SERVICE_HEALTH_CACHE_TTL_MS/);
+});
+
+test('fails for negative stream cache hints', () => {
+  process.env.STREAM_CACHE_MAX_AGE = '-1';
+  assert.throws(() => loadConfig(), /STREAM_CACHE_MAX_AGE/);
 });
