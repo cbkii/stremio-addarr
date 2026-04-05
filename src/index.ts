@@ -68,7 +68,13 @@ export function createApp(config: AppConfig) {
   });
 
   app.get('/healthz', (_req, res) => {
-    res.json({ ok: true });
+    const validation = validateConfig(config);
+    res.json({
+      ok: true,
+      targetClient: validation.targetClient,
+      likelyAndroidTvCompatible: validation.likelyAndroidTvCompatible,
+      issues: validation.issues.filter((issue) => issue !== 'Neither Radarr nor Sonarr is enabled — add-on will show no useful tiles')
+    });
   });
 
   app.get('/status.json', async (_req, res) => {
@@ -88,8 +94,17 @@ export function createApp(config: AppConfig) {
       version: config.version,
       host: config.host,
       port: config.port,
+      bind: `${config.host}:${config.port}`,
+      targetClient: validation.targetClient,
       publicBaseUrl: config.publicBaseUrl,
       publicBaseUrlIsHttps: validation.isHttps,
+      publicBaseUrlHostnameIsIp: validation.isHostnameIp,
+      publicBaseUrlHostnameIsInternal: validation.isInternalHostname,
+      publicBaseUrlHasPathPrefix: validation.hasPathPrefix,
+      likelyAndroidTvCompatible: validation.likelyAndroidTvCompatible,
+      recommendedFrontDoor: validation.recommendedCaddyPublicCert
+        ? 'Caddy reverse proxy with publicly trusted certificate on real DNS hostname'
+        : 'configured origin looks Android-TV-safe',
       statusCacheTtlMs: config.statusCacheTtlMs,
       serviceHealthCacheTtlMs: config.serviceHealthCacheTtlMs,
       requestTimeoutMs: config.requestTimeoutMs,

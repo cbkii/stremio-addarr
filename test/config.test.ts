@@ -9,8 +9,12 @@ test.afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
 });
 
+test.beforeEach(() => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
+});
+
 test('loads valid config', () => {
-  process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:7010';
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.RADARR_ENABLED = 'true';
   process.env.RADARR_BASE_URL = 'http://127.0.0.1:7878';
   process.env.RADARR_API_KEY = 'abc';
@@ -36,29 +40,54 @@ test('fails for PUBLIC_BASE_URL with embedded credentials', () => {
   assert.throws(() => loadConfig(), /PUBLIC_BASE_URL/);
 });
 
-test('validateConfig warns when PUBLIC_BASE_URL is not HTTPS and not localhost', () => {
+test('validateConfig warns when PUBLIC_BASE_URL uses HTTP', () => {
   const cfg = baseConfig();
   cfg.publicBaseUrl = 'http://192.168.1.50:7010';
   const result = validateConfig(cfg);
   assert.equal(result.isHttps, false);
-  assert.ok(result.issues.some((i) => /HTTPS/i.test(i)));
+  assert.ok(result.issues.includes('PUBLIC_BASE_URL uses HTTP'));
 });
 
-test('validateConfig has no issue when PUBLIC_BASE_URL is HTTPS', () => {
+test('validateConfig marks public HTTPS hostname as Android-TV compatible', () => {
   const cfg = baseConfig();
-  cfg.publicBaseUrl = 'https://stremio-addarr.lan';
+  cfg.publicBaseUrl = 'https://stremio-addarr.example.com';
   cfg.radarr.enabled = true;
   const result = validateConfig(cfg);
   assert.equal(result.isHttps, true);
-  assert.ok(!result.issues.some((i) => /HTTPS/i.test(i)));
+  assert.equal(result.likelyAndroidTvCompatible, true);
+  assert.equal(result.isInternalHostname, false);
 });
 
-test('validateConfig has no HTTPS issue when PUBLIC_BASE_URL is localhost HTTP', () => {
+test('validateConfig flags localhost HTTP as Android-TV incompatible', () => {
   const cfg = baseConfig();
   cfg.publicBaseUrl = 'http://127.0.0.1:7010';
   const result = validateConfig(cfg);
   assert.equal(result.isHttps, false);
-  assert.ok(!result.issues.some((i) => /HTTPS/i.test(i)));
+  assert.ok(result.issues.includes('Android TV compatibility likely broken'));
+});
+
+test('validateConfig flags internal-only hostname for android-tv target', () => {
+  const cfg = baseConfig();
+  cfg.publicBaseUrl = 'https://stremio-addarr.lan';
+  const result = validateConfig(cfg);
+  assert.ok(result.issues.includes('PUBLIC_BASE_URL uses internal-only hostname'));
+  assert.equal(result.likelyAndroidTvCompatible, false);
+});
+
+test('validateConfig flags path-prefix origins as unsupported', () => {
+  const cfg = baseConfig();
+  cfg.publicBaseUrl = 'https://stremio-addarr.example.com/addarr';
+  const result = validateConfig(cfg);
+  assert.ok(result.issues.includes('PUBLIC_BASE_URL includes a path prefix, which is unsupported'));
+});
+
+test('validateConfig allows generic target for advanced/local setups', () => {
+  const cfg = baseConfig();
+  cfg.targetClient = 'generic';
+  cfg.publicBaseUrl = 'http://127.0.0.1:7010';
+  const result = validateConfig(cfg);
+  assert.equal(result.likelyAndroidTvCompatible, true);
+  assert.ok(!result.issues.includes('Android TV compatibility likely broken'));
 });
 
 test('validateConfig warns when neither service is enabled', () => {
@@ -81,7 +110,7 @@ test('fails for PUBLIC_BASE_URL with query string', () => {
 });
 
 test('enabled Radarr requires root folder path', () => {
-  process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:7010';
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.RADARR_ENABLED = 'true';
   process.env.RADARR_BASE_URL = 'http://127.0.0.1:7878';
   process.env.RADARR_API_KEY = 'abc';
@@ -90,7 +119,7 @@ test('enabled Radarr requires root folder path', () => {
 });
 
 test('enabled Sonarr requires positive profile ids', () => {
-  process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:7010';
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.SONARR_ENABLED = 'true';
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
@@ -108,4 +137,9 @@ test('fails for low service health cache ttl', () => {
 test('fails for negative stream cache hints', () => {
   process.env.STREAM_CACHE_MAX_AGE = '-1';
   assert.throws(() => loadConfig(), /STREAM_CACHE_MAX_AGE/);
+});
+
+test('fails for unknown TARGET_CLIENT', () => {
+  process.env.TARGET_CLIENT = 'android-phone';
+  assert.throws(() => loadConfig(), /TARGET_CLIENT/);
 });

@@ -7,6 +7,7 @@ export function baseConfig(): AppConfig {
     host: '127.0.0.1',
     port: 0,
     publicBaseUrl: 'http://127.0.0.1:7010',
+    targetClient: 'android-tv',
     logLevel: 'error',
     requestTimeoutMs: 2000,
     statusCacheTtlMs: 10_000,

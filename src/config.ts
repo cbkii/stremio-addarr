@@ -7,6 +7,7 @@ export interface AppConfig {
   host: string;
   port: number;
   publicBaseUrl: string;
+  targetClient: 'android-tv' | 'generic';
   logLevel: LogLevel;
   requestTimeoutMs: number;
   statusCacheTtlMs: number;
@@ -38,6 +39,7 @@ export interface AppConfig {
 }
 
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error']);
+const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 
 function readNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -100,14 +102,37 @@ function ensureHttpUrl(name: string, value: string): string {
   return stripTrailingSlash(parsed.toString());
 }
 
+function parseTargetClient(value: string): AppConfig['targetClient'] {
+  const normalized = value.trim().toLowerCase() as AppConfig['targetClient'];
+  if (!TARGET_CLIENTS.has(normalized)) {
+    throw new Error('TARGET_CLIENT must be one of: android-tv, generic.');
+  }
+  return normalized;
+}
+
+function isIpAddress(hostname: string): boolean {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+    return hostname.split('.').every((part) => {
+      const n = Number(part);
+      return Number.isInteger(n) && n >= 0 && n <= 255;
+    });
+  }
+  return hostname.includes(':');
+}
+
+function isInternalOnlyHostname(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  if (lower === 'localhost' || lower.endsWith('.localhost')) return true;
+  if (lower.endsWith('.local') || lower.endsWith('.lan') || lower.endsWith('.home.arpa')) return true;
+  return !lower.includes('.');
+}
+
 export function loadConfig(): AppConfig {
   const packageVersion = process.env.npm_package_version?.trim() || '0.1.0';
-  const host = readString('HOST', '0.0.0.0');
+  const host = readString('HOST', '127.0.0.1');
   const port = readNumber('PORT', 7010);
-  const publicBaseUrl = ensureHttpUrl(
-    'PUBLIC_BASE_URL',
-    readString('PUBLIC_BASE_URL', `http://127.0.0.1:${port}`)
-  );
+  const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
+  const targetClient = parseTargetClient(readString('TARGET_CLIENT', 'android-tv'));
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);
   const statusCacheTtlMs = readNumber('STATUS_CACHE_TTL_MS', 30000);
   const serviceHealthCacheTtlMs = readNumber('SERVICE_HEALTH_CACHE_TTL_MS', 10000);
@@ -141,6 +166,7 @@ export function loadConfig(): AppConfig {
     host,
     port,
     publicBaseUrl,
+    targetClient,
     logLevel: logLevelRaw,
     requestTimeoutMs,
     statusCacheTtlMs,
@@ -211,26 +237,52 @@ export function loadConfig(): AppConfig {
 export function validateConfig(config: AppConfig): ConfigValidation {
   const issues: string[] = [];
   let isHttps = false;
+  let isHostnameIp = false;
+  let isInternalHostname = false;
+  let hasPathPrefix = false;
 
   try {
     const parsed = new URL(config.publicBaseUrl);
     isHttps = parsed.protocol === 'https:';
-    const isLocalhost =
-      parsed.hostname === '127.0.0.1' ||
-      parsed.hostname === 'localhost' ||
-      parsed.hostname === '::1';
-    if (!isHttps && !isLocalhost) {
-      issues.push(
-        'PUBLIC_BASE_URL is not HTTPS — Stremio on remote devices may reject the manifest'
-      );
+    isHostnameIp = isIpAddress(parsed.hostname);
+    isInternalHostname = isInternalOnlyHostname(parsed.hostname);
+    hasPathPrefix = parsed.pathname !== '/';
+
+    if (!isHttps) {
+      issues.push('PUBLIC_BASE_URL uses HTTP');
+    }
+    if (isHostnameIp) {
+      issues.push('PUBLIC_BASE_URL uses an IP address');
+    }
+    if (isInternalHostname) {
+      issues.push('PUBLIC_BASE_URL uses internal-only hostname');
+    }
+    if (hasPathPrefix) {
+      issues.push('PUBLIC_BASE_URL includes a path prefix, which is unsupported');
     }
   } catch {
     issues.push('PUBLIC_BASE_URL is not a valid URL');
+  }
+
+  const androidTvLikelyBroken =
+    config.targetClient === 'android-tv' && (!isHttps || isHostnameIp || isInternalHostname || hasPathPrefix);
+  if (androidTvLikelyBroken) {
+    issues.push('Android TV compatibility likely broken');
+    issues.push('Caddy/public certificate recommended');
   }
 
   if (!config.radarr.enabled && !config.sonarr.enabled) {
     issues.push('Neither Radarr nor Sonarr is enabled — add-on will show no useful tiles');
   }
 
-  return { issues, isHttps };
+  return {
+    issues,
+    isHttps,
+    targetClient: config.targetClient,
+    isHostnameIp,
+    isInternalHostname,
+    hasPathPrefix,
+    likelyAndroidTvCompatible: !androidTvLikelyBroken,
+    recommendedCaddyPublicCert: androidTvLikelyBroken
+  };
 }
