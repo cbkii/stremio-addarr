@@ -2,7 +2,16 @@
 
 Self-hosted, LAN-first Stremio add-on that shows **Radarr/Sonarr status** and provides one clear **Add + Search** action from Stremio item pages.
 
-**Primary deployment target: Raspberry Pi + systemd + Caddy on home LAN.**
+**Primary deployment target: Raspberry Pi + systemd + Caddy on home LAN.**  
+**Primary client: Stremio on Android TV v9 (D-pad remote).**  
+**All end-user UX happens inside Stremio — no browser pages for normal use.**
+
+## Design goals
+
+- **LAN-only / Raspberry Pi first.** Minimal CPU, RAM, and request overhead.
+- **UX inside Stremio.** Status and action are tile labels/descriptions; clicking "Add" triggers the action directly — no confirmation browser page needed.
+- **No web UI.** Root `/`, `/healthz`, `/health`, `/status.json` are operator-only endpoints for debugging. End users never need to open a browser.
+- **No extra dependencies.** Keep the runtime lean — native `fetch`, Express, `stremio-addon-sdk`. Nothing else.
 
 ## What it does
 
@@ -16,7 +25,8 @@ Self-hosted, LAN-first Stremio add-on that shows **Radarr/Sonarr status** and pr
   - `Sonarr • Episode Missing`
   - `Sonarr • Series Added`
   - `Sonarr • Series Not Added` + `Add to Sonarr + Search`
-- Action tiles open a tiny server-side action route and return a TV-readable result page with a **Back to Stremio** link.
+- Clicking `Add to Radarr + Search` or `Add to Sonarr + Search` opens a server-side action endpoint that **immediately performs the add** (no confirmation step by default) and returns a minimal plain-text result page with a **← Back to Stremio** link.
+- Set `ACTION_CONFIRM=true` to show a minimal confirm form before adding (useful on shared setups).
 
 ## Deployment priority
 
@@ -149,24 +159,29 @@ Caddy handles TLS termination and passes requests to `127.0.0.1:7010`. The Expre
 
 ## Install in Stremio
 
-1. Open your add-on landing page (`http://<pi-ip>:7010/`) and copy the manifest URL.
-2. Install using Stremio's add-on install flow, or paste the `stremio://` URL shown on the landing page.
-3. On Android TV: navigate to any movie or episode detail page and check the Arr status tile.
+1. Get the manifest URL: `http://<pi-ip>:7010/manifest.json` (or `https://stremio-addarr.lan/manifest.json` with Caddy).
+2. In Stremio, go to **Add-ons → Community Add-ons → Install from URL** and paste the manifest URL.  
+   Or navigate to `stremio://<pi-ip>:7010/manifest.json` directly.
+3. On Android TV: open any movie or episode detail page — the Arr status tile appears in the streams list.
+
+The root `http://<pi-ip>:7010/` returns a small JSON summary for operator use only.
 
 ## Android TV notes
 
-- The add-on uses `externalUrl` in the `stream` resource — Stremio opens these in the device browser.
-- Action pages and result pages are designed for TV remote navigation with large tap targets.
-- After adding, use the **← Back to Stremio** link to return; or press the TV remote back button.
-- The `stremio:///detail/...` deep link returns you to the item detail page.
+- The add-on uses `externalUrl` in the `stream` resource — clicking an action tile opens the device browser briefly.
+- When `ACTION_CONFIRM=false` (default), clicking `Add to Radarr + Search` **immediately triggers the add**. The browser shows a plain result page with a **← Back to Stremio** link.
+- Press the TV remote **back button** or tap **← Back to Stremio** to return to the item page.
 - If HTTPS is not configured, Stremio on Android TV may refuse to install the manifest from a remote IP.
 
-## Diagnostics
+## Diagnostics (operator-only)
+
+These endpoints are for the operator to verify the add-on is working. End users don't need them.
 
 | Endpoint | Description |
 |---|---|
-| `/healthz` | Lightweight liveness: `{"ok":true}` |
-| `/health` | Service health + version (legacy) |
+| `/healthz` | Liveness probe: `{"ok":true}` |
+| `/` | Tiny JSON summary: name, version, manifest URL |
+| `/health` | Service health + version |
 | `/status.json` | Full diagnostics: config, reachability, issues (no secrets) |
 
 `/status.json` includes:

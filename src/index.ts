@@ -4,7 +4,7 @@ import { loadConfig, validateConfig, type AppConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
 import { parseStremioId } from './lib/stremio-ids.js';
-import { renderActionConfirmPage, renderActionResultPage, renderLandingPage } from './ui/landing.js';
+import { renderActionConfirmPage, renderActionResultPage } from './ui/landing.js';
 
 function redactUrl(rawUrl: string): string {
   try {
@@ -122,31 +122,24 @@ export function createApp(config: AppConfig) {
     try {
       const rawId = decodeURIComponent(req.params.encodedId);
       const parsed = parseStremioId(kind, rawId);
-      // GET never performs side effects; always render the confirmation page.
-      // Construct action path from validated data rather than reflecting req.path.
-      const actionPath = `/action/${kind}/${encodeURIComponent(parsed.rawId)}`;
-      res.type('html').send(renderActionConfirmPage(parsed, actionPath));
+
+      if (!config.actionConfirm) {
+        // Default: perform the add directly on GET — the user already clicked in Stremio.
+        const result = await statusService.triggerAdd(parsed);
+        const returnLink = statusService.buildReturnLink(parsed);
+        res.type('html').send(renderActionResultPage(result, returnLink));
+      } else {
+        // Explicit confirmation requested: show a minimal confirm form.
+        const actionPath = `/action/${kind}/${encodeURIComponent(parsed.rawId)}`;
+        res.type('html').send(renderActionConfirmPage(parsed, actionPath));
+      }
     } catch (error) {
       logger.error('Action request failed', {
         error: error instanceof Error ? error.message : String(error),
         kind,
         encodedId: req.params.encodedId
       });
-      res
-        .status(400)
-        .type('html')
-        .send(
-          renderActionResultPage(
-            {
-              ok: false,
-              service: kind === 'movie' ? 'radarr' : 'sonarr',
-              title: 'Invalid request',
-              summary: 'The action URL could not be parsed.',
-              detail: 'Please verify the link from Stremio is correct.'
-            },
-            '/'
-          )
-        );
+      res.status(400).send('Invalid action request.');
     }
   });
 
@@ -181,15 +174,19 @@ export function createApp(config: AppConfig) {
               summary: 'Could not complete add request.',
               detail: 'Try again after checking Arr settings.'
             },
-            '/'
+            'stremio://'
           )
         );
     }
   });
 
-  app.get('/', async (_req, res) => {
-    const health = await statusService.getServiceHealth();
-    res.type('html').send(renderLandingPage(config, health));
+  app.get('/', (_req, res) => {
+    res.json({
+      ok: true,
+      name: config.appName,
+      version: config.version,
+      manifest: `${config.publicBaseUrl}/manifest.json`
+    });
   });
 
   app.use('/', getRouter(addonInterface));
