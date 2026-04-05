@@ -129,12 +129,9 @@ function isInternalOnlyHostname(hostname: string): boolean {
 
 export function loadConfig(): AppConfig {
   const packageVersion = process.env.npm_package_version?.trim() || '0.1.0';
-  const host = readString('HOST', '0.0.0.0');
+  const host = readString('HOST', '127.0.0.1');
   const port = readNumber('PORT', 7010);
-  const publicBaseUrl = ensureHttpUrl(
-    'PUBLIC_BASE_URL',
-    readString('PUBLIC_BASE_URL', `https://stremio-addarr.example.com`)
-  );
+  const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
   const targetClient = parseTargetClient(readString('TARGET_CLIENT', 'android-tv'));
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);
   const statusCacheTtlMs = readNumber('STATUS_CACHE_TTL_MS', 30000);

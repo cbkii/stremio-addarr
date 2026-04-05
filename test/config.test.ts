@@ -9,6 +9,10 @@ test.afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
 });
 
+test.beforeEach(() => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
+});
+
 test('loads valid config', () => {
   process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.RADARR_ENABLED = 'true';
