@@ -5,7 +5,7 @@ Maintain **Arr Status & Add** as a production-ready, self-hosted, LAN-first Stre
 
 ## Product contract
 - Primary UX surface is Stremio `stream` resource.
-- Show status first, and only one strong add action when not already present.
+- Show status first, and only one strong add action when not already present. Treat the UI as episode-aware, but keep backend add semantics series-level where needed.
 - Movie pages map to Radarr status/add.
 - Episode pages are episode-aware for status and series-level for Sonarr add semantics.
 - Always fail softly with readable tiles/pages.
@@ -31,6 +31,7 @@ Maintain **Arr Status & Add** as a production-ready, self-hosted, LAN-first Stre
 
 ## Deployment rules
 - Design for Raspberry Pi/home-server LAN deployment.
+- Raspberry Pi runs Sonarr and Radarr, while Android 9 TV runs Stremio, connectected via ethernet LAN.
 - HTTPS reverse proxy guidance must remain accurate (Caddy example kept current).
 - Do not assume private Arr services are publicly reachable.
 
