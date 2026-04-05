@@ -8,7 +8,8 @@ function streamFromTile(tile: StatusTile) {
   return {
     name: tile.name,
     description: tile.description,
-    externalUrl: tile.externalUrl
+    externalUrl: tile.externalUrl,
+    externalUris: tile.externalUris
   };
 }
 

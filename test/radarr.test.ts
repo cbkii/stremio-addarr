@@ -18,7 +18,7 @@ class FakeHttp {
     return this.handlers.get[path] as T;
   }
 
-  async post<T>(path: string): Promise<T> {
+  async post<T>(path: string, _body?: unknown): Promise<T> {
     if (this.postError) throw this.postError;
     if (!this.handlers.post || !(path in this.handlers.post)) throw new Error(`Missing POST ${path}`);
     return this.handlers.post[path] as T;
@@ -33,7 +33,8 @@ test('maps downloaded status', async () => {
     cfg,
     new FakeHttp({
       get: {
-        '/api/v3/movie': [{ id: 1, imdbId: 'tt1', hasFile: true, monitored: true }]
+        '/api/v3/movie': [{ id: 1, imdbId: 'tt1', hasFile: true, monitored: true }],
+        '/api/v3/queue?page=1&pageSize=250&includeUnknownMovieItems=true': { records: [] }
       }
     }) as never
   );
@@ -47,7 +48,10 @@ test('prevents duplicate add when already exists', async () => {
   cfg.radarr.enabled = true;
   const client = new RadarrClient(
     cfg,
-    new FakeHttp({ get: { '/api/v3/movie': [{ id: 1, imdbId: 'tt2', monitored: true }] } }) as never
+    new FakeHttp({ get: {
+      '/api/v3/movie': [{ id: 1, imdbId: 'tt2', monitored: true }],
+      '/api/v3/queue?page=1&pageSize=250&includeUnknownMovieItems=true': { records: [] }
+    } }) as never
   );
 
   const result = await client.addMovieByImdbId('tt2');
@@ -61,7 +65,8 @@ test('HTTP 400 already-been-added response returns alreadyExisted', async () => 
     {
       get: {
         '/api/v3/movie': [],
-        '/api/v3/movie/lookup/imdb?imdbId=tt5': [{ title: 'Movie5', imdbId: 'tt5', tmdbId: 555 }]
+        '/api/v3/movie/lookup/imdb?imdbId=tt5': [{ title: 'Movie5', imdbId: 'tt5', tmdbId: 555 }],
+        '/api/v3/queue?page=1&pageSize=250&includeUnknownMovieItems=true': { records: [] }
       }
     },
     new HttpError('bad request', 400, 'This movie has already been added')
@@ -98,6 +103,7 @@ test('movie cache is cleared after successful add', async () => {
     async get<T>(path: string): Promise<T> {
       getCallCount++;
       if (path === '/api/v3/movie') return [] as T;
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
       if (path.startsWith('/api/v3/movie/lookup/imdb')) {
         return [{ title: 'Movie Z', imdbId: 'tt42', tmdbId: 42 }] as T;
       }
@@ -115,4 +121,115 @@ test('movie cache is cleared after successful add', async () => {
   const statusGetsBefore = getCallCount;
   await client.getMovieStatus('tt42');
   assert.ok(getCallCount > statusGetsBefore, 'Should re-fetch /movie after cache clear');
+});
+
+test('downloading state takes precedence over missing', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const client = new RadarrClient(
+    cfg,
+    new FakeHttp({
+      get: {
+        '/api/v3/movie': [{ id: 1, imdbId: 'tt77', monitored: true }],
+        '/api/v3/queue?page=1&pageSize=250&includeUnknownMovieItems=true': { records: [{ movieId: 1 }] }
+      }
+    }) as never
+  );
+
+  const status = await client.getMovieStatus('tt77');
+  assert.equal(status.state, 'downloading');
+});
+
+test('triggerMovieSearch posts MoviesSearch command for existing movie', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const posts: unknown[] = [];
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/movie') return [{ id: 5, imdbId: 'tt88', monitored: true }] as T;
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string, body: unknown): Promise<T> {
+      posts.push(body);
+      return {} as T;
+    }
+  };
+  const client = new RadarrClient(cfg, http as never);
+  const result = await client.triggerMovieSearch('tt88');
+  assert.equal(result.ok, true);
+  assert.deepEqual(posts[0], { name: 'MoviesSearch', movieIds: [5] });
+});
+
+test('queue failure does not downgrade movie status to unavailable', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/movie') return [{ id: 15, imdbId: 'tt1515', monitored: true }] as T;
+      if (path.startsWith('/api/v3/queue?')) throw new Error('queue timeout');
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string): Promise<T> {
+      return {} as T;
+    }
+  };
+
+  const client = new RadarrClient(cfg, http as never);
+  const status = await client.getMovieStatus('tt1515');
+  assert.equal(status.state, 'missing');
+});
+
+test('queue pagination finds matches after first page and caches queue calls', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  let queueCalls = 0;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/movie') return [{ id: 16, imdbId: 'tt1616', monitored: true }] as T;
+      if (path === '/api/v3/queue?page=1&pageSize=250&includeUnknownMovieItems=true') {
+        queueCalls++;
+        return { records: [{ movieId: 999 }], totalRecords: 251 } as T;
+      }
+      if (path === '/api/v3/queue?page=2&pageSize=250&includeUnknownMovieItems=true') {
+        queueCalls++;
+        return { records: [{ movieId: 16 }], totalRecords: 251 } as T;
+      }
+      if (path === '/api/v3/queue?page=3&pageSize=250&includeUnknownMovieItems=true') {
+        queueCalls++;
+        return { records: [] } as T;
+      }
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string): Promise<T> {
+      return {} as T;
+    }
+  };
+
+  const client = new RadarrClient(cfg, http as never);
+  const first = await client.getMovieStatus('tt1616');
+  const second = await client.getMovieStatus('tt1616');
+  assert.equal(first.state, 'downloading');
+  assert.equal(second.state, 'downloading');
+  assert.equal(queueCalls, 3);
+});
+
+test('triggerMovieSearch returns unavailable reason when status lookup fails', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/movie') throw new Error('radarr unreachable');
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string): Promise<T> {
+      return {} as T;
+    }
+  };
+
+  const client = new RadarrClient(cfg, http as never);
+  const result = await client.triggerMovieSearch('tt9999');
+  assert.equal(result.ok, false);
+  assert.equal(result.title, 'Radarr unavailable');
+  assert.match(result.summary, /unreachable/);
 });

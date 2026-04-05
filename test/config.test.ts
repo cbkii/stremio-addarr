@@ -143,3 +143,10 @@ test('fails for unknown TARGET_CLIENT', () => {
   process.env.TARGET_CLIENT = 'android-phone';
   assert.throws(() => loadConfig(), /TARGET_CLIENT/);
 });
+
+test('allows empty KODI_PACKAGE when Kodi is disabled', () => {
+  process.env.KODI_ENABLED = 'false';
+  process.env.KODI_PACKAGE = '';
+  const config = loadConfig();
+  assert.equal(config.kodi.enabled, false);
+});
