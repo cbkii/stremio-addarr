@@ -7,3 +7,6 @@ services:
       - .env
     ports:
       - "7010:7010"
+    # If Radarr/Sonarr run on the host or another LAN device,
+    # use host networking or ensure container can reach them:
+    # network_mode: host

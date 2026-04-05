@@ -99,3 +99,8 @@ export interface SonarrLookupRecord {
   imdbId?: string;
   tvdbId?: number;
 }
+
+export interface ConfigValidation {
+  issues: string[];
+  isHttps: boolean;
+}

@@ -80,6 +80,16 @@ export class RadarrClient {
       };
     }
 
+    if (!lookup.tmdbId) {
+      return {
+        ok: false,
+        service: 'radarr',
+        title: 'Movie lookup failed',
+        summary: 'Radarr requires a TMDB ID but none was returned.',
+        detail: `IMDb id: ${imdbId}`
+      };
+    }
+
     const payload = {
       title: lookup.title,
       tmdbId: lookup.tmdbId,
@@ -95,7 +105,25 @@ export class RadarrClient {
       }
     };
 
-    await this.http.post('/api/v3/movie', payload);
+    try {
+      await this.http.post('/api/v3/movie', payload);
+    } catch (error) {
+      if (
+        error instanceof HttpError &&
+        error.status === 400 &&
+        /already been added/i.test(error.body)
+      ) {
+        this.moviesCache.clear();
+        return {
+          ok: true,
+          service: 'radarr',
+          title: 'Already in Radarr',
+          summary: 'Movie is already added to Radarr.',
+          alreadyExisted: true
+        };
+      }
+      throw error;
+    }
     this.moviesCache.clear();
 
     return {
@@ -139,7 +167,12 @@ export class RadarrClient {
       return 'timeout';
     }
     if (error instanceof HttpError) {
+      if (error.status === 401 || error.status === 403) return 'auth_error';
+      if (error.status === 404) return 'not_found';
       return `http_${error.status}`;
+    }
+    if (error instanceof TypeError && /fetch|network|ECONNREFUSED/i.test(error.message)) {
+      return 'unreachable';
     }
     if (error instanceof Error) {
       return error.message;

@@ -22,16 +22,94 @@ test('health route exposes version and service config', async () => {
   });
 });
 
-test('action GET always shows confirmation page regardless of actionConfirm flag', async () => {
-  const cfg = baseConfig(); // actionConfirm=false
+test('/healthz returns {ok:true} with status 200', async () => {
+  const cfg = baseConfig();
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/healthz`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { ok: boolean };
+    assert.equal(body.ok, true);
+  });
+});
+
+test('/status.json returns structured JSON with expected fields', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = false;
+  cfg.sonarr.enabled = false;
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/status.json`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.ok('name' in body);
+    assert.ok('version' in body);
+    assert.ok('publicBaseUrl' in body);
+    assert.ok('publicBaseUrlIsHttps' in body);
+    assert.ok('radarr' in body);
+    assert.ok('sonarr' in body);
+    assert.ok('configIssues' in body);
+    assert.ok(Array.isArray(body.configIssues));
+  });
+});
+
+test('/status.json does not contain API keys in response', async () => {
+  const cfg = baseConfig();
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/status.json`);
+    const text = await res.text();
+    assert.ok(!text.includes('radarr-key'), 'Should not expose radarr API key');
+    assert.ok(!text.includes('sonarr-key'), 'Should not expose sonarr API key');
+  });
+});
+
+test('root route returns JSON with expected fields and no API keys', async () => {
+  const cfg = baseConfig();
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.ok('ok' in body);
+    assert.ok('name' in body);
+    assert.ok('manifest' in body);
+    const text = JSON.stringify(body);
+    assert.ok(!text.includes('radarr-key'), 'Should not expose radarr API key');
+    assert.ok(!text.includes('sonarr-key'), 'Should not expose sonarr API key');
+  });
+});
+
+test('action GET with actionConfirm=false performs add directly (no confirm page)', async () => {
+  const cfg = baseConfig(); // actionConfirm=false, radarr disabled
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/action/movie/tt1234567`);
     assert.equal(res.status, 200);
     const html = await res.text();
-    assert.match(html, /Confirm Add/);
+    // Should be a result page, not a confirm page
+    assert.doesNotMatch(html, /Confirm Add/);
+    assert.match(html, /Radarr unavailable/);
     assert.match(html, /Back to Stremio/);
+  });
+});
+
+test('action GET with actionConfirm=true shows confirm form', async () => {
+  const cfg = baseConfig();
+  cfg.actionConfirm = true;
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/action/movie/tt1234567`);
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /Add \+ Search/);
+    assert.match(html, /Cancel/);
   });
 });
 
@@ -71,7 +149,7 @@ test('action route confirm flow requires POST side effect', async () => {
   await withServer(app, async (baseUrl) => {
     const confirmRes = await ORIGINAL_FETCH(`${baseUrl}/action/movie/tt1234567`);
     const confirmHtml = await confirmRes.text();
-    assert.match(confirmHtml, /Confirm Add \+ Search/);
+    assert.match(confirmHtml, /Add \+ Search/);
 
     const executeRes = await ORIGINAL_FETCH(`${baseUrl}/action/movie/tt1234567`, { method: 'POST' });
     const executeHtml = await executeRes.text();

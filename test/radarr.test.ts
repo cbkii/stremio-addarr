@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RadarrClient } from '../src/services/radarr.js';
+import { HttpError } from '../src/lib/http.js';
 import { baseConfig } from './_helpers.js';
 
 class FakeHttp {
@@ -8,7 +9,8 @@ class FakeHttp {
     private readonly handlers: {
       get: Record<string, unknown>;
       post?: Record<string, unknown>;
-    }
+    },
+    private readonly postError?: Error
   ) {}
 
   async get<T>(path: string): Promise<T> {
@@ -17,6 +19,7 @@ class FakeHttp {
   }
 
   async post<T>(path: string): Promise<T> {
+    if (this.postError) throw this.postError;
     if (!this.handlers.post || !(path in this.handlers.post)) throw new Error(`Missing POST ${path}`);
     return this.handlers.post[path] as T;
   }
@@ -49,4 +52,38 @@ test('prevents duplicate add when already exists', async () => {
 
   const result = await client.addMovieByImdbId('tt2');
   assert.equal(result.alreadyExisted, true);
+});
+
+test('HTTP 400 already-been-added response returns alreadyExisted', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const http = new FakeHttp(
+    {
+      get: {
+        '/api/v3/movie': [],
+        '/api/v3/movie/lookup/imdb?imdbId=tt5': [{ title: 'Movie5', imdbId: 'tt5', tmdbId: 555 }]
+      }
+    },
+    new HttpError('bad request', 400, 'This movie has already been added')
+  );
+
+  const client = new RadarrClient(cfg, http as never);
+  const result = await client.addMovieByImdbId('tt5');
+  assert.equal(result.ok, true);
+  assert.equal(result.alreadyExisted, true);
+});
+
+test('ping classifies auth errors correctly', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const http = new FakeHttp({ get: {} });
+  // Override get to throw an auth error
+  (http as { get: (path: string) => Promise<unknown> }).get = async (_path: string) => {
+    throw new HttpError('unauthorized', 401, 'Unauthorized');
+  };
+
+  const client = new RadarrClient(cfg, http as never);
+  const result = await client.ping();
+  assert.equal(result.reachable, false);
+  assert.equal(result.detail, 'auth_error');
 });
