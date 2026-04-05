@@ -10,10 +10,12 @@ function redactUrl(rawUrl: string): string {
   try {
     const parsed = new URL(rawUrl);
     const host = parsed.hostname;
-    if (host.length <= 4) return rawUrl;
-    const redacted = `${host[0]}${'*'.repeat(Math.max(0, host.length - 4))}${host.slice(-3)}`;
-    parsed.hostname = redacted;
-    return parsed.toString().replace(/\/+$/, '');
+    if (host.length <= 4) {
+      return rawUrl;
+    }
+    const redacted = `${host[0]}${'*'.repeat(host.length - 4)}${host.slice(-3)}`;
+    const port = parsed.port ? `:${parsed.port}` : '';
+    return `${parsed.protocol}//${redacted}${port}`;
   } catch {
     return '***';
   }
