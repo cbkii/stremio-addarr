@@ -1,19 +1,28 @@
 # Arr Status & Add (`stremio-addarr`)
 
-Lightweight, self-hosted Stremio add-on for **LAN-first Raspberry Pi deployments**.
+Lightweight, self-hosted Stremio add-on for Raspberry Pi + Sonarr/Radarr, with an **HTTPS-first deployment model for stock Android TV v9**.
 
-It shows concise Sonarr/Radarr status tiles on Stremio detail pages and provides a one-click add action that executes server-side and returns immediately to Stremio.
+## Core compatibility rule (important)
 
-## Why this add-on exists
+For stock/non-root Android TV v9, install this add-on through a **publicly trusted HTTPS certificate** on a **real DNS hostname**.
 
-- Keep normal usage inside Stremio on Android TV v9.
-- Avoid multi-step browser workflows.
-- Keep Arr credentials server-side only.
-- Stay small and reliable for always-on Pi usage.
+Recommended example:
+- `https://stremio-addarr.example.com/manifest.json`
+
+Not recommended for stock Android TV (may fail):
+- `http://...`
+- `https://192.168.x.x/...`
+- `https://hostname.local/...`
+- `https://hostname.lan/...`
+- self-signed certs / Caddy internal CA certs
+
+Why: Android apps targeting API 24+ typically do not trust user-added CAs unless app-specific opt-in is present.
+
+---
 
 ## UX model (Stremio-first)
 
-Typical tiles:
+Primary surface is Stremio `stream` tiles:
 
 - `✅ Radarr • Downloaded`
 - `📌 Radarr • Added`
@@ -26,27 +35,32 @@ Typical tiles:
 - `🛑 Arr Offline`
 
 Action flow:
-
 1. Click add tile in Stremio.
-2. Server performs Arr add/search immediately.
-3. Server responds with redirect to the same `stremio:///detail/...` context.
-4. Next stream fetch reflects updated state (short cache + mutation invalidation).
-5. If both Arr services are disabled or both unreachable, no tiles are returned (fail-soft/no-noise mode).
+2. Server executes add/search in Arr.
+3. Server immediately redirects back to the same `stremio:///detail/...` context.
+4. Next stream refresh reflects the updated status.
 
-## Routes
+---
 
+## Architecture (recommended production shape)
+
+- Node app: private listener, e.g. `127.0.0.1:7010`
+- Caddy: public HTTPS on 80/443
+- Caddy reverse-proxies to Node app
+- `PUBLIC_BASE_URL` points to Caddy hostname (never the private bind URL)
+
+This keeps Stremio-facing URLs canonical and stable:
 - `/manifest.json`
 - `/stream/:type/:id.json`
-- `/action/movie/:encodedId`
-- `/action/series/:encodedId`
+- `/action/...`
 - `/healthz`
 - `/status.json`
-- `/health`
-- `/` (tiny operator probe)
 
-No dashboard/wizard UI is provided.
+All generated user-facing links come from `PUBLIC_BASE_URL`.
 
-## Raspberry Pi deployment (recommended)
+---
+
+## Quick start on Raspberry Pi
 
 ```bash
 git clone https://github.com/cbkii/stremio-addarr /opt/stremio-addarr
@@ -61,61 +75,74 @@ sudo systemctl enable --now stremio-addarr
 curl http://127.0.0.1:7010/healthz
 ```
 
-### HTTPS for Android TV (optional but recommended)
+### Caddy setup (recommended default)
 
-Use the included `Caddyfile.example` and set `PUBLIC_BASE_URL` to the HTTPS LAN host (for example `https://stremio-addarr.lan`).
+1. Set a real DNS name (example: `stremio-addarr.example.com`) to your Caddy host.
+2. Copy `Caddyfile.example` to `/etc/caddy/Caddyfile` and edit hostname.
+3. Reload Caddy.
+4. Set `.env`:
+   - `HOST=127.0.0.1`
+   - `PORT=7010`
+   - `TARGET_CLIENT=android-tv`
+   - `PUBLIC_BASE_URL=https://stremio-addarr.example.com`
+5. Verify:
+   - `curl -I https://stremio-addarr.example.com/manifest.json`
+   - `curl https://stremio-addarr.example.com/status.json`
+
+If your Pi is LAN-only, use split-horizon DNS / local DNS override / hairpin NAT, or use DNS challenge for certificates.
+
+---
 
 ## Configuration
 
-Key settings in `.env`:
+Key `.env` settings:
 
 | Variable | Purpose |
 |---|---|
-| `HOST`, `PORT` | Local bind address/port for the Node service. |
-| `PUBLIC_BASE_URL` | URL Stremio uses to access this add-on (must be reachable from TV). |
+| `HOST`, `PORT` | Private Node bind address/port (typically `127.0.0.1:7010`). |
+| `PUBLIC_BASE_URL` | Public Stremio-facing origin for manifest/action links. |
+| `TARGET_CLIENT` | `android-tv` (strict default) or `generic` (advanced mode). |
 | `REQUEST_TIMEOUT_MS` | Per-request Arr timeout. |
-| `STATUS_CACHE_TTL_MS` | In-memory TTL for Arr status lists. |
-| `SERVICE_HEALTH_CACHE_TTL_MS` | TTL for cached Arr reachability checks. |
-| `STREAM_CACHE_MAX_AGE` | `cacheMaxAge` hint in stream responses. |
-| `STREAM_STALE_REVALIDATE` | `staleRevalidate` hint in stream responses. |
-| `RADARR_*` | Radarr enable/base URL/API key/root/profile/search behavior. |
-| `SONARR_*` | Sonarr enable/base URL/API key/root/profile/search behavior. |
+| `STATUS_CACHE_TTL_MS` | TTL for status-heavy cache entries. |
+| `SERVICE_HEALTH_CACHE_TTL_MS` | TTL for Arr reachability checks. |
+| `RADARR_*`, `SONARR_*` | Arr integration settings. |
 
-### Security guarantees
+### Strict `PUBLIC_BASE_URL` checks
 
-- Arr API keys stay in server `.env` only.
-- Keys are not put in manifest/action URLs or status output.
-- URLs shown in diagnostics are redacted.
+Validation requires a valid absolute URL and warns loudly when:
+- HTTP is used
+- hostname is an IP
+- hostname is internal-only (`localhost`, `.local`, `.lan`, single-label hostnames)
+- path-prefix hosting is configured
 
-## Operator diagnostics
+In `TARGET_CLIENT=android-tv`, these conditions flag:
+- `Android TV compatibility likely broken`
+- `Caddy/public certificate recommended`
 
-- `GET /healthz` → liveness probe
-- `GET /status.json` → machine-readable config/reachability summary
-- `GET /health` → health summary with service reachability
+---
 
-## Known protocol limitations
+## Diagnostics
 
-- Stremio add-ons cannot force live UI push updates.
-- There are no guaranteed native success toasts from add-ons.
-- Therefore status updates appear on the next normal stream refresh.
+- `GET /healthz`: liveness + Android-TV compatibility summary.
+- `GET /status.json`: machine-readable diagnostics including:
+  - bind host/port
+  - `PUBLIC_BASE_URL`
+  - HTTPS/IP/internal-hostname/path-prefix flags
+  - compatibility assessment for stock Android TV
+  - Arr reachability (without exposing API keys)
+- `GET /health`: service health summary.
 
-## Troubleshooting
+No secrets are exposed in output.
 
-**No tiles appear at all**
-- This is expected when both services are disabled or both are unreachable.
-- Check `/status.json` reachability and `RADARR_ENABLED` / `SONARR_ENABLED`.
+---
 
-**Tile shows `🛑 Arr Offline`**
-- The relevant service is enabled but unreachable.
-- Check Arr URL reachability from the Pi and API key validity.
+## Advanced mode (kept, not recommended)
 
-**Action click doesn’t appear to update instantly**
-- Re-open stream list to trigger fresh fetch.
-- Ensure `STATUS_CACHE_TTL_MS` is short enough for your preference.
+`TARGET_CLIENT=generic` allows advanced local setups (HTTP, IP URLs, internal names, internal CAs), but these are **not recommended** for stock Android TV because trust may fail in-app.
 
-**Manifest not installable from TV**
-- Verify `PUBLIC_BASE_URL` is reachable from Android TV.
-- Prefer HTTPS via Caddy for remote-device installs.
+Use only if you understand the certificate trust trade-offs and your client environment is controlled.
+
+---
 
 ## Local verification
 

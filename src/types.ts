@@ -103,4 +103,10 @@ export interface SonarrLookupRecord {
 export interface ConfigValidation {
   issues: string[];
   isHttps: boolean;
+  targetClient: 'android-tv' | 'generic';
+  isHostnameIp: boolean;
+  isInternalHostname: boolean;
+  hasPathPrefix: boolean;
+  likelyAndroidTvCompatible: boolean;
+  recommendedCaddyPublicCert: boolean;
 }
