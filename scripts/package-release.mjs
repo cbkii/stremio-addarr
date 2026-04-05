@@ -9,7 +9,7 @@ import { dirname } from 'node:path';
 
 const STAGING = 'dist/staging';
 const ARCHIVE = 'dist/stremio-addarr-install.tar.gz';
-const CHECKSUM = `${ARCHIVE}.sha256`;
+const CHECKSUM = 'dist/stremio-addarr-install.tar.gz.sha256';
 
 // ── Pre-flight: verify all required files exist ──────────────────────────
 const REQUIRED_FILES = [

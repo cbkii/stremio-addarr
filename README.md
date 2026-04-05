@@ -70,6 +70,8 @@ npm ci --omit=dev
 ```
 
 > Replace `pi:pi` with your actual username and group if different (check with `whoami` and `id -gn`).
+> The `chown` step is needed here because `sudo tar` extracts files as root.
+> It also ensures the systemd service (configured later) can write to this directory.
 
 Continue with the sections below to configure and run the add-on.
 
