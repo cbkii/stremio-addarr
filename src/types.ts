@@ -9,6 +9,8 @@ export interface ParsedStremioId {
   videoId?: string;
 }
 
+export type ArrService = 'radarr' | 'sonarr';
+
 export interface StatusTile {
   name: string;
   description: string;
@@ -38,11 +40,17 @@ export interface ArrEpisodeStatus {
 
 export interface AddActionResult {
   ok: boolean;
-  service: 'radarr' | 'sonarr';
+  service: ArrService;
   title: string;
   summary: string;
   detail?: string;
   alreadyExisted?: boolean;
+}
+
+export interface ServiceHealth {
+  configured: boolean;
+  reachable: boolean;
+  detail?: string;
 }
 
 export interface RadarrMovieRecord {

@@ -1,6 +1,6 @@
 import type { AppConfig } from '../config.js';
 import { TtlCache } from '../lib/cache.js';
-import { JsonHttpClient } from '../lib/http.js';
+import { HttpError, HttpTimeoutError, JsonHttpClient } from '../lib/http.js';
 import type {
   AddActionResult,
   ArrEpisodeStatus,
@@ -14,12 +14,17 @@ export class SonarrClient {
   private readonly seriesCache: TtlCache<SonarrSeriesRecord[]>;
   private readonly episodeCache: TtlCache<SonarrEpisodeRecord[]>;
 
-  constructor(private readonly config: AppConfig) {
-    this.http = new JsonHttpClient({
-      baseUrl: config.sonarr.baseUrl,
-      apiKey: config.sonarr.apiKey,
-      timeoutMs: config.requestTimeoutMs
-    });
+  constructor(
+    private readonly config: AppConfig,
+    injectedHttp?: JsonHttpClient
+  ) {
+    this.http =
+      injectedHttp ??
+      new JsonHttpClient({
+        baseUrl: config.sonarr.baseUrl,
+        apiKey: config.sonarr.apiKey,
+        timeoutMs: config.requestTimeoutMs
+      });
     this.seriesCache = new TtlCache<SonarrSeriesRecord[]>(config.statusCacheTtlMs);
     this.episodeCache = new TtlCache<SonarrEpisodeRecord[]>(config.statusCacheTtlMs);
   }
@@ -48,7 +53,7 @@ export class SonarrClient {
         return { state: 'series_added', monitored: !!series.monitored, reason: 'Episode not found in Sonarr yet.' };
       }
 
-      if (match.hasFile || match.episodeFileId) {
+      if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
         return { state: 'episode_downloaded', monitored: match.monitored, hasFile: true };
       }
       if (match.monitored) {
@@ -147,7 +152,19 @@ export class SonarrClient {
 
   private async findSeriesByImdbId(imdbId: string): Promise<SonarrSeriesRecord | undefined> {
     const series = await this.listSeries();
-    return series.find((item) => item.imdbId === imdbId);
+    const inLibrary = series.find((item) => item.imdbId === imdbId);
+    if (inLibrary) return inLibrary;
+
+    const lookup = await this.lookupSeries(imdbId);
+    if (!lookup) return undefined;
+
+    if (lookup.tvdbId != null) {
+      return series.find((item) => item.tvdbId === lookup.tvdbId);
+    }
+    if (lookup.title) {
+      return series.find((item) => item.title.toLowerCase() === lookup.title.toLowerCase());
+    }
+    return undefined;
   }
 
   private async lookupSeries(imdbId: string): Promise<SonarrLookupRecord | null> {
@@ -155,5 +172,30 @@ export class SonarrClient {
       `/api/v3/series/lookup?term=${encodeURIComponent(`imdb:${imdbId}`)}`
     );
     return results.find((item) => item.imdbId === imdbId) ?? results[0] ?? null;
+  }
+
+  async ping(): Promise<{ reachable: boolean; detail?: string }> {
+    if (!this.config.sonarr.enabled) {
+      return { reachable: false, detail: 'disabled' };
+    }
+    try {
+      await this.http.get('/api/v3/system/status');
+      return { reachable: true };
+    } catch (error) {
+      return { reachable: false, detail: this.mapError(error) };
+    }
+  }
+
+  private mapError(error: unknown): string {
+    if (error instanceof HttpTimeoutError) {
+      return 'timeout';
+    }
+    if (error instanceof HttpError) {
+      return `http_${error.status}`;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return 'unknown_error';
   }
 }

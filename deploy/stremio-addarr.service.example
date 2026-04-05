@@ -1,0 +1,16 @@
+[Unit]
+Description=stremio-addarr
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/stremio-addarr
+EnvironmentFile=/opt/stremio-addarr/.env
+ExecStart=/usr/bin/node /opt/stremio-addarr/dist/src/index.js
+Restart=on-failure
+RestartSec=5
+User=pi
+Group=pi
+
+[Install]
+WantedBy=multi-user.target

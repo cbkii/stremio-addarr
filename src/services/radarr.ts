@@ -1,18 +1,23 @@
 import type { AppConfig } from '../config.js';
 import { TtlCache } from '../lib/cache.js';
-import { JsonHttpClient } from '../lib/http.js';
+import { HttpError, HttpTimeoutError, JsonHttpClient } from '../lib/http.js';
 import type { AddActionResult, ArrMovieStatus, RadarrLookupRecord, RadarrMovieRecord } from '../types.js';
 
 export class RadarrClient {
   private readonly http: JsonHttpClient;
   private readonly moviesCache: TtlCache<RadarrMovieRecord[]>;
 
-  constructor(private readonly config: AppConfig) {
-    this.http = new JsonHttpClient({
-      baseUrl: config.radarr.baseUrl,
-      apiKey: config.radarr.apiKey,
-      timeoutMs: config.requestTimeoutMs
-    });
+  constructor(
+    private readonly config: AppConfig,
+    injectedHttp?: JsonHttpClient
+  ) {
+    this.http =
+      injectedHttp ??
+      new JsonHttpClient({
+        baseUrl: config.radarr.baseUrl,
+        apiKey: config.radarr.apiKey,
+        timeoutMs: config.requestTimeoutMs
+      });
     this.moviesCache = new TtlCache<RadarrMovieRecord[]>(config.statusCacheTtlMs);
   }
 
@@ -114,6 +119,31 @@ export class RadarrClient {
     const records = await this.http.get<RadarrLookupRecord[]>(
       `/api/v3/movie/lookup/imdb?imdbId=${encodeURIComponent(imdbId)}`
     );
-    return records[0] ?? null;
+    return records.find((entry) => entry.imdbId === imdbId) ?? records[0] ?? null;
+  }
+
+  async ping(): Promise<{ reachable: boolean; detail?: string }> {
+    if (!this.config.radarr.enabled) {
+      return { reachable: false, detail: 'disabled' };
+    }
+    try {
+      await this.http.get('/api/v3/system/status');
+      return { reachable: true };
+    } catch (error) {
+      return { reachable: false, detail: this.mapError(error) };
+    }
+  }
+
+  private mapError(error: unknown): string {
+    if (error instanceof HttpTimeoutError) {
+      return 'timeout';
+    }
+    if (error instanceof HttpError) {
+      return `http_${error.status}`;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return 'unknown_error';
   }
 }

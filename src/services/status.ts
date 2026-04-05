@@ -1,6 +1,6 @@
 import type { AppConfig } from '../config.js';
 import { toStremioDetailLink } from '../lib/stremio-ids.js';
-import type { AddActionResult, ParsedStremioId, StatusTile } from '../types.js';
+import type { AddActionResult, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
 
@@ -28,6 +28,7 @@ export class ArrStatusService {
           tiles.push({ name: 'Arr', description: 'Radarr • Missing' });
           break;
         case 'not_added':
+          tiles.push({ name: 'Arr', description: 'Radarr • Not Added' });
           tiles.push({
             name: 'Arr',
             description: 'Add to Radarr + Search',
@@ -55,6 +56,7 @@ export class ArrStatusService {
         tiles.push({ name: 'Arr', description: 'Sonarr • Series Added' });
         break;
       case 'series_not_added':
+        tiles.push({ name: 'Arr', description: 'Sonarr • Series Not Added' });
         tiles.push({
           name: 'Arr',
           description: 'Add to Sonarr + Search',
@@ -79,5 +81,22 @@ export class ArrStatusService {
 
   buildReturnLink(parsed: ParsedStremioId): string {
     return toStremioDetailLink(parsed);
+  }
+
+  async getServiceHealth(): Promise<{ radarr: ServiceHealth; sonarr: ServiceHealth }> {
+    const radarrPing = await this.radarr.ping();
+    const sonarrPing = await this.sonarr.ping();
+    return {
+      radarr: {
+        configured: this.config.radarr.enabled,
+        reachable: radarrPing.reachable,
+        detail: radarrPing.detail
+      },
+      sonarr: {
+        configured: this.config.sonarr.enabled,
+        reachable: sonarrPing.reachable,
+        detail: sonarrPing.detail
+      }
+    };
   }
 }

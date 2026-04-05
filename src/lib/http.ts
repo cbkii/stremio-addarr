@@ -15,6 +15,12 @@ export class HttpError extends Error {
   }
 }
 
+export class HttpTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 export class JsonHttpClient {
   private readonly apiKeyHeader: string;
 
@@ -58,6 +64,11 @@ export class JsonHttpClient {
       }
 
       return text ? (JSON.parse(text) as T) : ({} as T);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new HttpTimeoutError(`Request timed out after ${this.options.timeoutMs}ms`);
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
     }

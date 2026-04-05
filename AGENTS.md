@@ -1,79 +1,51 @@
 # AGENTS.md
 
-This repository is the starter scaffold for the **Arr Status & Add** Stremio add-on.
-
 ## Mission
+Maintain **Arr Status & Add** as a production-ready, self-hosted, LAN-first Stremio add-on.
 
-Build a **self-hosted LAN-first Stremio add-on** that:
-- shows whether the current movie or episode is already present in Radarr or Sonarr
-- distinguishes **added** vs **downloaded** where the Arr APIs make that practical
-- lets the user trigger **Add + Search** from a supported Stremio add-on action surface
-- stays fast and readable on **Android TV v9 + Stremio 1.9+**
+## Product contract
+- Primary UX surface is Stremio `stream` resource.
+- Show status first, and only one strong add action when not already present.
+- Movie pages map to Radarr status/add.
+- Episode pages are episode-aware for status and series-level for Sonarr add semantics.
+- Always fail softly with readable tiles/pages.
 
-## Non-negotiables
-
-- Keep the design **LAN-first**. Do not assume Radarr or Sonarr are publicly reachable.
-- Keep secrets **server-side**. Do not move Arr API keys into manifest URLs, config URLs, or visible labels.
-- Use only **supported Stremio add-on protocol surfaces**. Do not claim the addon can inject an undocumented native button beside Stremio's own “Add to library”.
-- Prefer **small payloads**, **deterministic ordering**, and **one strong action** over crowded UI.
-- Never add piracy source scraping, mirror discovery, anti-bot bypassing, or unauthorised stream sources.
-
-## Primary architecture
-
-- Language: TypeScript
-- Runtime: Node.js 20+
-- Host: self-hosted Express app on LAN
-- Add-on SDK: official `stremio-addon-sdk`
-- Primary Stremio surface: `stream`
-- Optional later surface: `meta.links`
-- Config model: `.env` on the server, not user secrets encoded into the addon install URL
-
-## Product rules
-
-### Movie pages
-Return a small Arr tile set such as:
-- `Radarr • Downloaded`
-- `Radarr • Added`
-- `Radarr • Missing`
-- `Add to Radarr + Search`
-
-### Episode pages
-Treat the UI as episode-aware, but keep backend add semantics series-level where needed.
-Examples:
-- `Sonarr • Episode Downloaded`
-- `Sonarr • Episode Missing`
-- `Sonarr • Series Added`
-- `Add to Sonarr + Search`
+## Security rules
+- Keep Arr credentials server-side (`.env`) only.
+- Never expose API keys in URLs, labels, HTML pages, logs, or errors.
+- Never add scraping/piracy/mirror/bypass features.
 
 ## Engineering rules
+- TypeScript, Node 20+, Express, `stremio-addon-sdk`.
+- Use native `fetch` with explicit timeout.
+- Keep dependencies small and justified.
+- Short TTL cache for status-heavy lookups.
+- Invalidate relevant cache entries after successful adds.
+- Validate env configuration at startup with useful errors.
+- Keep HTML pages minimal and TV-readable.
 
-- Use native `fetch` on modern Node.
-- Set explicit timeouts for every Arr request.
-- Cache list/status calls briefly.
-- Fail soft: if Arr is unreachable, return a simple status stream instead of throwing raw errors.
-- Keep logs structured and never print API keys.
-- Validate all env values and malformed IDs.
-- Keep HTML result pages minimal and readable on TV browsers.
+## Logging rules
+- Structured JSON logs.
+- Include route, method, duration, status.
+- Redact sensitive fields by default.
 
-## Reference constraints
+## Deployment rules
+- Design for Raspberry Pi/home-server LAN deployment.
+- HTTPS reverse proxy guidance must remain accurate (Caddy example kept current).
+- Do not assume private Arr services are publicly reachable.
 
-Stremio add-ons expose `/manifest.json` and routes such as `/{resource}/{type}/{id}.json`; documented resources are `catalog`, `meta`, `stream`, and `subtitles`. Configurable add-ons can expose `/configure`, and Stremio supports deep links including detail pages. The official SDK also includes TypeScript support. citeturn0search0turn0search4turn0search5turn4search0turn5search0
+## Testing rules
+- Tests must not call real home LAN services.
+- Mock Arr API responses.
+- Keep tests deterministic and lightweight.
 
-Radarr and Sonarr both expose official API docs that cover movie lookup / add and series lookup / add flows, which should be treated as the source of truth for request shapes while finishing this starter. citeturn1search0turn1search1
-
-## Expected future work
-
-1. Harden Radarr add payload handling.
-2. Finish Sonarr series lookup by IMDb and fallback matching.
-3. Add proper downloaded / monitored / missing state mapping.
-4. Add optional confirm-before-add flow.
-5. Add tests around duplicate detection, episode status, and Arr outage handling.
-6. Add optional TMDB fallback only if lookup quality needs it.
+## CI/release rules
+- CI must run typecheck, tests, and build.
+- Tag `vX.Y.Z` should trigger release workflow and publish artifacts/checksums.
 
 ## Review checklist
-
-Every meaningful change should include:
-- what user-visible Stremio behaviour changed
-- what Arr endpoint assumptions were introduced or removed
-- how to verify locally on LAN
-- how Android TV UX is affected
+For each significant change include:
+1. user-visible behavior change
+2. Arr endpoint assumptions changed/unchanged
+3. local verification steps
+4. Android TV UX/performance impact
