@@ -67,7 +67,7 @@ export class SonarrClient {
       if (match.monitored) {
         return { state: 'episode_missing', monitored: true, hasFile: false };
       }
-      return { state: 'episode_missing', monitored: false, hasFile: false };
+      return { state: 'series_added', monitored: !!series.monitored, hasFile: false };
     } catch (error) {
       return {
         state: 'unavailable',
@@ -194,7 +194,9 @@ export class SonarrClient {
       if (match) return match;
     } catch {
       // fall through to return null — fallback text search is not implemented
-      // TODO: add text-based fallback lookup if IMDb lookup fails (e.g., term: title)
+      // TODO: add text-based fallback lookup if Sonarr's IMDb lookup returns empty results.
+      // A title source would be needed (e.g., from a TMDB lookup using TMDB_API_KEY).
+      // See AGENTS.md "Expected future work" for context.
     }
     return null;
   }
