@@ -29,12 +29,15 @@ export function renderActionConfirmPage(
   const backUrl = escapeHtml(
     `stremio:///detail/${kind}/${parsed.imdbId}/${parsed.videoId ?? parsed.imdbId}`
   );
-  const autoScript = autoSubmit ? '<script>document.forms[0].submit();</script>' : '';
+  const autoScript = autoSubmit
+    ? '<script>document.forms[0].submit();</script>'
+    : '';
+  const submitLabel = autoSubmit ? 'Adding…' : 'Add + Search';
   return minimalHtml(
     title,
     autoScript +
       `<form method="post" action="${escapeHtml(actionPath)}">` +
-      `<button type="submit">Add + Search</button> ` +
+      `<button type="submit">${submitLabel}</button> ` +
       `<a href="${backUrl}">Cancel</a></form>`
   );
 }
