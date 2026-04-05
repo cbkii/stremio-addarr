@@ -10,7 +10,9 @@ export interface AppConfig {
   logLevel: LogLevel;
   requestTimeoutMs: number;
   statusCacheTtlMs: number;
-  actionConfirm: boolean;
+  serviceHealthCacheTtlMs: number;
+  streamCacheMaxAgeSec: number;
+  streamStaleRevalidateSec: number;
   radarr: {
     enabled: boolean;
     baseUrl: string;
@@ -92,6 +94,9 @@ function ensureHttpUrl(name: string, value: string): string {
   if (parsed.username || parsed.password) {
     throw new Error(`Environment variable ${name} must not contain embedded credentials (userinfo).`);
   }
+  if (parsed.search || parsed.hash) {
+    throw new Error(`Environment variable ${name} must not include query or hash components.`);
+  }
   return stripTrailingSlash(parsed.toString());
 }
 
@@ -105,8 +110,26 @@ export function loadConfig(): AppConfig {
   );
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);
   const statusCacheTtlMs = readNumber('STATUS_CACHE_TTL_MS', 30000);
+  const serviceHealthCacheTtlMs = readNumber('SERVICE_HEALTH_CACHE_TTL_MS', 10000);
+  const streamCacheMaxAgeSec = readNumber(
+    'STREAM_CACHE_MAX_AGE',
+    readNumber('STREAM_CACHE_MAX_AGE_SEC', 2)
+  );
+  const streamStaleRevalidateSec = readNumber(
+    'STREAM_STALE_REVALIDATE',
+    readNumber('STREAM_STALE_REVALIDATE_SEC', 5)
+  );
+
   if (requestTimeoutMs < 1000) throw new Error('REQUEST_TIMEOUT_MS must be at least 1000.');
   if (statusCacheTtlMs < 1000) throw new Error('STATUS_CACHE_TTL_MS must be at least 1000.');
+  if (serviceHealthCacheTtlMs < 1000) {
+    throw new Error('SERVICE_HEALTH_CACHE_TTL_MS must be at least 1000.');
+  }
+  if (streamCacheMaxAgeSec < 0) throw new Error('STREAM_CACHE_MAX_AGE must be at least 0.');
+  if (streamStaleRevalidateSec < 0) {
+    throw new Error('STREAM_STALE_REVALIDATE must be at least 0.');
+  }
+
   const logLevelRaw = readString('LOG_LEVEL', 'info') as LogLevel;
   if (!LOG_LEVELS.has(logLevelRaw)) {
     throw new Error('LOG_LEVEL must be one of: debug, info, warn, error.');
@@ -121,7 +144,9 @@ export function loadConfig(): AppConfig {
     logLevel: logLevelRaw,
     requestTimeoutMs,
     statusCacheTtlMs,
-    actionConfirm: readBoolean('ACTION_CONFIRM', false),
+    serviceHealthCacheTtlMs,
+    streamCacheMaxAgeSec,
+    streamStaleRevalidateSec,
     radarr: {
       enabled: readBoolean('RADARR_ENABLED', false),
       baseUrl: stripTrailingSlash(readString('RADARR_BASE_URL')),
@@ -154,6 +179,23 @@ export function loadConfig(): AppConfig {
   if (config.sonarr.enabled && (!config.sonarr.baseUrl || !config.sonarr.apiKey)) {
     readRequiredString('SONARR_BASE_URL');
     readRequiredString('SONARR_API_KEY');
+  }
+
+  if (config.radarr.enabled) {
+    readRequiredString('RADARR_ROOT_FOLDER_PATH');
+    if (config.radarr.qualityProfileId <= 0) {
+      throw new Error('RADARR_QUALITY_PROFILE_ID must be greater than 0.');
+    }
+  }
+
+  if (config.sonarr.enabled) {
+    readRequiredString('SONARR_ROOT_FOLDER_PATH');
+    if (config.sonarr.qualityProfileId <= 0) {
+      throw new Error('SONARR_QUALITY_PROFILE_ID must be greater than 0.');
+    }
+    if (config.sonarr.languageProfileId <= 0) {
+      throw new Error('SONARR_LANGUAGE_PROFILE_ID must be greater than 0.');
+    }
   }
 
   if (config.radarr.enabled) {

@@ -10,7 +10,9 @@ export function baseConfig(): AppConfig {
     logLevel: 'error',
     requestTimeoutMs: 2000,
     statusCacheTtlMs: 10_000,
-    actionConfirm: false,
+    serviceHealthCacheTtlMs: 2_000,
+    streamCacheMaxAgeSec: 2,
+    streamStaleRevalidateSec: 5,
     radarr: {
       enabled: false,
       baseUrl: 'http://radarr.local',

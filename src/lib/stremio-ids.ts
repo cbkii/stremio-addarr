@@ -26,7 +26,8 @@ export function parseStremioId(type: 'movie' | 'series', id: string): ParsedStre
     return {
       rawId: cleanedId,
       imdbId: cleanedId,
-      kind: 'series'
+      kind: 'series',
+      videoId: cleanedId
     };
   }
 
@@ -57,6 +58,6 @@ export function toStremioDetailLink(parsed: ParsedStremioId): string {
     return `stremio:///detail/movie/${parsed.imdbId}/${parsed.imdbId}`;
   }
 
-  const videoId = parsed.videoId ?? '';
+  const videoId = parsed.videoId ?? parsed.imdbId;
   return `stremio:///detail/series/${parsed.imdbId}/${videoId}`;
 }
