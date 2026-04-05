@@ -24,7 +24,7 @@ test('stream handler output sanity for movie', async () => {
   await withServer(app, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/stream/movie/tt1234567.json`);
     assert.equal(response.status, 200);
-    const body = (await response.json()) as { streams: Array<{ description: string }> };
-    assert.equal(body.streams[0].description, 'Radarr • Unavailable');
+    const body = (await response.json()) as { streams: Array<{ name: string }> };
+    assert.equal(body.streams[0].name, 'Arr Offline');
   });
 });

@@ -37,7 +37,11 @@ export function createAddonInterface(config: AppConfig) {
 
     const parsed = parseStremioId(type, id);
     const tiles = await statusService.buildTiles(parsed);
-    return { streams: tiles.map(streamFromTile) };
+    return {
+      streams: tiles.map(streamFromTile),
+      cacheMaxAge: 30,
+      staleRevalidate: 60
+    };
   });
 
   return {

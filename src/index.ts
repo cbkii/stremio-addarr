@@ -4,7 +4,7 @@ import { loadConfig, validateConfig, type AppConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
 import { parseStremioId } from './lib/stremio-ids.js';
-import { renderActionConfirmPage, renderActionResultPage } from './ui/landing.js';
+import { renderActionConfirmPage, renderActionResultPage, renderActionErrorPage } from './ui/landing.js';
 
 function redactUrl(rawUrl: string): string {
   try {
@@ -115,31 +115,35 @@ export function createApp(config: AppConfig) {
   app.get('/action/:kind/:encodedId', async (req, res) => {
     const kind = req.params.kind;
     if (kind !== 'movie' && kind !== 'series') {
-      res.status(400).send('Unsupported action kind.');
+      res
+        .status(400)
+        .type('html')
+        .send(renderActionErrorPage('Unsupported action kind.', 'stremio://'));
       return;
     }
 
+    let returnUrl = 'stremio://';
     try {
       const rawId = decodeURIComponent(req.params.encodedId);
       const parsed = parseStremioId(kind, rawId);
-
-      if (!config.actionConfirm) {
-        // Default: perform the add directly on GET — the user already clicked in Stremio.
-        const result = await statusService.triggerAdd(parsed);
-        const returnLink = statusService.buildReturnLink(parsed);
-        res.type('html').send(renderActionResultPage(result, returnLink));
-      } else {
-        // Explicit confirmation requested: show a minimal confirm form.
-        const actionPath = `/action/${kind}/${encodeURIComponent(parsed.rawId)}`;
-        res.type('html').send(renderActionConfirmPage(parsed, actionPath));
-      }
+      returnUrl = statusService.buildReturnLink(parsed);
+      // GET must never perform a non-idempotent action.
+      // When ACTION_CONFIRM=false the page auto-submits via JS (one-click UX preserved).
+      // When ACTION_CONFIRM=true the user must explicitly click the confirm button.
+      const actionPath = `/action/${kind}/${encodeURIComponent(parsed.rawId)}`;
+      res
+        .type('html')
+        .send(renderActionConfirmPage(parsed, actionPath, !config.actionConfirm));
     } catch (error) {
       logger.error('Action request failed', {
         error: error instanceof Error ? error.message : String(error),
         kind,
         encodedId: req.params.encodedId
       });
-      res.status(400).send('Invalid action request.');
+      res
+        .status(400)
+        .type('html')
+        .send(renderActionErrorPage('Invalid action request.', returnUrl));
     }
   });
 

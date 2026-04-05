@@ -84,7 +84,7 @@ test('root route returns JSON with expected fields and no API keys', async () =>
   });
 });
 
-test('action GET with actionConfirm=false performs add directly (no confirm page)', async () => {
+test('action GET with actionConfirm=false shows auto-submit form (no direct add)', async () => {
   const cfg = baseConfig(); // actionConfirm=false, radarr disabled
   const app = createApp(cfg);
 
@@ -92,10 +92,12 @@ test('action GET with actionConfirm=false performs add directly (no confirm page
     const res = await fetch(`${baseUrl}/action/movie/tt1234567`);
     assert.equal(res.status, 200);
     const html = await res.text();
-    // Should be a result page, not a confirm page
-    assert.doesNotMatch(html, /Confirm Add/);
-    assert.match(html, /Radarr unavailable/);
-    assert.match(html, /Back to Stremio/);
+    // Should be an auto-submit form — GET must not trigger the add operation
+    assert.match(html, /<form/);
+    assert.match(html, /document\.forms\[0\]\.submit/);
+    assert.match(html, /Back to Stremio|Cancel/);
+    // Must not already show a result from performing the add
+    assert.doesNotMatch(html, /Radarr unavailable/);
   });
 });
 
