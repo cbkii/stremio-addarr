@@ -63,8 +63,9 @@ https://YOUR-HOSTNAME/manifest.json
 ## Upgrade from a previous release
 
 ```bash
-# Download
-curl -LO https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz
+# Download to home directory
+curl -L https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz \
+  -o ~/stremio-addarr-install.tar.gz
 
 # Extract over existing installation (preserves your .env)
 cd /opt/stremio-addarr

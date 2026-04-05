@@ -277,8 +277,9 @@ No secrets are exposed in any diagnostic output.
 ## 14 — Upgrade from a previous release
 
 ```bash
-# Download the new release
-curl -LO https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz
+# Download the new release to your home directory
+curl -L https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz \
+  -o ~/stremio-addarr-install.tar.gz
 
 # Extract over existing installation (preserves your .env)
 cd /opt/stremio-addarr
