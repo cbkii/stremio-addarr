@@ -70,7 +70,8 @@ gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-instal
 
 ```bash
 sha256sum -c stremio-addarr-install.tar.gz.sha256
-file stremio-addarr-install.tar.gz | grep -q 'gzip'
+file stremio-addarr-install.tar.gz | grep -q 'gzip' \
+  || { echo "ERROR: Downloaded file is not a valid gzip archive."; exit 1; }
 
 sudo mkdir -p /opt/stremio-addarr
 sudo tar -xzf stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
@@ -183,7 +184,8 @@ gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-instal
 
 ```bash
 sha256sum -c ~/stremio-addarr-install.tar.gz.sha256
-file ~/stremio-addarr-install.tar.gz | grep -q 'gzip'
+file ~/stremio-addarr-install.tar.gz | grep -q 'gzip' \
+  || { echo "ERROR: Downloaded file is not a valid gzip archive."; exit 1; }
 
 sudo tar -xzf ~/stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
 sudo chown -R "$SVC_USER:$SVC_GROUP" /opt/stremio-addarr

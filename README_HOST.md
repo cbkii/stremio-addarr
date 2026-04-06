@@ -79,11 +79,10 @@ fi
 sudo curl -fsSL "$CADDY_URL" -o /usr/local/bin/caddy
 sudo chmod +x /usr/local/bin/caddy
 /usr/local/bin/caddy version
-/usr/local/bin/caddy list-modules | grep -q dns.providers.duckdns
-echo "DuckDNS plugin present"
+/usr/local/bin/caddy list-modules | grep -q dns.providers.duckdns \
+  && echo "DuckDNS plugin present" \
+  || { echo "ERROR: DuckDNS plugin missing"; exit 1; }
 ```
-
-Expected result: `DuckDNS plugin present`.
 
 ### Option B: build with xcaddy (Go required)
 
@@ -101,11 +100,10 @@ sudo mv ./caddy /usr/local/bin/caddy
 sudo chmod +x /usr/local/bin/caddy
 
 /usr/local/bin/caddy version
-/usr/local/bin/caddy list-modules | grep -q dns.providers.duckdns
-echo "DuckDNS plugin present"
+/usr/local/bin/caddy list-modules | grep -q dns.providers.duckdns \
+  && echo "DuckDNS plugin present" \
+  || { echo "ERROR: DuckDNS plugin missing"; exit 1; }
 ```
-
-Expected result: `DuckDNS plugin present`.
 
 ---
 
@@ -215,8 +213,9 @@ sudo systemctl restart caddy
 sudo /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 sudo systemctl enable --now caddy
 sudo systemctl is-active caddy
-/usr/local/bin/caddy list-modules | grep -q dns.providers.duckdns
-echo "DuckDNS plugin present in running binary"
+/usr/local/bin/caddy list-modules | grep -q dns.providers.duckdns \
+  && echo "DuckDNS plugin present in running binary" \
+  || { echo "ERROR: DuckDNS plugin missing"; exit 1; }
 curl -fI "https://$ADDARR_HOSTNAME/manifest.json"
 ```
 
