@@ -1,6 +1,13 @@
 # Hosting Guide — Arr Status & Add (`stremio-addarr`)
 
-This guide walks you through getting a **publicly trusted HTTPS certificate** on a **real DNS hostname** so that stock Android TV (Stremio) can install and use the add-on.
+This guide shows how to give the add-on a **publicly trusted HTTPS certificate** on a **real DNS hostname** so stock Android TV Stremio can install and use it.
+
+The setup below keeps the add-on **private on your LAN**:
+
+- Caddy terminates HTTPS on the Pi
+- the Node app listens only on `127.0.0.1:7010`
+- certificates are issued with the **ACME DNS-01 challenge**
+- **router port forwarding is not required**
 
 ---
 
@@ -26,13 +33,13 @@ Router port forwarding is **not required** for the setup documented here.
 ```
 Android TV (Stremio)
     │  HTTPS  https://myaddarr.duckdns.org/manifest.json
-    │  ← DNS: local override resolves hostname → Pi's LAN IP
+    │  ← DNS resolves hostname to the Pi's LAN IP
     ▼
 Caddy on Raspberry Pi (port 443)
-    │  Let's Encrypt cert via DNS-01 (DuckDNS API, no port forwarding)
+    │  ACME DNS-01 via DuckDNS or deSEC
     │  reverse proxy
     ▼
-Node.js add-on (127.0.0.1:7010, loopback only)
+Node.js add-on (127.0.0.1:7010 only)
     │  HTTP API
     ▼
 Sonarr / Radarr on LAN
@@ -40,8 +47,8 @@ Sonarr / Radarr on LAN
 
 Key points:
 - **DuckDNS A record** points to your Pi's LAN IP (e.g. `192.168.1.100`). It does not need a public IP.
-- **Local DNS override** (dnsmasq or Pi-hole) tells every LAN device that `myaddarr.duckdns.org` is at `192.168.1.100`. Without this, LAN devices would query public DNS and might not reach the Pi.
-- **Caddy** handles TLS termination and reverse-proxies to the Node app.
+- **Local DNS override** (dnsmasq or Pi-hole) tells every LAN device that `myaddarr.duckdns.org` is at `192.168.1.100`. Without this, LAN devices would query public DNS and might not reach the Pi reliably.
+- **Caddy** is the only process on port 443, handles TLS termination, and reverse-proxies to the Node app.
 - **Node app** listens only on `127.0.0.1:7010`, never exposed directly.
 
 ---
@@ -52,17 +59,20 @@ You will need:
 - A **Raspberry Pi** running Raspberry Pi OS (Debian-based) or similar.
 - **Node.js 20+** already installed (see main README).
 - The **stremio-addarr** add-on already installed in `/opt/stremio-addarr` but not yet started.
-- A **DuckDNS** account (free, no credit card).
+- A **DuckDNS** account (free, no credit card), or a domain delegated to **deSEC**.
 - Either **dnsmasq** or **Pi-hole** on your LAN for local DNS override.
 - `curl` and `dig` (or `nslookup`) available on the Pi.
 
 > **Which local DNS tool do I have?**
+> ```bash
+> systemctl is-active pihole-FTL || true   # Pi-hole
+> systemctl is-active dnsmasq || true      # dnsmasq
+> ```
 > If you already run Pi-hole on your network, use that. Otherwise, install dnsmasq on the Pi itself.
-> Check: `systemctl is-active pihole-FTL` (Pi-hole) or `systemctl is-active dnsmasq`.
 
 ---
 
-## Step 1 — Choose a free DNS provider
+## Step 1 — Choose a DNS provider
 
 ### Option A — DuckDNS (recommended, always free)
 
@@ -83,15 +93,11 @@ dig +short myaddarr.duckdns.org
 # Should output your Pi's LAN IP, e.g. 192.168.1.100
 ```
 
-> ℹ️ You do NOT need a DuckDNS update cron job for this LAN-only setup. The A record should point to your Pi's LAN IP (which you set in the step above) so LAN clients can connect. Let's Encrypt only checks the TXT record for DNS-01 certificate issuance — it does not check the A record — so you do not need a public/WAN IP for the cert to be issued.
+> ℹ️ You do NOT need a DuckDNS update cron job for this LAN-only setup. DNS-01 only checks the TXT record during cert issuance — it does not check the A record — so you do not need a public/WAN IP. No port forwarding is required.
 
 ### Option B — deSEC (advanced, bring-your-own-domain)
 
-> ⚠️ **Important:** As of mid-2024, deSEC has **suspended new registrations of free `dedyn.io` subdomains**. Their own registration page states: *"dynDNS registrations are suspended at this time."* Existing `dedyn.io` users can continue to use their subdomains.
->
-> If you want to use deSEC, you must **bring your own domain name** (registered elsewhere, e.g. Namecheap, Porkbun, or another registrar). You then delegate that domain to deSEC's nameservers and use their free DNS hosting.
->
-> **For most beginners, DuckDNS (Option A) is strongly recommended** as it remains fully free and requires no paid domain.
+> ⚠️ **Important:** As of mid-2024, deSEC has **suspended new registrations of free `dedyn.io` subdomains**. Existing `dedyn.io` users can continue to use their subdomains. For most beginners, **DuckDNS (Option A) is strongly recommended**.
 
 If you already have a domain and want to use deSEC:
 
@@ -105,6 +111,26 @@ If you already have a domain and want to use deSEC:
 ## Step 2 — Install Caddy with the DNS plugin
 
 The **standard Caddy package from APT does not include DNS provider plugins**. You must install a custom Caddy build.
+
+### Clean up old package-managed units first
+
+> ⚠️ **Important:** If you previously installed Caddy from APT and then removed it, the `caddy.service`
+> and `caddy-api.service` units may still be **masked** — with
+> `/etc/systemd/system/caddy.service` pointing at `/dev/null`. This will block the manual unit
+> you create below. Run these cleanup commands before proceeding, even if you think Caddy is
+> fully removed:
+
+```bash
+sudo systemctl disable --now caddy caddy-api 2>/dev/null || true
+sudo systemctl unmask caddy caddy-api 2>/dev/null || true
+sudo rm -f /etc/systemd/system/caddy.service /etc/systemd/system/caddy-api.service
+sudo systemctl daemon-reload
+```
+
+To also remove the APT package (optional):
+```bash
+sudo apt remove -y caddy
+```
 
 ### Method 1 — Download from Caddy's official build service (recommended for beginners, no Go required)
 
@@ -137,20 +163,13 @@ sudo chmod +x /usr/local/bin/caddy
 # Expected output: dns.providers.duckdns
 ```
 
-> ⚠️ **Do not use the standard `sudo apt install caddy`** — that package does not include third-party DNS plugins. If you previously installed Caddy via APT, remove it first to avoid conflicts with future APT upgrades:
-> ```bash
-> sudo apt remove caddy
-> sudo systemctl stop caddy 2>/dev/null || true
-> ```
-> Then install the custom binary at `/usr/local/bin/caddy` as shown above. Ensure the Caddy systemd service uses `/usr/local/bin/caddy` (check with `systemctl cat caddy | grep ExecStart`).
-
 ### Method 2 — Build with xcaddy (alternative, requires Go)
 
 If you prefer to build from source:
 
 ```bash
-# Install Go (needed only for building)
-sudo apt install -y golang
+# Install Go and git (needed only for building)
+sudo apt install -y golang-go git
 
 # Install xcaddy
 go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
@@ -169,52 +188,69 @@ sudo chmod +x /usr/local/bin/caddy
 caddy list-modules | grep dns.providers
 ```
 
-### Install Caddy system files
+### Create the caddy service account and directories
 
-Whether you used Method 1 or Method 2, set up the Caddy user and directories:
-
-```bash
-# Create caddy user (if not already present)
-sudo groupadd --system caddy 2>/dev/null || true
-sudo useradd --system --gid caddy --create-home --home-dir /var/lib/caddy \
-  --shell /usr/sbin/nologin --comment "Caddy web server" caddy 2>/dev/null || true
-
-# Create config directory
-sudo mkdir -p /etc/caddy
-sudo chown root:caddy /etc/caddy
-sudo chmod 750 /etc/caddy
-
-# Create data/log directories
-sudo mkdir -p /var/lib/caddy /var/log/caddy
-sudo chown -R caddy:caddy /var/lib/caddy /var/log/caddy
-```
-
-Install the systemd service:
+Whether you used Method 1 or Method 2:
 
 ```bash
-# Download the official Caddy systemd service file
-sudo curl -fsSL \
-  https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy.service \
-  -o /etc/systemd/system/caddy.service
+getent group caddy >/dev/null || sudo groupadd --system caddy
+id -u caddy >/dev/null 2>&1 || sudo useradd --system \
+  --gid caddy \
+  --create-home \
+  --home-dir /var/lib/caddy \
+  --shell /usr/sbin/nologin \
+  --comment 'Caddy web server' \
+  caddy
 
-sudo systemctl daemon-reload
-sudo systemctl enable caddy
+sudo install -d -m 0755 -o root  -g caddy /etc/caddy
+sudo install -d -m 0755 -o caddy -g caddy /var/lib/caddy
 ```
 
-> If this URL is unavailable, the service file is available at:
-> `https://github.com/caddyserver/dist/blob/master/init/caddy.service`
+### Create the caddy.service unit file
+
+> ℹ️ This creates the unit file manually instead of downloading it from the Caddy dist repo.
+> Make sure `command -v caddy` points to the custom binary you installed above (usually `/usr/local/bin/caddy`).
+
+```bash
+BIN="$(command -v caddy)"
+echo "$BIN"
+
+sudo tee /etc/systemd/system/caddy.service >/dev/null <<EOF
+[Unit]
+Description=Caddy
+Documentation=https://caddyserver.com/docs/
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+EnvironmentFile=/etc/caddy/caddy.env
+ExecStart=${BIN} run --environ --config /etc/caddy/Caddyfile
+ExecReload=${BIN} reload --config /etc/caddy/Caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
 
 ---
 
 ## Step 3 — Store your DNS token securely
 
-Never hard-code API tokens directly in the Caddyfile. Store them in an environment file that only root and the caddy user can read.
+Never hard-code API tokens directly in the Caddyfile. Store them in an environment file that the systemd service loads automatically via `EnvironmentFile=` (see the unit above).
 
 ```bash
-# Create the environment file (replace with your actual token)
-sudo install -m 600 -o root -g caddy /dev/null /etc/caddy/caddy.env
+# Create the environment file with strict permissions
+sudo install -m 600 -o root -g root /dev/null /etc/caddy/caddy.env
 
-# For DuckDNS:
+# For DuckDNS (replace with your actual token):
 echo 'DUCKDNS_TOKEN=your-duckdns-token-here' | sudo tee /etc/caddy/caddy.env > /dev/null
 
 # For deSEC:
@@ -222,26 +258,18 @@ echo 'DUCKDNS_TOKEN=your-duckdns-token-here' | sudo tee /etc/caddy/caddy.env > /
 
 # Confirm permissions
 ls -l /etc/caddy/caddy.env
-# Expected: -rw------- root caddy  (read by root and caddy group only)
+# Expected: -rw------- root root
 ```
 
-Tell the Caddy systemd service to load this environment file. Create a drop-in override:
-
-```bash
-sudo mkdir -p /etc/systemd/system/caddy.service.d
-sudo tee /etc/systemd/system/caddy.service.d/env.conf > /dev/null << 'EOF'
-[Service]
-EnvironmentFile=/etc/caddy/caddy.env
-EOF
-
-sudo systemctl daemon-reload
-```
+> ℹ️ `EnvironmentFile=` is read by systemd as root before dropping to the caddy user, so
+> root-only (`600`) permissions are correct. The variable name just needs to match what you use
+> in the Caddyfile (e.g. `{env.DUCKDNS_TOKEN}`).
 
 An example file is provided at `deploy/caddy.env.example` in this repo.
 
 ---
 
-## Step 4 — Configure Caddy
+## Step 4 — Write the Caddyfile
 
 ### For DuckDNS
 
@@ -261,6 +289,9 @@ EOF
 ```
 
 See also `Caddyfile.duckdns.example` in the repo root for a copy you can use as a reference.
+
+> **Advanced:** If you use a delegated DuckDNS subdomain for the ACME DNS-01 challenge, set
+> `override_domain` inside the `dns duckdns` block. See `Caddyfile.duckdns.example` for details.
 
 ### For deSEC
 
@@ -283,14 +314,19 @@ EOF
 
 See also `Caddyfile.desec.example` in the repo root.
 
-### Validate and start Caddy
+---
+
+## Step 5 — Validate and start Caddy
 
 ```bash
-# Validate config syntax
-sudo caddy validate --config /etc/caddy/Caddyfile
+# Reload unit files
+sudo systemctl daemon-reload
 
-# Start (or restart if already running)
-sudo systemctl restart caddy
+# Validate the Caddyfile before starting
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+# Enable and start
+sudo systemctl enable --now caddy
 sudo systemctl status caddy
 
 # Watch logs to confirm cert issuance (may take up to 2 minutes)
@@ -298,17 +334,33 @@ sudo journalctl -u caddy -f
 # Look for: "certificate obtained successfully"
 ```
 
-**Expected:** Caddy contacts Let's Encrypt, sets a TXT record via the DuckDNS API, and receives a trusted certificate. This happens automatically — no port forwarding needed.
+**Useful verification checks:**
+
+```bash
+# Confirm the DNS plugin is present in the running binary
+caddy list-modules | grep dns.providers
+
+# Confirm systemd uses the correct binary and env file
+systemctl cat caddy | grep -E 'ExecStart|ExecReload|EnvironmentFile'
+
+# Confirm the unit file is NOT masked (must not print /dev/null)
+readlink -f /etc/systemd/system/caddy.service || true
+```
+
+**Expected outcomes:**
+- `caddy list-modules` lists `dns.providers.duckdns` (or `dns.providers.desec`)
+- `caddy validate` exits cleanly with no errors
+- `systemctl status caddy` shows `active (running)`, not masked
+- `readlink -f` prints the actual unit file path, not `/dev/null`
+- Logs show `certificate obtained successfully`
 
 ---
 
-## Step 5 — Set up local DNS override
+## Step 6 — Set up local DNS override
 
-Your DuckDNS hostname (`myaddarr.duckdns.org`) points to your Pi's LAN IP in public DNS. However, some routers intercept DNS queries and may return incorrect results, or return the LAN IP fine but your clients may cache stale entries. A **local DNS override** ensures every LAN device reliably resolves the hostname to the Pi's LAN IP.
+A **local DNS override** ensures every LAN device reliably resolves the hostname to the Pi's LAN IP. Without it, some routers or DHCP configurations may behave inconsistently with private-IP DNS records.
 
-Replace `192.168.1.100` with your Pi's actual LAN IP and `myaddarr.duckdns.org` with your actual hostname in the examples below.
-
-> **Why is this needed?** Without local DNS override, LAN clients query public DNS resolvers. Your DuckDNS A record points to a private LAN IP (`192.168.1.100`), and public DNS will return that private IP. Most of the time this works, but some routers have DNS forwarding quirks, apply aggressive TTL caching, or respond inconsistently for private-IP DNS records. A local DNS override bypasses public DNS entirely for this hostname, gives you instant and reliable resolution, and means the TV always finds the Pi directly on the LAN regardless of how your router handles public DNS queries.
+Replace `192.168.1.100` with your Pi's actual LAN IP and `myaddarr.duckdns.org` with your actual hostname.
 
 ### Option A — Pi-hole local DNS records
 
@@ -344,20 +396,18 @@ Make sure your router hands out the Pi's LAN IP as the DNS server for DHCP clien
 
 ### Confirm resolution from a client
 
-From another device on the LAN (e.g. from the Pi itself after the override is active):
-
 ```bash
-# Should return your Pi's LAN IP, not a public IP
+# Query the LAN DNS server directly (replace 192.168.1.100 with your Pi's LAN IP)
 dig +short myaddarr.duckdns.org @192.168.1.100
+# Should return your Pi's LAN IP
+
 # or using nslookup:
 nslookup myaddarr.duckdns.org 192.168.1.100
 ```
 
-From Android TV, you can verify with an app like "Network Analyzer" or simply try installing the add-on.
-
 ---
 
-## Step 6 — Configure the add-on
+## Step 7 — Configure the add-on
 
 In `/opt/stremio-addarr/.env`, set:
 
@@ -368,7 +418,7 @@ PUBLIC_BASE_URL=https://myaddarr.duckdns.org
 TARGET_CLIENT=android-tv
 ```
 
-Replace `myaddarr.duckdns.org` with your actual hostname. `PUBLIC_BASE_URL` must be the exact HTTPS origin with no trailing slash or path.
+Replace `myaddarr.duckdns.org` with your actual hostname. `PUBLIC_BASE_URL` must be the exact HTTPS origin with **no trailing slash** or path.
 
 Restart the add-on:
 
@@ -378,26 +428,29 @@ sudo systemctl restart stremio-addarr
 
 ---
 
-## Step 7 — Verify
+## Step 8 — Verify end to end
 
 ```bash
 # 1. Node app is running on loopback
 curl http://127.0.0.1:7010/healthz
 # Expected: {"ok":true,...}
 
-# 2. Caddy is proxying with a trusted cert (run from the Pi)
-curl -I https://myaddarr.duckdns.org/manifest.json
-# Expected: HTTP/2 200  (with no TLS errors)
+# 2. HTTPS via DNS bypass (bypasses LAN DNS to test Caddy/cert independently)
+curl -I --resolve myaddarr.duckdns.org:443:192.168.1.100 \
+  https://myaddarr.duckdns.org/manifest.json
+# Expected: HTTP/2 200
 
-# 3. Full status check
+# 3. Normal DNS-based access
+curl -I https://myaddarr.duckdns.org/manifest.json
 curl https://myaddarr.duckdns.org/status.json
 ```
 
-If step 2 shows a TLS error, see the Troubleshooting section below.
+> If step 2 (`--resolve`) succeeds but step 3 fails, the problem is your **LAN DNS** — the TV or client is
+> not using the local DNS override. Check your Pi-hole/dnsmasq config and DHCP settings.
 
 ---
 
-## Step 8 — Install the add-on in Stremio
+## Step 9 — Install the add-on in Stremio
 
 1. Open Stremio on your Android TV.
 2. Go to **Add-ons**.
@@ -414,51 +467,88 @@ The add-on appears as "Arr Status & Add" in your installed add-ons.
 
 ## Verification checklist
 
+- [ ] `caddy list-modules | grep dns.providers` lists the DuckDNS or deSEC plugin
+- [ ] `sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` exits cleanly
+- [ ] `systemctl status caddy` shows `active (running)`
+- [ ] `readlink -f /etc/systemd/system/caddy.service` does **not** print `/dev/null`
 - [ ] `curl http://127.0.0.1:7010/healthz` returns `{"ok":true,...}`
-- [ ] `curl -I https://myaddarr.duckdns.org/manifest.json` returns `HTTP/2 200` with no TLS errors
+- [ ] `curl -I --resolve myaddarr.duckdns.org:443:192.168.1.100 https://myaddarr.duckdns.org/manifest.json` returns `HTTP/2 200`
 - [ ] `dig +short myaddarr.duckdns.org @<Pi-LAN-IP>` returns the Pi's LAN IP
 - [ ] Stremio on Android TV successfully installs the add-on from `https://myaddarr.duckdns.org/manifest.json`
-- [ ] Status tiles appear when browsing movies/episodes in Stremio
 
 ---
 
 ## Troubleshooting
 
+### `Cannot edit caddy.service: unit is masked`
+
+**Symptom:** `systemctl edit caddy` or `systemctl enable caddy` reports `Unit caddy.service is masked`.
+
+The APT-managed unit left a symlink to `/dev/null`. Run the cleanup from Step 2:
+
+```bash
+sudo systemctl disable --now caddy caddy-api 2>/dev/null || true
+sudo systemctl unmask caddy caddy-api 2>/dev/null || true
+sudo rm -f /etc/systemd/system/caddy.service /etc/systemd/system/caddy-api.service
+sudo systemctl daemon-reload
+```
+
+Then recreate the unit file as shown in Step 2 and run `systemctl daemon-reload` again.
+
+### Wrong Caddy binary used by systemd
+
+**Symptom:** Caddy starts but the DNS plugin is missing, or `caddy list-modules` on the command line shows the plugin but the service fails.
+
+Check which binary systemd is actually using:
+
+```bash
+systemctl cat caddy | grep ExecStart
+# Compare with:
+command -v caddy
+```
+
+If the paths differ, update `ExecStart` in `/etc/systemd/system/caddy.service` to point to the correct binary (usually `/usr/local/bin/caddy`), then run `sudo systemctl daemon-reload && sudo systemctl restart caddy`.
+
+### Missing DNS plugin
+
+**Symptom:** `caddy list-modules | grep dns.providers` shows nothing; Caddyfile fails with `unknown directive: dns`.
+
+You have a Caddy binary without third-party DNS plugins (e.g. from APT). Replace it with the custom binary from Step 2. Confirm: `caddy list-modules | grep dns.providers.duckdns`.
+
+### Token or challenge failure
+
+**Symptom:** Caddy starts but cert issuance fails with `DNS challenge failed` or `unauthorized`.
+
+- Confirm: `sudo cat /etc/caddy/caddy.env` shows the correct token (e.g. `DUCKDNS_TOKEN=xxxxxxxx-xxxx-...`).
+- Confirm file permissions: `ls -l /etc/caddy/caddy.env` should show `-rw------- root root`.
+- Confirm the service loads it: `systemctl cat caddy | grep EnvironmentFile`.
+- After changing the token: `sudo systemctl restart caddy`.
+
+### Caddy serving an internal/self-signed certificate
+
+**Symptom:** `curl -I https://myaddarr.duckdns.org/manifest.json` shows `SSL certificate problem: self signed certificate`.
+
+- This usually means Caddy could not obtain a Let's Encrypt cert and fell back to a self-signed one.
+- Check Caddy logs: `sudo journalctl -u caddy -n 100`
+- Ensure the Caddyfile has `tls { dns duckdns ... }` and not `tls internal`.
+- Confirm the custom Caddy binary includes the DNS plugin (see above).
+- Clear Caddy's cert cache to force re-issuance (⚠️ removes all stored certs):
+  ```bash
+  sudo systemctl stop caddy
+  sudo rm -rf /var/lib/caddy/.local/share/caddy
+  sudo systemctl start caddy
+  sudo journalctl -u caddy -f  # watch for "certificate obtained successfully"
+  ```
+
 ### DNS resolution on LAN not working
 
-**Symptom:** `dig myaddarr.duckdns.org` returns wrong IP or no result.
+**Symptom:** `dig myaddarr.duckdns.org` returns the wrong IP or no result.
 
 - Confirm the DuckDNS dashboard shows the correct LAN IP.
 - If using Pi-hole: check **Local DNS → DNS Records** in the Pi-hole admin.
 - If using dnsmasq: check `/etc/dnsmasq.d/stremio-addarr.conf` has the correct address line. Run `sudo dnsmasq --test` to check config syntax.
 - Ensure your devices use Pi/dnsmasq as their DNS server. Check DHCP settings on your router.
 - Try flushing DNS cache on Android TV: **Settings → Device Preferences → Network → Reset** (or reboot the TV).
-
-### Certificate issuance failure
-
-**Symptom:** `sudo journalctl -u caddy` shows `ACME challenge failed` or `timeout`.
-
-- Verify your DuckDNS token is correct in `/etc/caddy/caddy.env`.
-- Check the `EnvironmentFile` drop-in is loaded: `systemctl cat caddy` should show `EnvironmentFile=/etc/caddy/caddy.env`.
-- Run: `sudo systemctl show caddy --property=Environment` to confirm the variable is set.
-- Let's Encrypt has rate limits. If you hit them, wait and retry. Use Let's Encrypt staging during testing by adding `acme_ca https://acme-staging-v02.api.letsencrypt.org/directory` inside the global Caddy block.
-- Confirm `dig +short TXT _acme-challenge.myaddarr.duckdns.org` shows a TXT record shortly after starting Caddy (Caddy sets this automatically).
-
-### Wrong Caddy build / missing DNS plugin
-
-**Symptom:** `caddy list-modules | grep dns.providers` shows nothing; Caddyfile fails to load with unknown directive `dns`.
-
-- You have the standard APT-installed Caddy binary without DNS plugins.
-- Replace it with the custom binary from Step 2. Confirm with: `caddy list-modules | grep dns.providers.duckdns`
-- If `/usr/bin/caddy` is the APT binary and you installed the custom one at `/usr/local/bin/caddy`, check which one systemd uses: `systemctl cat caddy | grep ExecStart`. Update the path if needed.
-
-### Wrong or missing token
-
-**Symptom:** Caddy starts but cert issuance fails with `DNS challenge failed` or `unauthorized`.
-
-- Confirm: `sudo cat /etc/caddy/caddy.env` shows the correct token line (e.g. `DUCKDNS_TOKEN=xxxxxxxx-xxxx-...`).
-- Confirm file permissions: `ls -l /etc/caddy/caddy.env` should show `rw-------`.
-- After changing the token, reload: `sudo systemctl reload caddy`.
 
 ### `PUBLIC_BASE_URL` mismatch
 
@@ -471,15 +561,7 @@ The add-on appears as "Arr Status & Add" in your installed add-ons.
   - ❌ `myaddarr.duckdns.org` (missing protocol)
 - After changing `.env`, restart the add-on: `sudo systemctl restart stremio-addarr`
 
-### Manifest loads locally but not in Stremio on Android TV
-
-**Symptom:** `curl -I https://myaddarr.duckdns.org/manifest.json` works from the Pi but Stremio fails to install.
-
-- Confirm the Android TV is using the local DNS server (Pi-hole or dnsmasq). Check TV network settings.
-- Confirm the TV can reach the Pi on LAN (try pinging the Pi's LAN IP from the TV via a network app).
-- Try opening `https://myaddarr.duckdns.org/manifest.json` in a browser on the TV — this tests DNS + TLS + connectivity in one step.
-
-### Add-on not responding (`127.0.0.1:7010` down or wrong port)
+### Add-on not listening on loopback
 
 **Symptom:** `curl http://127.0.0.1:7010/healthz` returns connection refused.
 
@@ -487,29 +569,17 @@ The add-on appears as "Arr Status & Add" in your installed add-ons.
 - Check logs: `sudo journalctl -u stremio-addarr -n 50`
 - Confirm `HOST=127.0.0.1` and `PORT=7010` in `.env` match the Caddy `reverse_proxy` target.
 
-### Caddy serving an internal/self-signed certificate
-
-**Symptom:** `curl -I https://myaddarr.duckdns.org/manifest.json` shows TLS error `SSL certificate problem: self signed certificate` or `unable to get local issuer certificate`.
-
-- This usually means Caddy could not obtain a Let's Encrypt cert and fell back to a self-signed one.
-- Check Caddy logs: `sudo journalctl -u caddy -n 100`
-- Ensure the Caddyfile has the `tls { dns duckdns ... }` block and not `tls internal`.
-- Confirm the custom Caddy binary is being used (see "Wrong Caddy build" above).
-- Delete Caddy's data directory to force re-issuance (⚠️ this removes all stored certs):
-  ```bash
-  sudo systemctl stop caddy
-  sudo rm -rf /var/lib/caddy/.local/share/caddy
-  sudo systemctl start caddy
-  sudo journalctl -u caddy -f  # watch for "certificate obtained successfully"
-  ```
-
 ---
 
 ## Android TV compatibility notes
 
 - Stock Android TV (API 24+) **only** trusts system CA certificates.
 - You **cannot** install custom CA roots without root access.
-- Stremio on Android TV will reject add-ons served over plain HTTP, IP addresses, `.local`/`.lan` hostnames, or self-signed/Caddy internal certificates.
-- Let's Encrypt certificates (obtained by Caddy via DNS-01) are trusted by all Android TV devices.
-- The hostname can resolve to a private LAN IP — that is fine. What matters is the certificate is signed by a trusted public CA.
-
+- The following are **not suitable** for the final add-on URL on stock Android TV:
+  - Plain `http://` URLs
+  - `https://192.168.x.x` (IP address)
+  - `.local` / `.lan` hostnames
+  - Self-signed certificates
+  - `tls internal` / private CA certificates
+- A **public CA certificate** (e.g. Let's Encrypt via DNS-01) on a **real DNS hostname** is required.
+- The hostname may resolve to a **private LAN IP** — that is fine. What matters is the certificate is signed by a trusted public CA.

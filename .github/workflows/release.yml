@@ -281,6 +281,25 @@ jobs:
             --latest
           echo "### 🚀 Release [${TAG}](https://github.com/${{ github.repository }}/releases/tag/${TAG}) published" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify published assets
+        if: steps.flags.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          echo "Verifying assets on release ${TAG}..."
+          ASSETS=$(gh release view "${TAG}" --json assets --jq '.assets[].name')
+          echo "Published assets:"
+          echo "$ASSETS"
+          echo "$ASSETS" | grep -qx 'stremio-addarr-install.tar.gz' \
+            || { echo "::error::Missing asset: stremio-addarr-install.tar.gz"; exit 1; }
+          echo "$ASSETS" | grep -qx 'stremio-addarr-install.tar.gz.sha256' \
+            || { echo "::error::Missing asset: stremio-addarr-install.tar.gz.sha256"; exit 1; }
+          echo "### ✅ Verified published assets" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$ASSETS" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Comment result on PR
         if: github.event_name == 'issue_comment'
         env:
