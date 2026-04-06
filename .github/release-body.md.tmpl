@@ -1,116 +1,39 @@
 # ${TAG}
 
-## Install
+## Install / Upgrade (canonical docs)
 
-**Download:** [`stremio-addarr-install.tar.gz`](https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz)
-**Checksum:** [`stremio-addarr-install.tar.gz.sha256`](https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz.sha256)
+Use the primary guides for complete and current steps:
 
----
+- Install/upgrade guide: [README.md](https://github.com/${REPO}/blob/${TAG}/README.md)
+- Hosting/TLS (Caddy + DuckDNS): [README_HOST.md](https://github.com/${REPO}/blob/${TAG}/README_HOST.md)
 
-## Quick Raspberry Pi install
+Release assets:
+- [`stremio-addarr-install.tar.gz`](https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz)
+- [`stremio-addarr-install.tar.gz.sha256`](https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz.sha256)
+
+Quick download:
 
 ```bash
-# Authenticate if you haven't already (required for private repos)
 gh auth login
-
-# Download the release assets
 gh release download --repo ${REPO} --tag ${TAG} --pattern 'stremio-addarr-install.tar.gz*'
 ```
 
-**Public repo / anonymous download only** (will fail on private repos):
-```bash
-curl -fL --retry 3 -o stremio-addarr-install.tar.gz \
-  https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz
-curl -fL --retry 3 -o stremio-addarr-install.tar.gz.sha256 \
-  https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz.sha256
-```
+---
 
-> ⚠️ If `file stremio-addarr-install.tar.gz` shows `ASCII text` or `tar` fails with `not in gzip format`,
-> the download returned an error page. Check the URL, release, or repo access and use `gh release download` instead.
+## Version notes
 
-```bash
-# Optional: verify checksum
-sha256sum -c stremio-addarr-install.tar.gz.sha256
-
-# Sanity-check before extraction
-file stremio-addarr-install.tar.gz | grep -q 'gzip' \
-  || { echo "ERROR: Downloaded file is not a valid gzip archive. Check the URL, release, or repo access."; exit 1; }
-
-# Extract to /opt/stremio-addarr (files owned by pi)
-sudo mkdir -p /opt/stremio-addarr
-sudo tar -xzf stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
-sudo chown -R pi:pi /opt/stremio-addarr
-
-# Install production dependencies
-cd /opt/stremio-addarr
-npm ci --omit=dev
-
-# Configure
-cp .env.example .env && nano .env
-
-# Install and start systemd service
-sudo cp deploy/stremio-addarr.service.example /etc/systemd/system/stremio-addarr.service
-sudo systemctl daemon-reload && sudo systemctl enable --now stremio-addarr
-```
-
-> Replace `pi` with your actual service account username if different.
-> See [README.md](https://github.com/${REPO}/blob/${TAG}/README.md) for the full setup guide.
+- Add version-specific changes here.
+- If config keys changed, list required `.env` updates here.
+- If service account expectations changed, state required `User=` / `Group=` updates here.
 
 ---
 
-## Hosting (Android TV compatible)
+## Minimal verification checklist
 
-| Mode | Description |
-|------|-------------|
-| **DuckDNS + Caddy + Let's Encrypt (DNS-01)** | Default recommended. Free dynamic DNS, automatic trusted HTTPS via Caddy DNS-01 challenge. No router port forwarding required — the service stays LAN-only. |
-| **Tailscale Funnel** | No port forwarding needed. Public HTTPS via `*.ts.net`. |
+After install or upgrade, verify in this order:
 
-See the full hosting guide: [README_HOST.md](https://github.com/${REPO}/blob/${TAG}/README_HOST.md)
-
----
-
-## Install in Stremio
-
-Once the add-on is running and your hostname resolves, open this URL on your Android TV or any Stremio client:
-
-```
-https://YOUR-HOSTNAME/manifest.json
-```
-
----
-
-## Upgrade from a previous release
-
-**Recommended (works for public and private repos):**
-```bash
-gh release download --repo ${REPO} --tag ${TAG} --pattern 'stremio-addarr-install.tar.gz*' --dir ~
-```
-
-**Public repo / anonymous download only:**
-```bash
-curl -fL --retry 3 -o ~/stremio-addarr-install.tar.gz \
-  https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz
-```
-
-```bash
-# Sanity-check before extraction
-file ~/stremio-addarr-install.tar.gz | grep -q 'gzip' \
-  || { echo "ERROR: Downloaded file is not a valid gzip archive. Check the URL, release, or repo access."; exit 1; }
-
-# Extract over existing installation (preserves your .env)
-sudo tar -xzf ~/stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
-sudo chown -R pi:pi /opt/stremio-addarr
-cd /opt/stremio-addarr
-npm ci --omit=dev
-sudo systemctl restart stremio-addarr
-
-# Verify
-curl http://127.0.0.1:7010/healthz
-```
-
----
-
-## Documentation
-
-- [README.md](https://github.com/${REPO}/blob/${TAG}/README.md) — full setup guide
-- [README_HOST.md](https://github.com/${REPO}/blob/${TAG}/README_HOST.md) — hosting setup (DuckDNS + Caddy and Tailscale Funnel)
+- [ ] `sudo systemctl is-active stremio-addarr` returns `active`
+- [ ] `curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null` succeeds
+- [ ] `curl -fI https://YOUR_HOSTNAME/manifest.json` returns `200`
+- [ ] `PUBLIC_BASE_URL` exactly matches the Caddy hostname (`https://YOUR_HOSTNAME`)
+- [ ] Stremio installs from `https://YOUR_HOSTNAME/manifest.json`
