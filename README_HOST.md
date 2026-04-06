@@ -68,7 +68,8 @@ You will need:
 > systemctl is-active pihole-FTL || true   # Pi-hole
 > systemctl is-active dnsmasq || true      # dnsmasq
 > ```
-> If you already run Pi-hole on your network, use that. Otherwise, install dnsmasq on the Pi itself.
+> If you already run Pi-hole on your network, use that. Otherwise, install dnsmasq on the Pi itself:
+> `sudo apt install -y dnsmasq` (see Step 6 for the full dnsmasq setup).
 
 ---
 
@@ -213,6 +214,7 @@ sudo install -d -m 0755 -o caddy -g caddy /var/lib/caddy
 
 ```bash
 BIN="$(command -v caddy)"
+# Confirm this is the custom binary at /usr/local/bin/caddy, not the APT one at /usr/bin/caddy
 echo "$BIN"
 
 sudo tee /etc/systemd/system/caddy.service >/dev/null <<EOF
@@ -290,8 +292,9 @@ EOF
 
 See also `Caddyfile.duckdns.example` in the repo root for a copy you can use as a reference.
 
-> **Advanced:** If you use a delegated DuckDNS subdomain for the ACME DNS-01 challenge, set
-> `override_domain` inside the `dns duckdns` block. See `Caddyfile.duckdns.example` for details.
+> **Advanced:** If you use a delegated DuckDNS subdomain for the ACME DNS-01 challenge (where a
+> separate subdomain is delegated to handle the `_acme-challenge` TXT record), set `override_domain`
+> inside the `dns duckdns` block. See `Caddyfile.duckdns.example` for details.
 
 ### For deSEC
 
