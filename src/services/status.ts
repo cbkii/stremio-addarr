@@ -20,7 +20,7 @@ function truncate(s: string, maxLen: number): string {
 function movieLine(title?: string, year?: number): string {
   if (!title) return '📽 Not in Radarr';
   const yearStr = year ? ` (${year})` : '';
-  const maxTitle = 32 - 2 - yearStr.length; // 2 = len('📽 ')
+  const maxTitle = 32 - 3 - yearStr.length; // 3 = '📽 '.length (emoji is 2 UTF-16 units + space)
   return `📽 ${truncate(title, maxTitle)}${yearStr}`;
 }
 
@@ -29,7 +29,7 @@ function movieLine(title?: string, year?: number): string {
  */
 function seriesLine(title?: string): string {
   if (!title) return '📺 Not in Sonarr';
-  return `📺 ${truncate(title, 30)}`; // 2 = len('📺 '), so title ≤ 30
+  return `📺 ${truncate(title, 29)}`; // 3 = '📺 '.length (emoji is 2 UTF-16 units + space), title ≤ 29
 }
 
 /**
