@@ -155,7 +155,6 @@ export function createApp(config: AppConfig) {
       } else {
         await statusService.triggerSearch(parsed);
       }
-      statusService.invalidateStatusCaches();
       logger.info('Action completed', { action, kind, encodedId: req.params.encodedId });
     } catch (error) {
       // Log the failure but always respond with a valid HLS stream so Stremio

@@ -10,8 +10,10 @@ import { SonarrClient } from './sonarr.js';
  * Truncate a string to at most maxLen codepoints, appending '…' if trimmed.
  */
 function truncate(s: string, maxLen: number): string {
-  if (s.length <= maxLen) return s;
-  return s.slice(0, maxLen - 1) + '…';
+  const cps = Array.from(s);
+  if (cps.length <= maxLen) return s;
+  if (maxLen <= 1) return '…';
+  return cps.slice(0, maxLen - 1).join('') + '…';
 }
 
 /**
