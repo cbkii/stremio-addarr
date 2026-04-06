@@ -1,0 +1,40 @@
+# Caddyfile for stremio-addarr — deSEC DNS-01 (no port forwarding required)
+#
+# IMPORTANT: As of mid-2024, deSEC has suspended NEW free dedyn.io subdomain
+# registrations. This config is for existing dedyn.io users or users who bring
+# their own domain hosted on deSEC. New users should use DuckDNS instead
+# (see Caddyfile.duckdns.example).
+#
+# REQUIREMENTS:
+#   - Custom Caddy binary with the deSEC DNS provider plugin.
+#     The standard APT caddy package does NOT include DNS plugins.
+#     Get the binary from https://caddyserver.com/download
+#       (select the github.com/caddy-dns/desec plugin)
+#     or build with: xcaddy build --with github.com/caddy-dns/desec
+#     Verify: caddy list-modules | grep dns.providers.desec
+#
+#   - deSEC API token stored in /etc/caddy/caddy.env:
+#       DESEC_TOKEN=your-desec-api-token-here
+#     File must be owned root:caddy with mode 600.
+#     Load via systemd drop-in (see README_HOST.md Step 3).
+#
+#   - Your domain or subdomain must be managed by deSEC's nameservers.
+#
+#   - Local DNS override so LAN clients resolve the hostname to the Pi's LAN IP.
+#     See README_HOST.md Step 5.
+#
+# Replace "stremio.example.com" with your actual deSEC-hosted domain/subdomain.
+
+stremio.example.com {
+    # Obtain a publicly trusted Let's Encrypt certificate via DNS-01.
+    # Caddy sets a temporary TXT record using the deSEC API.
+    # No inbound ports need to be open.
+    tls {
+        dns desec {
+            token {env.DESEC_TOKEN}
+        }
+    }
+
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:7010
+}

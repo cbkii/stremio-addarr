@@ -1,0 +1,34 @@
+# Caddyfile for stremio-addarr — DuckDNS DNS-01 (no port forwarding required)
+#
+# REQUIREMENTS:
+#   - Custom Caddy binary with the DuckDNS DNS provider plugin.
+#     The standard APT caddy package does NOT include DNS plugins.
+#     Get the binary from https://caddyserver.com/download
+#       (select the github.com/caddy-dns/duckdns plugin)
+#     or build with: xcaddy build --with github.com/caddy-dns/duckdns
+#     Verify: caddy list-modules | grep dns.providers.duckdns
+#
+#   - DuckDNS token stored in /etc/caddy/caddy.env:
+#       DUCKDNS_TOKEN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+#     File must be owned root:caddy with mode 600.
+#     Load via systemd drop-in (see README_HOST.md Step 3).
+#
+#   - DuckDNS A record for your subdomain must exist (LAN IP is fine).
+#     Set it in the DuckDNS dashboard: https://www.duckdns.org
+#
+#   - Local DNS override so LAN clients resolve the hostname to the Pi's LAN IP.
+#     See README_HOST.md Step 5.
+#
+# Replace "myaddarr" with your actual DuckDNS subdomain name.
+
+myaddarr.duckdns.org {
+    # Obtain a publicly trusted Let's Encrypt certificate via DNS-01.
+    # Caddy sets a temporary TXT record at _acme-challenge.myaddarr.duckdns.org
+    # using the DuckDNS API. No inbound ports need to be open.
+    tls {
+        dns duckdns {env.DUCKDNS_TOKEN}
+    }
+
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:7010
+}
