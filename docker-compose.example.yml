@@ -5,10 +5,17 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Override HOST so the app listens on all container interfaces.
+      # .env sets HOST=127.0.0.1 (correct for bare-metal), but inside a
+      # container that would bind to the container loopback only, making
+      # Docker's port publishing unable to reach the app.
+      # LAN privacy is enforced by the host-side bind below (127.0.0.1:7010),
+      # not by the in-container bind address.
+      HOST: "0.0.0.0"
     ports:
-      # Bind to loopback only — Caddy (running on the host) reverse-proxies to
-      # this port. Binding to 127.0.0.1 prevents the app from being directly
-      # reachable on the LAN without going through Caddy's TLS termination.
+      # Publish only to the host loopback — Caddy (on the host) reverse-proxies
+      # to 127.0.0.1:7010. The app is not directly reachable on the LAN.
       - "127.0.0.1:7010:7010"
     # If Radarr/Sonarr run on the host or another LAN device,
     # use host networking or ensure container can reach them:
