@@ -68,13 +68,25 @@ export class JsonHttpClient {
 
       const text = await response.text();
       if (!response.ok) {
+        let errorCategory: string;
+        if (response.status === 401 || response.status === 403) {
+          errorCategory = 'auth_error';
+        } else if (response.status === 404) {
+          errorCategory = 'not_found';
+        } else if (response.status === 429) {
+          errorCategory = 'rate_limited';
+        } else if (response.status >= 500) {
+          errorCategory = 'server_error';
+        } else {
+          errorCategory = `http_${response.status}`;
+        }
         this.options.logger?.warn('arr response error', {
           service,
           method,
           path,
           status: response.status,
           durationMs: Date.now() - start,
-          errorCategory: response.status === 401 || response.status === 403 ? 'auth' : 'http_error'
+          errorCategory
         });
         throw new HttpError(
           `Request failed with status ${response.status}`,

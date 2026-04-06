@@ -397,7 +397,9 @@ Common causes and fixes:
 | `timeout`                        | Radarr/Sonarr took too long to respond              | Increase `REQUEST_TIMEOUT_MS`; check Arr load      |
 | `auth_error`                     | Wrong API key                                       | Verify `RADARR_API_KEY` / `SONARR_API_KEY` in `.env` |
 | `unreachable`                    | Network/firewall blocked or wrong base URL          | Check `RADARR_BASE_URL` / `SONARR_BASE_URL`        |
-| `http_404`                       | Wrong base URL path                                 | Remove trailing path segments from base URL        |
+| `not_found`                      | Wrong base URL path                                 | Remove trailing path segments from base URL        |
+| `rate_limited`                   | Too many requests to Arr                            | Increase `STATUS_CACHE_TTL_MS`                     |
+| `server_error`                   | Arr returned 5xx                                    | Check Arr service health/logs                      |
 
 ---
 

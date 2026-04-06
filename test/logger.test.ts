@@ -8,8 +8,8 @@ async function captureOutput(fn: () => Promise<void> | void): Promise<{ stdout: 
   const stderr: string[] = [];
   const origLog = console.log.bind(console);
   const origErr = console.error.bind(console);
-  console.log = (...args: unknown[]) => stdout.push(String(args[0]));
-  console.error = (...args: unknown[]) => stderr.push(String(args[0]));
+  console.log = (...args: unknown[]) => stdout.push(args.map(String).join(' '));
+  console.error = (...args: unknown[]) => stderr.push(args.map(String).join(' '));
   try {
     await fn();
   } finally {
