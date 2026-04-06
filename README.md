@@ -253,6 +253,7 @@ Set `LOG_LEVEL` in `.env`:
 | `warn`  | Arr API errors, timeouts, auth failures, add/search warnings   |
 | `info`  | Every HTTP request + Arr add/search operations (recommended)   |
 | `debug` | All of the above + individual outgoing Arr API call timings    |
+| `none`  | Silence all log output                                         |
 
 For production Raspberry Pi use `LOG_LEVEL=info`. Switch to `debug` only while investigating a problem.
 
@@ -340,9 +341,11 @@ Stremio on Android TV does **not** expose an in-app log. There is no practical w
 # Get addon logs for the last 5 minutes after a failed playback
 sudo journalctl -u stremio-addarr --since "5 minutes ago" --no-pager -o cat | jq .
 
-# Or filter for stream handler calls only
+# Filter for completed stream handler calls (info level — visible at LOG_LEVEL=info or lower)
 sudo journalctl -u stremio-addarr --since "5 minutes ago" --no-pager -o cat \
-  | jq 'select(.message == "stream handler complete" or .message == "stream handler start")'
+  | jq 'select(.message == "stream handler complete")'
+
+# Note: "stream handler start" is logged at debug level and only visible with LOG_LEVEL=debug
 ```
 
 ### ADB log collection (advanced, requires USB debug mode on Android TV)
