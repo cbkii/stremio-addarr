@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import express from 'express';
 import sdk from 'stremio-addon-sdk';
 import { loadConfig, validateConfig, type AppConfig } from './config.js';
@@ -34,9 +35,12 @@ export function createApp(config: AppConfig) {
   app.disable('x-powered-by');
 
   app.use((req, res, next) => {
+    const reqId = randomUUID();
+    res.locals['reqId'] = reqId;
     const start = Date.now();
     res.on('finish', () => {
       logger.info('request', {
+        reqId,
         method: req.method,
         path: req.path,
         status: res.statusCode,
@@ -134,8 +138,8 @@ export function createApp(config: AppConfig) {
     const action = req.params.action;
     const kind = req.params.kind;
     const encodedId = req.params.encodedId;
-    // Capture the request-correlation ID set by the logging middleware (PR#13)
-    // so it can be included in background log entries emitted after the response.
+    // Capture the correlation ID set by the request-logging middleware above so
+    // it can be included in background log entries emitted after the response.
     const reqId = typeof res.locals['reqId'] === 'string' ? res.locals['reqId'] : undefined;
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');

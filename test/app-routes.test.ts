@@ -123,8 +123,12 @@ test('search action route triggers Radarr search and returns HLS stream', async 
     assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
 
     // The action responds immediately; Arr operations run in the background.
-    // Wait for the background command POST to be observed before asserting.
-    await commandPosted;
+    // Race against a 5 s timeout so the test fails fast on regression instead
+    // of hanging CI indefinitely.
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timed out waiting for background command POST')), 5000)
+    );
+    await Promise.race([commandPosted, timeout]);
     assert.ok(called.some((entry) => entry.path === '/api/v3/command' && entry.method === 'POST'));
   });
 });
@@ -133,18 +137,31 @@ test('add-search action route performs add and search on Sonarr', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
 
+  // resolveCommandPosted is assigned synchronously inside the Promise constructor.
+  let resolveCommandPosted!: () => void;
+  const commandPosted = new Promise<void>((resolve) => { resolveCommandPosted = resolve; });
+
+  // After POST /api/v3/series the mock must reflect the added series so that the
+  // subsequent triggerSearch → findSeriesByImdbId call (on the cleared cache)
+  // succeeds and proceeds to post the search command.
+  let seriesAdded = false;
+
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const parsed = new URL(url);
     const path = parsed.pathname + (parsed.search || '');
 
     if (path === '/api/v3/series' && (init?.method === 'GET' || !init?.method)) {
-      return new Response('[]', { status: 200 });
+      const list = seriesAdded
+        ? '[{"id":777,"imdbId":"tt7654321","tvdbId":777,"monitored":true,"title":"Show"}]'
+        : '[]';
+      return new Response(list, { status: 200 });
     }
     if (path.startsWith('/api/v3/series/lookup?term=')) {
       return new Response('[{"title":"Show","imdbId":"tt7654321","tvdbId":777}]', { status: 200 });
     }
     if (path === '/api/v3/series' && init?.method === 'POST') {
+      seriesAdded = true;
       return new Response('{}', { status: 201 });
     }
     if (path.startsWith('/api/v3/episode?seriesId=')) {
@@ -154,6 +171,7 @@ test('add-search action route performs add and search on Sonarr', async () => {
       return new Response('{"records":[]}', { status: 200 });
     }
     if (path === '/api/v3/command' && init?.method === 'POST') {
+      resolveCommandPosted();
       return new Response('{}', { status: 201 });
     }
     if (path === '/api/v3/system/status') {
@@ -170,6 +188,13 @@ test('add-search action route performs add and search on Sonarr', async () => {
     assert.equal(res.status, 200);
     const text = await res.text();
     assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
+
+    // The action responds immediately; wait for background Arr ops to finish
+    // before the test ends and afterEach restores globalThis.fetch.
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timed out waiting for background command POST')), 5000)
+    );
+    await Promise.race([commandPosted, timeout]);
   });
 });
 
@@ -178,16 +203,36 @@ test('series add-search action route triggers Sonarr add and search', async () =
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
 
+  // resolveCommandPosted is assigned synchronously inside the Promise constructor.
+  let resolveCommandPosted!: () => void;
+  const commandPosted = new Promise<void>((resolve) => { resolveCommandPosted = resolve; });
+
+  // After POST /api/v3/series the mock must reflect the added series so that the
+  // subsequent triggerSearch → findSeriesByImdbId call (on the cleared cache)
+  // succeeds and proceeds to post the search command.
+  let seriesAdded = false;
+
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const parsed = new URL(url);
     const path = parsed.pathname + (parsed.search || '');
 
-    if (path === '/api/v3/series' && (init?.method === 'GET' || !init?.method)) return new Response('[]', { status: 200 });
+    if (path === '/api/v3/series' && (init?.method === 'GET' || !init?.method)) {
+      const list = seriesAdded
+        ? '[{"id":111,"imdbId":"tt1111111","tvdbId":111,"monitored":true,"title":"Show"}]'
+        : '[]';
+      return new Response(list, { status: 200 });
+    }
     if (path.startsWith('/api/v3/series/lookup?term=')) return new Response('[{"title":"Show","imdbId":"tt1111111","tvdbId":111}]', { status: 200 });
-    if (path === '/api/v3/series' && init?.method === 'POST') return new Response('{}', { status: 201 });
+    if (path === '/api/v3/series' && init?.method === 'POST') {
+      seriesAdded = true;
+      return new Response('{}', { status: 201 });
+    }
     if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
-    if (path === '/api/v3/command' && init?.method === 'POST') return new Response('{}', { status: 201 });
+    if (path === '/api/v3/command' && init?.method === 'POST') {
+      resolveCommandPosted();
+      return new Response('{}', { status: 201 });
+    }
 
     return new Response('[]', { status: 200 });
   }) as typeof fetch;
@@ -198,5 +243,12 @@ test('series add-search action route triggers Sonarr add and search', async () =
     assert.equal(res.status, 200);
     const text = await res.text();
     assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
+
+    // The action responds immediately; wait for background Arr ops to finish
+    // before the test ends and afterEach restores globalThis.fetch.
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timed out waiting for background command POST')), 5000)
+    );
+    await Promise.race([commandPosted, timeout]);
   });
 });
