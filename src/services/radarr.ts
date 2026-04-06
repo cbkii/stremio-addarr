@@ -35,7 +35,7 @@ export class RadarrClient {
         return { state: 'not_added' };
       }
       if (existing.hasFile || existing.movieFile) {
-        return { state: 'downloaded', movieId: existing.id, monitored: existing.monitored, hasFile: true };
+        return { state: 'downloaded', movieId: existing.id, monitored: existing.monitored, hasFile: true, title: existing.title, year: existing.year };
       }
 
       let isDownloading = false;
@@ -45,12 +45,12 @@ export class RadarrClient {
         isDownloading = false;
       }
       if (isDownloading) {
-        return { state: 'downloading', movieId: existing.id, monitored: existing.monitored, hasFile: false };
+        return { state: 'downloading', movieId: existing.id, monitored: existing.monitored, hasFile: false, title: existing.title, year: existing.year };
       }
       if (existing.monitored) {
-        return { state: 'missing', movieId: existing.id, monitored: true, hasFile: false };
+        return { state: 'missing', movieId: existing.id, monitored: true, hasFile: false, title: existing.title, year: existing.year };
       }
-      return { state: 'added', movieId: existing.id, monitored: false, hasFile: false };
+      return { state: 'added', movieId: existing.id, monitored: false, hasFile: false, title: existing.title, year: existing.year };
     } catch (error) {
       return {
         state: 'unavailable',

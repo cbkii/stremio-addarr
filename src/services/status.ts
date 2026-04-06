@@ -4,6 +4,49 @@ import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
 
+// --- Tile formatting helpers ---
+
+/**
+ * Truncate a string to at most maxLen codepoints, appending '…' if trimmed.
+ */
+function truncate(s: string, maxLen: number): string {
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen - 1) + '…';
+}
+
+/**
+ * First line of a movie tile description: emoji + title + year, ≤32 chars.
+ */
+function movieLine(title?: string, year?: number): string {
+  if (!title) return '📽 Not in Radarr';
+  const yearStr = year ? ` (${year})` : '';
+  const maxTitle = 32 - 2 - yearStr.length; // 2 = len('📽 ')
+  return `📽 ${truncate(title, maxTitle)}${yearStr}`;
+}
+
+/**
+ * First line of a series tile description: emoji + title, ≤32 chars.
+ */
+function seriesLine(title?: string): string {
+  if (!title) return '📺 Not in Sonarr';
+  return `📺 ${truncate(title, 30)}`; // 2 = len('📺 '), so title ≤ 30
+}
+
+/**
+ * Season+episode label e.g. 'S01E02', or '' if not provided.
+ */
+function epLabel(season?: number, episode?: number): string {
+  if (season == null || episode == null) return '';
+  return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+}
+
+/**
+ * Join up to 3 non-empty lines into a newline-separated description.
+ */
+function desc(...lines: string[]): string {
+  return lines.filter(Boolean).slice(0, 3).join('\n');
+}
+
 export class ArrStatusService {
   private readonly radarr: RadarrClient;
   private readonly sonarr: SonarrClient;
@@ -33,52 +76,101 @@ export class ArrStatusService {
 
   private buildMovieTiles(status: ArrMovieStatus, parsed: ParsedStremioId): StatusTile[] {
     switch (status.state) {
-      case 'downloaded':
-        return [{ name: '✅ Downloaded', externalUris: this.buildKodiExternalUris() }];
+      case 'downloaded': {
+        const kodiUris = this.buildKodiExternalUris();
+        return [{
+          name: '✅\nDown\nload',
+          description: desc(
+            movieLine(status.title, status.year),
+            '✅ File ready',
+            kodiUris.length > 0 ? '▶ Open in Kodi' : ''
+          ),
+          externalUris: kodiUris
+        }];
+      }
       case 'downloading':
-        return [{ name: '⁉️⏱️ Downloading for Kodi' }];
+        return [{
+          name: '⏱️\nDLing',
+          description: desc(movieLine(status.title, status.year), '⏱ Downloading now')
+        }];
       case 'missing':
-        return [{ name: '⭕🔍 Search on Radarr', url: this.buildActionLink('search', parsed), behaviorHints: { notWebReady: true }, isAction: true }];
+        return [{
+          name: '🔍\nSrch\nRadar',
+          description: desc(movieLine(status.title, status.year), '⭕ Monitored, missing', '🔍 Tap to search'),
+          url: this.buildActionLink('search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'added':
-        return [{ name: '⭕🔍 Search on Radarr', url: this.buildActionLink('search', parsed), behaviorHints: { notWebReady: true }, isAction: true }];
+        return [{
+          name: '🔍\nSrch\nRadar',
+          description: desc(movieLine(status.title, status.year), '⭕ Added, unmonitored', '🔍 Tap to search'),
+          url: this.buildActionLink('search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'not_added':
-        return [
-          {
-            name: '‼️➕🔍 Add+Search Radarr',
-            url: this.buildActionLink('add-search', parsed),
-            behaviorHints: { notWebReady: true },
-            isAction: true
-          }
-        ];
+        return [{
+          name: '➕\nAdd+\nRadar',
+          description: desc('📽 Not in Radarr', '➕ Tap to add+search'),
+          url: this.buildActionLink('add-search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'unavailable':
       default:
-        return [{ name: '🛑 Arr Down', description: 'Radarr unreachable' }];
+        return [{ name: '🛑\nArr\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config') }];
     }
   }
 
   private buildSeriesTiles(status: ArrEpisodeStatus, parsed: ParsedStremioId): StatusTile[] {
+    const ep = epLabel(parsed.season, parsed.episode);
     switch (status.state) {
-      case 'episode_downloaded':
-        return [{ name: '✅ Downloaded', externalUris: this.buildKodiExternalUris() }];
+      case 'episode_downloaded': {
+        const kodiUris = this.buildKodiExternalUris();
+        return [{
+          name: '✅\nDown\nload',
+          description: desc(
+            seriesLine(status.title),
+            ep ? `✅ ${ep} ready` : '✅ File ready',
+            kodiUris.length > 0 ? '▶ Open in Kodi' : ''
+          ),
+          externalUris: kodiUris
+        }];
+      }
       case 'episode_downloading':
-        return [{ name: '⁉️⏱️ Downloading for Kodi' }];
+        return [{
+          name: '⏱️\nDLing',
+          description: desc(seriesLine(status.title), ep ? `⏱ ${ep} downloading` : '⏱ Downloading now')
+        }];
       case 'episode_missing':
-        return [{ name: '⭕🔍 Search on Sonarr', url: this.buildActionLink('search', parsed), behaviorHints: { notWebReady: true }, isAction: true }];
+        return [{
+          name: '🔍\nSrch\nSonar',
+          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🔍 Tap to search'),
+          url: this.buildActionLink('search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'series_added':
       case 'episode_monitored':
-        return [{ name: '⭕🔍 Search on Sonarr', url: this.buildActionLink('search', parsed), behaviorHints: { notWebReady: true }, isAction: true }];
+        return [{
+          name: '🔍\nSrch\nSonar',
+          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🔍 Tap to search'),
+          url: this.buildActionLink('search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'series_not_added':
-        return [
-          {
-            name: '‼️➕🔍 Add+Search Sonarr',
-            url: this.buildActionLink('add-search', parsed),
-            behaviorHints: { notWebReady: true },
-            isAction: true
-          }
-        ];
+        return [{
+          name: '➕\nAdd+\nSonar',
+          description: desc('📺 Not in Sonarr', '➕ Tap to add+search'),
+          url: this.buildActionLink('add-search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'unavailable':
       default:
-        return [{ name: '🛑 Arr Down', description: 'Sonarr unreachable' }];
+        return [{ name: '🛑\nArr\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config') }];
     }
   }
 
@@ -97,7 +189,7 @@ export class ArrStatusService {
       }
       const health = await this.getServiceHealth();
       if (!health.radarr.reachable) {
-        return [{ name: '🛑 Arr Down', description: 'Radarr unreachable' }];
+        return [{ name: '🛑\nArr\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config') }];
       }
       const status = await this.radarr.getMovieStatus(parsed.imdbId);
       return this.buildMovieTiles(status, parsed);
@@ -109,7 +201,7 @@ export class ArrStatusService {
 
     const health = await this.getServiceHealth();
     if (!health.sonarr.reachable) {
-      return [{ name: '🛑 Arr Down', description: 'Sonarr unreachable' }];
+      return [{ name: '🛑\nArr\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config') }];
     }
 
     const status = await this.sonarr.getEpisodeStatus(parsed.imdbId, parsed.season, parsed.episode);

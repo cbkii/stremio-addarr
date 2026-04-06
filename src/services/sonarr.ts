@@ -43,7 +43,7 @@ export class SonarrClient {
       }
 
       if (season == null || episode == null) {
-        return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored };
+        return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, title: series.title };
       }
 
       const episodes = await this.listEpisodes(series.id);
@@ -52,11 +52,11 @@ export class SonarrClient {
       );
 
       if (!match) {
-        return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, reason: 'Episode not found in Sonarr yet.' };
+        return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, reason: 'Episode not found in Sonarr yet.', title: series.title };
       }
 
       if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
-        return { state: 'episode_downloaded', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: true };
+        return { state: 'episode_downloaded', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: true, title: series.title };
       }
 
       let isDownloading = false;
@@ -66,12 +66,12 @@ export class SonarrClient {
         isDownloading = false;
       }
       if (isDownloading) {
-        return { state: 'episode_downloading', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: false };
+        return { state: 'episode_downloading', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: false, title: series.title };
       }
       if (match.monitored) {
-        return { state: 'episode_missing', seriesId: series.id, episodeId: match.id, monitored: true, hasFile: false };
+        return { state: 'episode_missing', seriesId: series.id, episodeId: match.id, monitored: true, hasFile: false, title: series.title };
       }
-      return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, hasFile: false };
+      return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, hasFile: false, title: series.title };
     } catch (error) {
       return {
         state: 'unavailable',
