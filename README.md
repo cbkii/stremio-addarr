@@ -53,13 +53,37 @@ See [README_HOST.md](README_HOST.md) for the full step-by-step setup guide.
 
 ## 3 — Quick install from release
 
-```bash
-# Download the latest release
-curl -LO https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz
+**Recommended (works for public and private repos):**
 
+```bash
+# Authenticate if you haven't already (required for private repos)
+gh auth login
+
+# Download the latest release assets
+gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-install.tar.gz*'
+```
+
+**Alternative — public repo / anonymous download only** (will fail silently on private repos):
+
+```bash
+curl -fL --retry 3 -o stremio-addarr-install.tar.gz \
+  https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz
+curl -fL --retry 3 -o stremio-addarr-install.tar.gz.sha256 \
+  https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz.sha256
+```
+
+> ⚠️ **Troubleshooting downloads:** If `file stremio-addarr-install.tar.gz` shows `ASCII text` or
+> `tar` complains `gzip: stdin: not in gzip format`, the download returned an error page instead of
+> the archive. This means the URL is wrong, the release does not exist yet, or the repo is private
+> and authentication is needed. Use `gh release download` (above) to fix this.
+
+```bash
 # Optional: verify checksum
-curl -LO https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz.sha256
 sha256sum -c stremio-addarr-install.tar.gz.sha256
+
+# Sanity-check before extraction (guards against a silent 404 download)
+file stremio-addarr-install.tar.gz | grep -q 'gzip' \
+  || { echo "ERROR: Downloaded file is not a valid gzip archive. Check the URL, release, or repo access."; exit 1; }
 
 # Extract to /opt/stremio-addarr
 sudo mkdir -p /opt/stremio-addarr
@@ -276,10 +300,24 @@ No secrets are exposed in any diagnostic output.
 
 ## 14 — Upgrade from a previous release
 
+**Recommended (works for public and private repos):**
+
 ```bash
 # Download the new release to your home directory
-curl -L https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz \
-  -o ~/stremio-addarr-install.tar.gz
+gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-install.tar.gz*' --dir ~
+```
+
+**Alternative — public repo / anonymous download only:**
+
+```bash
+curl -fL --retry 3 -o ~/stremio-addarr-install.tar.gz \
+  https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz
+```
+
+```bash
+# Sanity-check before extraction
+file ~/stremio-addarr-install.tar.gz | grep -q 'gzip' \
+  || { echo "ERROR: Downloaded file is not a valid gzip archive. Check the URL, release, or repo access."; exit 1; }
 
 # Extract over existing installation (preserves your .env)
 sudo tar -xzf ~/stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
@@ -350,10 +388,17 @@ Progress is reported via emoji reactions (🚀 on start, 👎 if unauthorised) a
 
 ### Stable download URL
 
-Users can always download the latest release at:
+The preferred way to download the latest release is:
+```bash
+gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-install.tar.gz*'
+```
+
+For public repos, anonymous curl also works:
 ```
 https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz
 ```
+
+> ℹ️ The bare URL is public-repo-only. Use `gh release download` for private repos or when authentication is required.
 
 ---
 

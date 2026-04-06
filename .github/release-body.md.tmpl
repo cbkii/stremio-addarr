@@ -10,12 +10,31 @@
 ## Quick Raspberry Pi install
 
 ```bash
-# Download
-curl -LO https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz
+# Authenticate if you haven't already (required for private repos)
+gh auth login
 
+# Download the release assets
+gh release download --repo ${REPO} --tag ${TAG} --pattern 'stremio-addarr-install.tar.gz*'
+```
+
+**Public repo / anonymous download only** (will fail on private repos):
+```bash
+curl -fL --retry 3 -o stremio-addarr-install.tar.gz \
+  https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz
+curl -fL --retry 3 -o stremio-addarr-install.tar.gz.sha256 \
+  https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz.sha256
+```
+
+> ⚠️ If `file stremio-addarr-install.tar.gz` shows `ASCII text` or `tar` fails with `not in gzip format`,
+> the download returned an error page. Check the URL, release, or repo access and use `gh release download` instead.
+
+```bash
 # Optional: verify checksum
-curl -LO https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz.sha256
 sha256sum -c stremio-addarr-install.tar.gz.sha256
+
+# Sanity-check before extraction
+file stremio-addarr-install.tar.gz | grep -q 'gzip' \
+  || { echo "ERROR: Downloaded file is not a valid gzip archive. Check the URL, release, or repo access."; exit 1; }
 
 # Extract to /opt/stremio-addarr (files owned by pi)
 sudo mkdir -p /opt/stremio-addarr
@@ -43,7 +62,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now stremio-addarr
 
 | Mode | Description |
 |------|-------------|
-| **DuckDNS + Caddy + Let's Encrypt** | Default recommended. Free dynamic DNS, automatic HTTPS via Caddy. Requires router port forwarding (80/443). |
+| **DuckDNS + Caddy + Let's Encrypt (DNS-01)** | Default recommended. Free dynamic DNS, automatic trusted HTTPS via Caddy DNS-01 challenge. No router port forwarding required — the service stays LAN-only. |
 | **Tailscale Funnel** | No port forwarding needed. Public HTTPS via `*.ts.net`. |
 
 See the full hosting guide: [README_HOST.md](https://github.com/${REPO}/blob/${TAG}/README_HOST.md)
@@ -62,10 +81,21 @@ https://YOUR-HOSTNAME/manifest.json
 
 ## Upgrade from a previous release
 
+**Recommended (works for public and private repos):**
 ```bash
-# Download to home directory
-curl -L https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz \
-  -o ~/stremio-addarr-install.tar.gz
+gh release download --repo ${REPO} --tag ${TAG} --pattern 'stremio-addarr-install.tar.gz*' --dir ~
+```
+
+**Public repo / anonymous download only:**
+```bash
+curl -fL --retry 3 -o ~/stremio-addarr-install.tar.gz \
+  https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz
+```
+
+```bash
+# Sanity-check before extraction
+file ~/stremio-addarr-install.tar.gz | grep -q 'gzip' \
+  || { echo "ERROR: Downloaded file is not a valid gzip archive. Check the URL, release, or repo access."; exit 1; }
 
 # Extract over existing installation (preserves your .env)
 sudo tar -xzf ~/stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
