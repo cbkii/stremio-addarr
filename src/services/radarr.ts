@@ -135,7 +135,7 @@ export class RadarrClient {
         /already been added/i.test(error.body)
       ) {
         this.moviesCache.clear();
-        this.logger.info('radarr add skipped', { imdbId, reason: 'already_exists_400' });
+        this.logger.info('radarr add skipped', { imdbId, reason: 'already_exists_400', state: 'unknown' });
         return {
           ok: true,
           service: 'radarr',

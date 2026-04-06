@@ -27,6 +27,14 @@ export class HttpTimeoutError extends Error {
   }
 }
 
+function categorizeHttpError(status: number): string {
+  if (status === 401 || status === 403) return 'auth_error';
+  if (status === 404) return 'not_found';
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'server_error';
+  return `http_${status}`;
+}
+
 export class JsonHttpClient {
   private readonly apiKeyHeader: string;
 
@@ -68,25 +76,13 @@ export class JsonHttpClient {
 
       const text = await response.text();
       if (!response.ok) {
-        let errorCategory: string;
-        if (response.status === 401 || response.status === 403) {
-          errorCategory = 'auth_error';
-        } else if (response.status === 404) {
-          errorCategory = 'not_found';
-        } else if (response.status === 429) {
-          errorCategory = 'rate_limited';
-        } else if (response.status >= 500) {
-          errorCategory = 'server_error';
-        } else {
-          errorCategory = `http_${response.status}`;
-        }
         this.options.logger?.warn('arr response error', {
           service,
           method,
           path,
           status: response.status,
           durationMs: Date.now() - start,
-          errorCategory
+          errorCategory: categorizeHttpError(response.status)
         });
         throw new HttpError(
           `Request failed with status ${response.status}`,

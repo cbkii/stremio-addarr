@@ -112,7 +112,7 @@ export class SonarrClient {
 
     const lookup = await this.lookupSeries(imdbId);
     if (!lookup) {
-      this.logger.warn('sonarr add failed', { imdbId, reason: 'lookup_failed' });
+      this.logger.warn('sonarr add failed', { imdbId, reason: 'lookup_failed', title: undefined });
       return {
         ok: false,
         service: 'sonarr',
@@ -123,7 +123,7 @@ export class SonarrClient {
     }
 
     if (!lookup.tvdbId) {
-      this.logger.warn('sonarr add failed', { imdbId, reason: 'no_tvdb_id' });
+      this.logger.warn('sonarr add failed', { imdbId, reason: 'no_tvdb_id', title: lookup.title });
       return {
         ok: false,
         service: 'sonarr',
@@ -160,7 +160,7 @@ export class SonarrClient {
       ) {
         this.seriesCache.clear();
         this.episodeCache.clear();
-        this.logger.info('sonarr add skipped', { imdbId, reason: 'already_exists_400' });
+        this.logger.info('sonarr add skipped', { imdbId, reason: 'already_exists_400', title: lookup.title });
         return {
           ok: true,
           service: 'sonarr',

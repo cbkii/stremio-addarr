@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createLogger } from '../src/logger.js';
 
 // Capture stdout/stderr lines during a callback
-async function captureOutput(fn: () => Promise<void> | void): Promise<{ stdout: string[]; stderr: string[] }> {
+async function captureConsoleOutput(fn: () => Promise<void> | void): Promise<{ stdout: string[]; stderr: string[] }> {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const origLog = console.log.bind(console);
@@ -21,7 +21,7 @@ async function captureOutput(fn: () => Promise<void> | void): Promise<{ stdout: 
 
 test('logger emits valid JSON with required fields', async () => {
   const logger = createLogger('info');
-  const { stdout } = await captureOutput(() => {
+  const { stdout } = await captureConsoleOutput(() => {
     logger.info('test message', { foo: 'bar' });
   });
   assert.equal(stdout.length, 1);
@@ -34,7 +34,7 @@ test('logger emits valid JSON with required fields', async () => {
 
 test('logger writes errors to stderr', async () => {
   const logger = createLogger('info');
-  const { stderr, stdout } = await captureOutput(() => {
+  const { stderr, stdout } = await captureConsoleOutput(() => {
     logger.error('something broke', { detail: 'oops' });
   });
   assert.equal(stdout.length, 0);
@@ -46,7 +46,7 @@ test('logger writes errors to stderr', async () => {
 
 test('logger respects log level threshold — debug suppressed at info level', async () => {
   const logger = createLogger('info');
-  const { stdout, stderr } = await captureOutput(() => {
+  const { stdout, stderr } = await captureConsoleOutput(() => {
     logger.debug('should be hidden');
     logger.info('should be visible');
   });
@@ -58,7 +58,7 @@ test('logger respects log level threshold — debug suppressed at info level', a
 
 test('logger at debug level emits debug messages', async () => {
   const logger = createLogger('debug');
-  const { stdout } = await captureOutput(() => {
+  const { stdout } = await captureConsoleOutput(() => {
     logger.debug('debug msg');
     logger.info('info msg');
   });
@@ -67,7 +67,7 @@ test('logger at debug level emits debug messages', async () => {
 
 test('logger at warn level suppresses info and debug', async () => {
   const logger = createLogger('warn');
-  const { stdout, stderr } = await captureOutput(() => {
+  const { stdout, stderr } = await captureConsoleOutput(() => {
     logger.debug('d');
     logger.info('i');
     logger.warn('w');
@@ -81,7 +81,7 @@ test('logger at warn level suppresses info and debug', async () => {
 
 test('logger sanitizes apiKey fields in extra', async () => {
   const logger = createLogger('info');
-  const { stdout } = await captureOutput(() => {
+  const { stdout } = await captureConsoleOutput(() => {
     logger.info('check', { apiKey: 'secret123', nested: 'ok' });
   });
   const parsed = JSON.parse(stdout[0]) as Record<string, unknown>;
@@ -91,7 +91,7 @@ test('logger sanitizes apiKey fields in extra', async () => {
 
 test('logger sanitizes api_key variant', async () => {
   const logger = createLogger('info');
-  const { stdout } = await captureOutput(() => {
+  const { stdout } = await captureConsoleOutput(() => {
     logger.info('check', { api_key: 'topsecret' });
   });
   const parsed = JSON.parse(stdout[0]) as Record<string, unknown>;
@@ -100,7 +100,7 @@ test('logger sanitizes api_key variant', async () => {
 
 test('logger sanitizes URLs with embedded credentials', async () => {
   const logger = createLogger('info');
-  const { stdout } = await captureOutput(() => {
+  const { stdout } = await captureConsoleOutput(() => {
     logger.info('check', { baseUrl: 'http://user:pass@192.168.1.1:7878' });
   });
   const parsed = JSON.parse(stdout[0]) as Record<string, unknown>;
@@ -112,7 +112,7 @@ test('logger sanitizes URLs with embedded credentials', async () => {
 
 test('logger does not alter non-sensitive fields', async () => {
   const logger = createLogger('info');
-  const { stdout } = await captureOutput(() => {
+  const { stdout } = await captureConsoleOutput(() => {
     logger.info('check', { imdbId: 'tt1234567', status: 'downloaded', count: 3 });
   });
   const parsed = JSON.parse(stdout[0]) as Record<string, unknown>;
