@@ -1,21 +1,181 @@
 name: Release
 
+# ─── Supported release triggers ───────────────────────────────────────────
+# 1. Tag push:           push a semver tag like v1.2.3
+# 2. Manual dispatch:    Actions → Release → Run workflow (version + dry_run)
+# 3. PR comment command: comment `/release` or `/release-dry-run` on a PR
+#    • Only collaborators/owners/members may trigger.
+#    • `/release-dry-run` builds and packages but does NOT publish.
+#    • `/release` builds, packages, tags, and publishes a real release.
+# ──────────────────────────────────────────────────────────────────────────
+
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v[0-9]*.[0-9]*.[0-9]*' # semver tags only — glob syntax, not regex (v1.2.3)
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.2.3 — without the v prefix). Must be X.Y.Z semver.'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run — build and verify archive without publishing a release'
+        required: false
+        type: boolean
+        default: false
+  issue_comment:
+    types: [created]
+
+# One release at a time. Use the tag name so parallel tag pushes are independent,
+# but PR-comment and dispatch runs share a single slot (ref is the default branch).
+concurrency:
+  group: release-${{ github.ref }}-${{ github.event.issue.number || '' }}
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: write       # create tags, create/update releases, push commits
+  issues: write         # add reactions to issue/PR comments
+  pull-requests: write  # comment on pull requests
 
 jobs:
+  # ── Gate for PR-comment triggers ──────────────────────────────────────
+  pr-comment-gate:
+    if: >-
+      github.event_name == 'issue_comment'
+      && github.event.issue.pull_request
+      && (
+        startsWith(github.event.comment.body, '/release-dry-run')
+        || startsWith(github.event.comment.body, '/release')
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+      dry_run: ${{ steps.check.outputs.dry_run }}
+      pr_sha:  ${{ steps.pr.outputs.sha }}
+    steps:
+      - name: Check permission
+        id: check
+        env:
+          ASSOC: ${{ github.event.comment.author_association }}
+          BODY:  ${{ github.event.comment.body }}
+        run: |
+          # Only OWNER, MEMBER, or COLLABORATOR may trigger releases
+          case "$ASSOC" in
+            OWNER|MEMBER|COLLABORATOR) echo "allowed=true"  >> "$GITHUB_OUTPUT" ;;
+            *)                         echo "allowed=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          # Detect dry-run before checking /release (dry-run also starts with /release)
+          if [[ "$BODY" == /release-dry-run* ]]; then
+            echo "dry_run=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: React — acknowledge
+        if: steps.check.outputs.allowed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions \
+            -f content='eyes' --silent || true
+
+      - name: React — reject unauthorised
+        if: steps.check.outputs.allowed != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions \
+            -f content='-1' --silent || true
+          echo "::error::User (${{ github.event.comment.author_association }}) is not a collaborator/owner — ignoring /release command."
+          exit 1
+
+      - name: Resolve PR head SHA
+        if: steps.check.outputs.allowed == 'true'
+        id: pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" --jq '.head.sha')
+          if [[ -z "$SHA" || "$SHA" == "null" ]]; then
+            echo "::error::Could not resolve head SHA for PR ${{ github.event.issue.number }}."
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+  # ── Main release job ──────────────────────────────────────────────────
   release:
+    needs: [pr-comment-gate]
+    # Run when:
+    #   • tag push or workflow_dispatch (pr-comment-gate is skipped → 'always()' unblocks)
+    #   • PR comment AND gate passed
+    if: >-
+      always()
+      && (
+        github.event_name == 'push'
+        || github.event_name == 'workflow_dispatch'
+        || (needs.pr-comment-gate.result == 'success' && needs.pr-comment-gate.outputs.allowed == 'true')
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # ── Resolve dry-run flag ─────────────────────────────────────────
+      - name: Resolve dry-run flag
+        id: flags
+        env:
+          EVENT:             ${{ github.event_name }}
+          DISPATCH_DRY_RUN:  ${{ github.event.inputs.dry_run }}
+          COMMENT_DRY_RUN:   ${{ needs.pr-comment-gate.outputs.dry_run }}
+        run: |
+          if [[ "$EVENT" == "workflow_dispatch" && "$DISPATCH_DRY_RUN" == "true" ]]; then
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT" == "issue_comment" && "$COMMENT_DRY_RUN" == "true" ]]; then
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Validate workflow_dispatch version input ──────────────────────
+      - name: Validate version input
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format '$VERSION'. Expected X.Y.Z (e.g. 1.2.3)."
+            exit 1
+          fi
+
+      # ── Checkout correct ref ─────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.pr-comment-gate.outputs.pr_sha || github.ref }}
 
+      # ── Resolve final tag ────────────────────────────────────────────
+      - name: Resolve tag
+        id: tag
+        env:
+          EVENT:   ${{ github.event_name }}
+          VERSION: ${{ github.event.inputs.version }}
+          PR_COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          if [[ "$EVENT" == "push" ]]; then
+            # Tag was already pushed — use it directly
+            TAG="${GITHUB_REF_NAME}"
+          elif [[ "$EVENT" == "workflow_dispatch" ]]; then
+            TAG="v${VERSION}"
+          else
+            # PR comment: derive version from package.json
+            VER=$(node -p "require('./package.json').version")
+            TAG="v${VER}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "### Release tag: \`$TAG\`  |  dry_run=${{ steps.flags.outputs.dry_run }}" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Build & verify ────────────────────────────────────────────────
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -25,21 +185,123 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Verify
-        run: |
-          npm run typecheck
-          npm run test:ci
-          npm run build
+      - name: Typecheck
+        run: npm run typecheck
 
-      - name: Package artifacts
+      - name: Test
+        run: npm run test:ci
+
+      - name: Build
+        run: npm run build
+
+      # ── Package ───────────────────────────────────────────────────────
+      - name: Package release
         run: npm run package:release
 
+      - name: Validate assets
+        run: |
+          test -f dist/stremio-addarr-install.tar.gz \
+            || { echo "::error::Primary archive missing"; exit 1; }
+          test -f dist/stremio-addarr-install.tar.gz.sha256 \
+            || { echo "::error::Checksum file missing"; exit 1; }
+          echo "Archive contents:"
+          tar -tzf dist/stremio-addarr-install.tar.gz | sort
+          echo "Checksum:"
+          cat dist/stremio-addarr-install.tar.gz.sha256
+
+      # ── Dry-run: stop here ────────────────────────────────────────────
+      - name: Dry-run summary
+        if: steps.flags.outputs.dry_run == 'true'
+        run: |
+          echo "### ✅ Dry-run complete — archive verified, no release published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tag would be:** \`${{ steps.tag.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Checksum:**" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat dist/stremio-addarr-install.tar.gz.sha256 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Publish (real release only) ───────────────────────────────────
+      - name: Create tag (if not already pushed)
+        if: steps.flags.outputs.dry_run != 'true' && github.event_name != 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # Check by inspecting remote output rather than relying on exit codes,
+          # which can vary between git versions and error conditions.
+          REMOTE_REFS=$(git ls-remote --tags origin "refs/tags/${TAG}" 2>&1)
+          LS_EXIT=$?
+          if [ $LS_EXIT -ne 0 ]; then
+            echo "::error::git ls-remote failed (exit code $LS_EXIT): ${REMOTE_REFS}"
+            exit 1
+          fi
+          if [ -n "$REMOTE_REFS" ]; then
+            echo "::notice::Tag ${TAG} already exists on remote — skipping tag creation."
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          fi
+
+      - name: Check for existing release
+        if: steps.flags.outputs.dry_run != 'true'
+        id: existing
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release ${TAG} already exists — skipping duplicate creation."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate release body
+        if: steps.flags.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        env:
+          TAG:  ${{ steps.tag.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Only substitute the two known variables; other $VAR patterns are left as-is.
+          envsubst '${TAG} ${REPO}' < .github/release-body.md.tmpl > /tmp/release-body.md
+
       - name: Create GitHub Release
+        if: steps.flags.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release create "${TAG}" \
+            dist/stremio-addarr-install.tar.gz \
+            dist/stremio-addarr-install.tar.gz.sha256 \
+            --title "${TAG}" \
+            --notes-file /tmp/release-body.md \
+            --latest
+          echo "### 🚀 Release [${TAG}](https://github.com/${{ github.repository }}/releases/tag/${TAG}) published" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment result on PR
+        if: github.event_name == 'issue_comment'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG:     ${{ steps.tag.outputs.tag }}
+          DRY_RUN: ${{ steps.flags.outputs.dry_run }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            MSG="✅ **Dry-run** for \`${TAG}\` succeeded — archive built and verified, no release published."
+          elif [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
+            MSG="⚠️ Release \`${TAG}\` already exists — no action taken. See https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          else
+            MSG="🚀 **Release \`${TAG}\`** published: https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          fi
+          gh pr comment "${{ github.event.issue.number }}" --body "$MSG"
+
+      - name: React — success
+        if: github.event_name == 'issue_comment' && steps.flags.outputs.dry_run != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/stremio-addarr-bundle.tar.gz \
-            dist/stremio-addarr-source.tar.gz \
-            dist/checksums.txt \
-            --generate-notes
+          gh api \
+            repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions \
+            -f content='rocket' --silent || true
