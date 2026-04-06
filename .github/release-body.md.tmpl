@@ -14,8 +14,8 @@ Release assets:
 Quick download:
 
 ```bash
-gh auth login
-gh release download --repo ${REPO} --tag ${TAG} --pattern 'stremio-addarr-install.tar.gz*'
+# gh auth login
+gh release download --repo ${REPO} ${TAG} --pattern 'stremio-addarr-install.tar.gz*' --clobber
 ```
 
 ---
