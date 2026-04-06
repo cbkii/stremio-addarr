@@ -137,10 +137,12 @@ export function createApp(config: AppConfig) {
     res.setHeader('Cache-Control', 'no-store');
 
     if (kind !== 'movie' && kind !== 'series') {
+      logger.warn('Action request with unsupported kind', { kind, action });
       res.send(EMPTY_HLS);
       return;
     }
     if (action !== 'search' && action !== 'add-search') {
+      logger.warn('Action request with unsupported action', { kind, action });
       res.send(EMPTY_HLS);
       return;
     }
@@ -155,6 +157,8 @@ export function createApp(config: AppConfig) {
       }
       statusService.invalidateStatusCaches();
     } catch (error) {
+      // Log the failure but always respond with a valid HLS stream so Stremio
+      // never falls back to opening an external browser.
       logger.error('Action execution failed', {
         error: error instanceof Error ? error.message : String(error),
         action,
