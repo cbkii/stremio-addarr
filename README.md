@@ -1,482 +1,237 @@
 # Arr Status & Add (`stremio-addarr`)
 
-Lightweight, self-hosted Stremio add-on for Raspberry Pi that shows Sonarr/Radarr download status and lets you add movies or series directly from Stremio.
+Self-hosted Stremio add-on that shows Sonarr/Radarr status tiles and provides one-click add actions.
 
-**Primary deployment target:** Raspberry Pi + stock Android TV (Stremio).
-
----
-
-## 1 — What this add-on does
-
-When you browse a movie or TV episode in Stremio, this add-on shows stream tiles with real-time Arr status:
-
-| Tile | Meaning |
-|------|---------|
-| `✅ Radarr • Downloaded` | Movie is downloaded |
-| `📌 Radarr • Added` | Movie is in Radarr, not yet downloaded |
-| `🔎 Radarr • Missing` | Movie is monitored but missing |
-| `➕ Add to Radarr + Search` | Click to add the movie and trigger a search |
-| `✅ Sonarr • Episode Downloaded` | Episode is downloaded |
-| `🔎 Sonarr • Episode Missing` | Episode is monitored but missing |
-| `📌 Sonarr • Series Added` | Series exists in Sonarr |
-| `➕ Add to Sonarr + Search` | Click to add the series and trigger a search |
-| `🛑 Arr Offline` | Cannot reach Sonarr/Radarr |
-
-**Action flow:** Click an add tile → server adds to Arr and triggers search → Stremio redirects back → next refresh shows the updated status.
+This README is the **canonical install and upgrade guide**.
 
 ---
 
-## 2 — Why HTTPS and a public hostname matter
+## 1) What you will set up
 
-Stock Android TV (API 24+) **only trusts system CA certificates**. This means:
+- `stremio-addarr` runs locally on your host at `127.0.0.1:7010`.
+- Caddy serves a public HTTPS URL (required for stock Android TV Stremio).
+- Stremio installs the add-on from:
 
-- ❌ `http://...` — blocked or untrusted
-- ❌ `https://192.168.x.x` — no valid certificate possible
-- ❌ `https://hostname.local` / `.lan` — not publicly resolvable
-- ❌ Self-signed or internal CA certificates — not trusted without root
+```text
+https://YOUR_HOSTNAME/manifest.json
+```
 
-**You need a publicly trusted HTTPS certificate on a real DNS hostname.**
+The hostname in all places must match exactly:
+- DuckDNS subdomain
+- Caddy site address
+- `.env` → `PUBLIC_BASE_URL`
+- Final manifest URL pasted into Stremio
 
-The certificate must be issued by a public CA (e.g. Let's Encrypt). The service itself can stay entirely private on your LAN — only the certificate needs to be public/trusted. Router port forwarding is **not required** when using a DNS-01 ACME challenge (the default path documented here).
-
-This project's recommended hosting path:
-
-| Mode | Description |
-|------|-------------|
-| **DuckDNS + Caddy DNS-01 + local DNS override** | Free subdomain, automatic trusted cert, no port forwarding. *(Recommended default)* |
-
-Install order: choose your hostname → set up Caddy with the DuckDNS DNS plugin → verify HTTPS → set `PUBLIC_BASE_URL` → install in Stremio.
-
-See [README_HOST.md](README_HOST.md) for the full step-by-step setup guide.
+For hosting/TLS/reverse proxy, follow **README_HOST.md**: [README_HOST.md](README_HOST.md).
 
 ---
 
-## 3 — Quick install from release
+## 2) Prerequisites
 
-**Recommended (works for public and private repos):**
+Run these checks first:
 
 ```bash
-# Authenticate if you haven't already (required for private repos)
-gh auth login
+node --version
+npm --version
+```
 
-# Download the latest release assets
+- Node must be **20+**.
+- Sonarr and/or Radarr must already be reachable from this host.
+- You need a service account and group that exist on your host.
+
+Set these once and reuse them in all commands:
+
+```bash
+export SVC_USER="$(whoami)"
+export SVC_GROUP="$(id -gn)"
+```
+
+If you run the service as a dedicated account, set `SVC_USER`/`SVC_GROUP` to that account instead.
+
+---
+
+## 3) Choose your path
+
+- **Fresh install from scratch** → go to [4) Fresh install](#4-fresh-install-from-scratch)
+- **Upgrade existing install** → go to [5) Upgrade existing install](#5-upgrade-existing-install)
+
+---
+
+## 4) Fresh install from scratch
+
+### Step 1 — Download release assets
+
+```bash
+gh auth login
 gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-install.tar.gz*'
 ```
 
-**Alternative — public repo / anonymous download only** (will fail silently on private repos):
+### Step 2 — Verify and extract
 
 ```bash
-curl -fL --retry 3 -o stremio-addarr-install.tar.gz \
-  https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz
-curl -fL --retry 3 -o stremio-addarr-install.tar.gz.sha256 \
-  https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz.sha256
-```
-
-> ⚠️ **Troubleshooting downloads:** If `file stremio-addarr-install.tar.gz` shows `ASCII text` or
-> `tar` complains `gzip: stdin: not in gzip format`, the download returned an error page instead of
-> the archive. This means the URL is wrong, the release does not exist yet, or the repo is private
-> and authentication is needed. Use `gh release download` (above) to fix this.
-
-```bash
-# Optional: verify checksum
 sha256sum -c stremio-addarr-install.tar.gz.sha256
+file stremio-addarr-install.tar.gz | grep -q 'gzip'
 
-# Sanity-check before extraction (guards against a silent 404 download)
-file stremio-addarr-install.tar.gz | grep -q 'gzip' \
-  || { echo "ERROR: Downloaded file is not a valid gzip archive. Check the URL, release, or repo access."; exit 1; }
-
-# Extract to /opt/stremio-addarr
 sudo mkdir -p /opt/stremio-addarr
 sudo tar -xzf stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
-# Give the service user (pi) ownership so npm ci and the service can write to the directory
-sudo chown -R pi:pi /opt/stremio-addarr
-cd /opt/stremio-addarr
-
-# Install production dependencies
-npm ci --omit=dev
+sudo chown -R "$SVC_USER:$SVC_GROUP" /opt/stremio-addarr
 ```
 
-> Replace `pi:pi` with your actual username and group if different (check with `whoami` and `id -gn`).
-> The `chown` step is needed here because `sudo tar` extracts files as root.
-> It also ensures the systemd service (configured later) can write to this directory.
-
-Continue with the sections below to configure and run the add-on.
-
----
-
-## 4 — Prerequisites
-
-- **Raspberry Pi** (or similar Linux host) with Node.js 20+
-- **Sonarr** and/or **Radarr** running and accessible from the Pi
-- **Stremio** installed on your Android TV (or other client)
-- A hosting setup for public HTTPS (see next section)
-
-Install Node.js 20 on Raspberry Pi OS:
+### Step 3 — Install production dependencies
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-node --version   # should show v20.x.x
-```
-
----
-
-## 5 — Choose a hosting mode
-
-Before installing the add-on, set up HTTPS hosting. The recommended default is **DuckDNS + Caddy DNS-01 + local DNS override** — it is free, requires no router port forwarding, and works on stock non-root Android TV.
-
-👉 **Follow the full setup instructions in [README_HOST.md](README_HOST.md) now**, then come back here to continue.
-
-You will need your public HTTPS hostname (e.g. `myaddarr.duckdns.org`) for the next steps.
-
----
-
-## 6 — Configure Sonarr and Radarr
-
-The add-on needs API access to your Arr instances. Here is how to find each value.
-
-### Radarr configuration
-
-| Setting | Where to find it | `.env` variable |
-|---------|-------------------|-----------------|
-| **Base URL** | Radarr is usually at `http://127.0.0.1:7878` (same Pi) or `http://LAN-IP:7878` | `RADARR_BASE_URL` |
-| **API Key** | Radarr → Settings → General → Security → API Key | `RADARR_API_KEY` |
-| **Root Folder Path** | Radarr → Settings → Media Management → Root Folders (e.g. `/media/movies`) | `RADARR_ROOT_FOLDER_PATH` |
-| **Quality Profile ID** | Radarr → Settings → Profiles → click a profile → the number in the URL (e.g. `1`) | `RADARR_QUALITY_PROFILE_ID` |
-| **Minimum Availability** | When Radarr considers a movie available: `announced`, `inCinemas`, `released`, `preDB` | `RADARR_MINIMUM_AVAILABILITY` |
-| **Search on Add** | `true` to automatically search when a movie is added | `RADARR_SEARCH_ON_ADD` |
-| **Tags** | Optional comma-separated tag IDs to apply | `RADARR_TAGS` |
-
-### Sonarr configuration
-
-| Setting | Where to find it | `.env` variable |
-|---------|-------------------|-----------------|
-| **Base URL** | Sonarr is usually at `http://127.0.0.1:8989` (same Pi) or `http://LAN-IP:8989` | `SONARR_BASE_URL` |
-| **API Key** | Sonarr → Settings → General → Security → API Key | `SONARR_API_KEY` |
-| **Root Folder Path** | Sonarr → Settings → Media Management → Root Folders (e.g. `/media/tv`) | `SONARR_ROOT_FOLDER_PATH` |
-| **Quality Profile ID** | Sonarr → Settings → Profiles → click a profile → the number in the URL (e.g. `1`) | `SONARR_QUALITY_PROFILE_ID` |
-| **Language Profile ID** | Sonarr → Settings → Profiles → Language Profiles → click a profile → ID in URL. Required on Sonarr v3. | `SONARR_LANGUAGE_PROFILE_ID` |
-| **Series Monitor** | Which episodes to monitor: `all`, `future`, `missing`, `unaired`, `none` | `SONARR_SERIES_MONITOR` |
-| **Search on Add** | `true` to automatically search when a series is added | `SONARR_SEARCH_ON_ADD` |
-| **Tags** | Optional comma-separated tag IDs to apply | `SONARR_TAGS` |
-
-> **Tip:** You can verify API access with:
-> ```bash
-> curl http://127.0.0.1:7878/api/v3/system/status -H "X-Api-Key: YOUR_RADARR_KEY"
-> curl http://127.0.0.1:8989/api/v3/system/status -H "X-Api-Key: YOUR_SONARR_KEY"
-> ```
-
----
-
-## 7 — Install the release on Raspberry Pi
-
-If you haven't already extracted the release (section 3), do so now:
-
-```bash
-sudo mkdir -p /opt/stremio-addarr
-sudo tar -xzf stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
-sudo chown -R pi:pi /opt/stremio-addarr
 cd /opt/stremio-addarr
 npm ci --omit=dev
 ```
 
----
-
-## 8 — Configure `.env`
+### Step 4 — Configure app environment
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-Set at minimum:
+Set required values:
 
-```bash
+```dotenv
 HOST=127.0.0.1
 PORT=7010
-PUBLIC_BASE_URL=https://YOUR-HOSTNAME    # your DuckDNS or Tailscale hostname
+PUBLIC_BASE_URL=https://YOUR_HOSTNAME
 TARGET_CLIENT=android-tv
 
 RADARR_ENABLED=true
 RADARR_BASE_URL=http://127.0.0.1:7878
-RADARR_API_KEY=your-radarr-api-key
+RADARR_API_KEY=replace-with-radarr-api-key
 RADARR_ROOT_FOLDER_PATH=/media/movies
 RADARR_QUALITY_PROFILE_ID=1
 
 SONARR_ENABLED=true
 SONARR_BASE_URL=http://127.0.0.1:8989
-SONARR_API_KEY=your-sonarr-api-key
+SONARR_API_KEY=replace-with-sonarr-api-key
 SONARR_ROOT_FOLDER_PATH=/media/tv
 SONARR_QUALITY_PROFILE_ID=1
 SONARR_LANGUAGE_PROFILE_ID=1
 ```
 
-See `.env.example` for all available options.
-
----
-
-## 9 — Run and enable the add-on
-
-### Using systemd (recommended)
+### Step 5 — Install systemd service
 
 ```bash
 sudo cp deploy/stremio-addarr.service.example /etc/systemd/system/stremio-addarr.service
+sudo nano /etc/systemd/system/stremio-addarr.service
+```
+
+In the service file, replace these placeholders with your real account/group:
+- `YOUR_SVC_USER`
+- `YOUR_SVC_GROUP`
+
+Then load and start:
+
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now stremio-addarr
 ```
 
-Check it is running:
+### Step 6 — Configure hosting/TLS (required)
+
+Follow **README_HOST.md** now: [README_HOST.md](README_HOST.md).
+
+When finished, you must have:
+- Caddy serving `https://YOUR_HOSTNAME`
+- `PUBLIC_BASE_URL=https://YOUR_HOSTNAME`
+
+### Step 7 — End-to-end verification (required before Stremio install)
+
+Run these checks in order:
 
 ```bash
-sudo systemctl status stremio-addarr
-sudo journalctl -u stremio-addarr -n 20
+# 1) Local service is running
+sudo systemctl is-active stremio-addarr
+
+# 2) Local manifest is reachable
+curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null
+
+# 3) Public HTTPS manifest is reachable
+curl -fI https://YOUR_HOSTNAME/manifest.json
+
+# 4) Exact URL to paste into Stremio
+echo "https://YOUR_HOSTNAME/manifest.json"
 ```
 
-### Manual run (for testing)
+### Step 8 — Install in Stremio
+
+On Stremio (Android TV):
+1. Open **Add-ons**.
+2. Open **Community Add-ons** (or search).
+3. Paste the manifest URL from Step 7:
+   - `https://YOUR_HOSTNAME/manifest.json`
+4. Click **Install**.
+
+---
+
+## 5) Upgrade existing install
+
+This keeps your existing `.env` and service wiring, then reapplies ownership and dependencies.
+
+### Step 1 — Download new release
 
 ```bash
-cd /opt/stremio-addarr
-node dist/src/index.js
-```
-
----
-
-## 10 — Set up hosting
-
-If you haven't already completed hosting setup, do so now:
-
-👉 **[README_HOST.md](README_HOST.md)** — step-by-step DuckDNS + Caddy DNS-01 setup (no port forwarding required).
-
----
-
-## 11 — Verify health and public URL
-
-```bash
-# Local health check
-curl http://127.0.0.1:7010/healthz
-
-# Public manifest (should return JSON with no TLS errors)
-curl -I https://YOUR-HOSTNAME/manifest.json
-
-# Full status (no secrets exposed)
-curl https://YOUR-HOSTNAME/status.json
-```
-
-### Diagnostics endpoints
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /healthz` | Liveness check + Android TV compatibility summary |
-| `GET /status.json` | Machine-readable diagnostics (bind address, URL flags, Arr reachability) |
-| `GET /health` | Service health summary |
-
-No secrets are exposed in any diagnostic output.
-
----
-
-## 12 — Install the add-on in Stremio
-
-1. Open Stremio on your Android TV (or any client).
-2. Go to the **Add-ons** section.
-3. Click **Community Add-ons** or the search icon.
-4. Enter your add-on URL:
-   ```
-   https://YOUR-HOSTNAME/manifest.json
-   ```
-5. Click **Install**.
-6. The add-on appears as "Arr Status & Add" in your installed add-ons.
-
----
-
-## 13 — Verify it works
-
-1. Browse to any movie or TV episode in Stremio.
-2. Open the **Streams** tab.
-3. You should see status tiles like `✅ Radarr • Downloaded` or `➕ Add to Radarr + Search`.
-4. Click an add tile to test adding a movie/series.
-5. Refresh — the status should update.
-
----
-
-## 14 — Upgrade from a previous release
-
-**Recommended (works for public and private repos):**
-
-```bash
-# Download the new release to your home directory
+gh auth login
 gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-install.tar.gz*' --dir ~
 ```
 
-**Alternative — public repo / anonymous download only:**
+### Step 2 — Verify and extract over existing install
 
 ```bash
-curl -fL --retry 3 -o ~/stremio-addarr-install.tar.gz \
-  https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz
+sha256sum -c ~/stremio-addarr-install.tar.gz.sha256
+file ~/stremio-addarr-install.tar.gz | grep -q 'gzip'
+
+sudo tar -xzf ~/stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
+sudo chown -R "$SVC_USER:$SVC_GROUP" /opt/stremio-addarr
 ```
 
+### Step 3 — Reinstall production dependencies
+
 ```bash
-# Sanity-check before extraction
-file ~/stremio-addarr-install.tar.gz | grep -q 'gzip' \
-  || { echo "ERROR: Downloaded file is not a valid gzip archive. Check the URL, release, or repo access."; exit 1; }
-
-# Extract over existing installation (preserves your .env)
-sudo tar -xzf ~/stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
-sudo chown -R pi:pi /opt/stremio-addarr
-
-# Update dependencies
 cd /opt/stremio-addarr
 npm ci --omit=dev
+```
 
-# Restart
+### Step 4 — Review config and service account
+
+- Compare your `.env` with the new `.env.example` and add any new required variables.
+- Confirm `/etc/systemd/system/stremio-addarr.service` still has your correct `User=` and `Group=`.
+
+If you edited the unit file, reload systemd:
+
+```bash
+sudo systemctl daemon-reload
+```
+
+### Step 5 — Restart and verify
+
+```bash
 sudo systemctl restart stremio-addarr
-
-# Verify
-curl http://127.0.0.1:7010/healthz
+sudo systemctl is-active stremio-addarr
+curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null
+curl -fI https://YOUR_HOSTNAME/manifest.json
 ```
 
-Your `.env` file is preserved — the archive does not include `.env`.
+If your hostname/TLS setup changed, re-run the hosting guide: [README_HOST.md](README_HOST.md).
 
 ---
 
-## 15 — Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| Add-on not starting | Check logs: `sudo journalctl -u stremio-addarr -n 50` |
-| "Arr Offline" tiles | Verify Arr URLs and API keys in `.env`. Test with `curl`. |
-| Stremio can't install add-on | Ensure `PUBLIC_BASE_URL` matches your HTTPS hostname exactly. Test in a browser. |
-| Certificate not trusted | See [README_HOST.md — Troubleshooting](README_HOST.md#troubleshooting). |
-| Port already in use | Change `PORT` in `.env` and update Caddy/Funnel config to match. |
-| Tiles show stale status | Cache TTL is configurable via `STATUS_CACHE_TTL_MS` in `.env`. Default is 30 seconds. |
-
----
-
-## 16 — Maintainer release process
-
-### Supported release paths
-
-| Trigger | How | When to use |
-|---------|-----|-------------|
-| **Tag push** | `git tag v1.2.3 && git push origin v1.2.3` | Standard release from main branch |
-| **Manual dispatch** | Actions → Release → Run workflow → enter version | Release without pushing a tag locally |
-| **Manual dispatch (dry run)** | Actions → Release → Run workflow → enable "Dry run" | Test build/package without publishing |
-| **PR comment** | Comment `/release` on a PR | Release from a PR branch (maintainers only) |
-| **PR comment dry-run** | Comment `/release-dry-run` on a PR | Test the build/package without publishing |
-
-### What happens
-
-1. CI runs typecheck, tests, and build.
-2. `scripts/package-release.mjs` produces:
-   - `stremio-addarr-install.tar.gz` — primary install archive
-   - `stremio-addarr-install.tar.gz.sha256` — SHA-256 checksum
-3. A GitHub Release is created (or skipped for dry-run) with:
-   - Both assets attached
-   - Release notes with install/upgrade/hosting instructions
-   - Links to tag-specific `README.md` and `README_HOST.md`
-   - Marked as `latest`
-
-### PR comment commands
-
-Only repository **collaborators**, **members**, and **owners** may trigger releases via PR comments. Comments on issues (not PRs) are ignored.
-
-| Command | Effect |
-|---------|--------|
-| `/release` | Full build → tag → publish release |
-| `/release-dry-run` | Full build → verify archive → no publish |
-
-Progress is reported via emoji reactions (🚀 on start, 👎 if unauthorised) and a follow-up comment with the result.
-
-### Stable download URL
-
-The preferred way to download the latest release is:
-```bash
-gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-install.tar.gz*'
-```
-
-For public repos, anonymous curl also works:
-```
-https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-install.tar.gz
-```
-
-> ℹ️ The bare URL is public-repo-only. Use `gh release download` for private repos or when authentication is required.
-
----
-
-## Architecture
-
-```
-Stremio (Android TV)
-    ↓ HTTPS
-Caddy (public hostname, port 443) ← Let's Encrypt cert via DNS-01
-    ↓ HTTP
-Node.js add-on (127.0.0.1:7010)
-    ↓ HTTP
-Sonarr / Radarr (LAN)
-```
-
-- Node app binds to `127.0.0.1:7010` (private, not exposed directly).
-- Caddy handles TLS termination. Certificate is issued by Let's Encrypt via DNS-01 — no port forwarding required.
-- `PUBLIC_BASE_URL` always points to the public HTTPS hostname.
-- All Arr credentials stay server-side in `.env`.
-
----
-
-## Appendix — Tailscale Funnel (alternative, advanced)
-
-Tailscale Funnel is an alternative if you already use Tailscale, want zero DNS configuration, and are comfortable with the `*.ts.net` subdomain format. It is **not the primary documented path** for this add-on but can work in place of Caddy.
-
-### Setup overview
-
-1. Install Tailscale on the Pi: `curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`
-2. Enable HTTPS certificates in the [Tailscale admin console](https://login.tailscale.com/admin/dns) → DNS → HTTPS Certificates.
-3. Expose port 7010: `sudo tailscale funnel --bg 7010`
-4. Note your public hostname, e.g. `raspberrypi.tail1234.ts.net`.
-5. Set `PUBLIC_BASE_URL=https://raspberrypi.tail1234.ts.net` in `.env`.
-6. Restart the add-on: `sudo systemctl restart stremio-addarr`
-7. Verify: `curl -I https://raspberrypi.tail1234.ts.net/manifest.json`
-
-> Tailscale Funnel routes traffic through Tailscale's infrastructure. The add-on URL is publicly reachable (not LAN-only) while Funnel is active. No local DNS override is needed.
-
----
-
-## Configuration reference
-
-See `.env.example` for all available settings. Key variables:
-
-| Variable | Purpose |
-|----------|---------|
-| `HOST`, `PORT` | Private Node bind address/port (default `127.0.0.1:7010`) |
-| `PUBLIC_BASE_URL` | Public HTTPS URL for Stremio-facing links |
-| `TARGET_CLIENT` | `android-tv` (strict, default) or `generic` (advanced) |
-| `REQUEST_TIMEOUT_MS` | Per-request Arr timeout (default 5000ms) |
-| `STATUS_CACHE_TTL_MS` | Status cache TTL (default 30000ms) |
-| `SERVICE_HEALTH_CACHE_TTL_MS` | Health check cache TTL (default 10000ms) |
-| `RADARR_*` | Radarr connection and add settings |
-| `SONARR_*` | Sonarr connection and add settings |
-
-### `PUBLIC_BASE_URL` validation
-
-The add-on validates `PUBLIC_BASE_URL` at startup and warns when:
-- HTTP is used
-- Hostname is an IP address
-- Hostname is internal-only (`.local`, `.lan`, `localhost`)
-- Path prefix is configured
-
-In `TARGET_CLIENT=android-tv` mode, these warnings flag as "Android TV compatibility likely broken".
-
----
-
-## Advanced mode
-
-`TARGET_CLIENT=generic` allows HTTP, IP, and internal hostname setups. **Not recommended** for stock Android TV — only use if you control the client's certificate trust store.
-
----
-
-## Local development
+## 6) Runtime checks
 
 ```bash
-npm run typecheck
-npm test
-npm run build
-npm run dev          # watch mode with tsx
+sudo journalctl -u stremio-addarr -n 50 --no-pager
+curl -fsS http://127.0.0.1:7010/healthz
+curl -fsS https://YOUR_HOSTNAME/status.json
 ```
+
+---
+
+## 7) Release and hosting docs
+
+- Hosting/TLS (canonical): [README_HOST.md](README_HOST.md)
+- Example env variables: [.env.example](.env.example)
+- Systemd example: [deploy/stremio-addarr.service.example](deploy/stremio-addarr.service.example)

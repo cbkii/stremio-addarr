@@ -11,8 +11,11 @@ EnvironmentFile=/opt/stremio-addarr/.env
 ExecStart=/usr/bin/node /opt/stremio-addarr/dist/src/index.js
 Restart=on-failure
 RestartSec=5
-User=pi
-Group=pi
+
+# REQUIRED: replace with the service account/group that exist on your host.
+# Do not leave placeholders in production.
+User=YOUR_SVC_USER
+Group=YOUR_SVC_GROUP
 
 # Hardening
 NoNewPrivileges=true
