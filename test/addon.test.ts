@@ -82,9 +82,10 @@ test('missing movie tile triggers search action URL and does not expose secrets'
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
-    const body = (await response.json()) as { streams: Array<{ name: string; url?: string }> };
+    const body = (await response.json()) as { streams: Array<{ name: string; url?: string; behaviorHints?: { notWebReady?: boolean } }> };
     assert.equal(body.streams[0].name, '⭕🔍 Search on Radarr');
     assert.equal(body.streams[0].url, 'https://stremio-addarr.lan/action/search/movie/tt1234567');
+    assert.equal(body.streams[0].behaviorHints?.notWebReady, true, 'Action tiles must set notWebReady to prevent watched tracking');
 
     const serialized = JSON.stringify(body);
     assert.ok(!serialized.includes('radarr-key'));

@@ -16,6 +16,7 @@ export interface StatusTile {
   description?: string;
   url?: string;
   externalUris?: Array<{ uri: string; name?: string }>;
+  behaviorHints?: { notWebReady?: boolean };
   isAction?: boolean;
 }
 

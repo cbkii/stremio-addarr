@@ -38,14 +38,15 @@ export class ArrStatusService {
       case 'downloading':
         return [{ name: '⁉️⏱️ Downloading for Kodi' }];
       case 'missing':
-        return [{ name: '⭕🔍 Search on Radarr', url: this.buildActionLink('search', parsed), isAction: true }];
+        return [{ name: '⭕🔍 Search on Radarr', url: this.buildActionLink('search', parsed), behaviorHints: { notWebReady: true }, isAction: true }];
       case 'added':
-        return [{ name: '⭕🔍 Search on Radarr', url: this.buildActionLink('search', parsed), isAction: true }];
+        return [{ name: '⭕🔍 Search on Radarr', url: this.buildActionLink('search', parsed), behaviorHints: { notWebReady: true }, isAction: true }];
       case 'not_added':
         return [
           {
             name: '‼️➕🔍 Add+Search Radarr',
             url: this.buildActionLink('add-search', parsed),
+            behaviorHints: { notWebReady: true },
             isAction: true
           }
         ];
@@ -62,15 +63,16 @@ export class ArrStatusService {
       case 'episode_downloading':
         return [{ name: '⁉️⏱️ Downloading for Kodi' }];
       case 'episode_missing':
-        return [{ name: '⭕🔍 Search on Sonarr', url: this.buildActionLink('search', parsed), isAction: true }];
+        return [{ name: '⭕🔍 Search on Sonarr', url: this.buildActionLink('search', parsed), behaviorHints: { notWebReady: true }, isAction: true }];
       case 'series_added':
       case 'episode_monitored':
-        return [{ name: '⭕🔍 Search on Sonarr', url: this.buildActionLink('search', parsed), isAction: true }];
+        return [{ name: '⭕🔍 Search on Sonarr', url: this.buildActionLink('search', parsed), behaviorHints: { notWebReady: true }, isAction: true }];
       case 'series_not_added':
         return [
           {
             name: '‼️➕🔍 Add+Search Sonarr',
             url: this.buildActionLink('add-search', parsed),
+            behaviorHints: { notWebReady: true },
             isAction: true
           }
         ];

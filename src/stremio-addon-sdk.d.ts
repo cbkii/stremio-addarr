@@ -21,6 +21,7 @@ declare module 'stremio-addon-sdk' {
     url?: string;
     externalUrl?: string;
     externalUris?: Array<{ uri: string; name?: string }>;
+    behaviorHints?: { notWebReady?: boolean };
   }
 
   export interface StreamHandlerArgs {
