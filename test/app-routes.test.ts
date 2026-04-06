@@ -5,6 +5,16 @@ import { baseConfig, withServer } from './_helpers.js';
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
+/** Race a promise against a 5 s timeout, failing fast if the background op never fires. */
+function withCommandTimeout(p: Promise<void>): Promise<void> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timed out waiting for background command POST')), 5000)
+    )
+  ]);
+}
+
 test.afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
 });
@@ -89,7 +99,7 @@ test('search action route triggers Radarr search and returns HLS stream', async 
   cfg.radarr.enabled = true;
   const called: Array<{ path: string; method: string }> = [];
 
-  let resolveCommandPosted!: () => void;
+  let resolveCommandPosted: () => void = () => {};
   const commandPosted = new Promise<void>((resolve) => { resolveCommandPosted = resolve; });
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -123,12 +133,8 @@ test('search action route triggers Radarr search and returns HLS stream', async 
     assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
 
     // The action responds immediately; Arr operations run in the background.
-    // Race against a 5 s timeout so the test fails fast on regression instead
-    // of hanging CI indefinitely.
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('timed out waiting for background command POST')), 5000)
-    );
-    await Promise.race([commandPosted, timeout]);
+    // Use withCommandTimeout so the test fails fast on regression instead of hanging CI.
+    await withCommandTimeout(commandPosted);
     assert.ok(called.some((entry) => entry.path === '/api/v3/command' && entry.method === 'POST'));
   });
 });
@@ -137,8 +143,9 @@ test('add-search action route performs add and search on Sonarr', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
 
-  // resolveCommandPosted is assigned synchronously inside the Promise constructor.
-  let resolveCommandPosted!: () => void;
+  // resolveCommandPosted is initialized to a no-op; the Promise constructor
+  // always runs synchronously and replaces it with the real resolver.
+  let resolveCommandPosted: () => void = () => {};
   const commandPosted = new Promise<void>((resolve) => { resolveCommandPosted = resolve; });
 
   // After POST /api/v3/series the mock must reflect the added series so that the
@@ -191,10 +198,7 @@ test('add-search action route performs add and search on Sonarr', async () => {
 
     // The action responds immediately; wait for background Arr ops to finish
     // before the test ends and afterEach restores globalThis.fetch.
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('timed out waiting for background command POST')), 5000)
-    );
-    await Promise.race([commandPosted, timeout]);
+    await withCommandTimeout(commandPosted);
   });
 });
 
@@ -203,8 +207,9 @@ test('series add-search action route triggers Sonarr add and search', async () =
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
 
-  // resolveCommandPosted is assigned synchronously inside the Promise constructor.
-  let resolveCommandPosted!: () => void;
+  // resolveCommandPosted is initialized to a no-op; the Promise constructor
+  // always runs synchronously and replaces it with the real resolver.
+  let resolveCommandPosted: () => void = () => {};
   const commandPosted = new Promise<void>((resolve) => { resolveCommandPosted = resolve; });
 
   // After POST /api/v3/series the mock must reflect the added series so that the
@@ -246,9 +251,6 @@ test('series add-search action route triggers Sonarr add and search', async () =
 
     // The action responds immediately; wait for background Arr ops to finish
     // before the test ends and afterEach restores globalThis.fetch.
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('timed out waiting for background command POST')), 5000)
-    );
-    await Promise.race([commandPosted, timeout]);
+    await withCommandTimeout(commandPosted);
   });
 });
