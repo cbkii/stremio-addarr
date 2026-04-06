@@ -4,6 +4,7 @@ import { loadConfig, validateConfig, type AppConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
 import { parseStremioId } from './lib/stremio-ids.js';
+import type { ParsedStremioId } from './types.js';
 
 // Minimal valid HLS end-of-stream playlist. Stremio's player resolves this as a
 // zero-duration stream that completes immediately — no browser is opened.
@@ -129,9 +130,10 @@ export function createApp(config: AppConfig) {
     });
   });
 
-  app.get('/action/:action/:kind/:encodedId', async (req, res) => {
+  app.get('/action/:action/:kind/:encodedId', (req, res) => {
     const action = req.params.action;
     const kind = req.params.kind;
+    const encodedId = req.params.encodedId;
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Cache-Control', 'no-store');
@@ -147,27 +149,51 @@ export function createApp(config: AppConfig) {
       return;
     }
 
+    let parsed: ParsedStremioId;
     try {
-      const rawId = decodeURIComponent(req.params.encodedId);
-      const parsed = parseStremioId(kind, rawId);
-      if (action === 'add-search') {
-        await statusService.triggerAddAndSearch(parsed);
-      } else {
-        await statusService.triggerSearch(parsed);
-      }
-      logger.info('Action completed', { action, kind, encodedId: req.params.encodedId });
+      parsed = parseStremioId(kind, decodeURIComponent(encodedId));
     } catch (error) {
-      // Log the failure but always respond with a valid HLS stream so Stremio
-      // never falls back to opening an external browser.
+      logger.error('Action id parse error', {
+        error: error instanceof Error ? error.message : String(error),
+        action,
+        kind,
+        encodedId
+      });
+      res.send(EMPTY_HLS);
+      return;
+    }
+
+    // Respond immediately so Stremio's player is not kept waiting while Arr
+    // API calls execute. The trigger runs in the background; if Stremio drops
+    // the connection before this response arrives, the work still completes.
+    res.send(EMPTY_HLS);
+
+    const trigger = action === 'add-search'
+      ? statusService.triggerAddAndSearch(parsed)
+      : statusService.triggerSearch(parsed);
+
+    trigger.then((result) => {
+      if (result.ok) {
+        logger.info('Action completed', { action, kind, encodedId, title: result.title });
+      } else {
+        logger.warn('Action rejected by Arr service', {
+          action,
+          kind,
+          encodedId,
+          title: result.title,
+          summary: result.summary
+        });
+      }
+    }).catch((error: unknown) => {
+      // Log the failure; Stremio has already received the HLS response and
+      // will not open an external browser regardless of what happens here.
       logger.error('Action execution failed', {
         error: error instanceof Error ? error.message : String(error),
         action,
         kind,
-        encodedId: req.params.encodedId
+        encodedId
       });
-    }
-
-    res.send(EMPTY_HLS);
+    });
   });
 
   app.get('/', (_req, res) => {

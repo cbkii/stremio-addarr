@@ -89,6 +89,9 @@ test('search action route triggers Radarr search and returns HLS stream', async 
   cfg.radarr.enabled = true;
   const called: Array<{ path: string; method: string }> = [];
 
+  let resolveCommandPosted!: () => void;
+  const commandPosted = new Promise<void>((resolve) => { resolveCommandPosted = resolve; });
+
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const parsed = new URL(url);
@@ -102,6 +105,7 @@ test('search action route triggers Radarr search and returns HLS stream', async 
       return new Response('{"records":[]}', { status: 200 });
     }
     if (path === '/api/v3/command' && init?.method === 'POST') {
+      resolveCommandPosted();
       return new Response('{}', { status: 201 });
     }
     if (path === '/api/v3/system/status') {
@@ -117,9 +121,12 @@ test('search action route triggers Radarr search and returns HLS stream', async 
     assert.equal(res.status, 200);
     const text = await res.text();
     assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
-  });
 
-  assert.ok(called.some((entry) => entry.path === '/api/v3/command' && entry.method === 'POST'));
+    // The action responds immediately; Arr operations run in the background.
+    // Wait for the background command POST to be observed before asserting.
+    await commandPosted;
+    assert.ok(called.some((entry) => entry.path === '/api/v3/command' && entry.method === 'POST'));
+  });
 });
 
 test('add-search action route performs add and search on Sonarr', async () => {
