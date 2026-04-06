@@ -6,7 +6,10 @@ services:
     env_file:
       - .env
     ports:
-      - "7010:7010"
+      # Bind to loopback only — Caddy (running on the host) reverse-proxies to
+      # this port. Binding to 127.0.0.1 prevents the app from being directly
+      # reachable on the LAN without going through Caddy's TLS termination.
+      - "127.0.0.1:7010:7010"
     # If Radarr/Sonarr run on the host or another LAN device,
     # use host networking or ensure container can reach them:
     # network_mode: host

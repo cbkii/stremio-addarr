@@ -1,26 +1,23 @@
-# Recommended default for stock Android TV v9 + Stremio:
-# - Real DNS hostname
-# - Publicly trusted certificate (Let's Encrypt / ZeroSSL)
-# - Reverse proxy to local Node app (127.0.0.1:7010)
+# Caddyfile example for stremio-addarr — DuckDNS DNS-01 (no port forwarding)
 #
-# PUBLIC_BASE_URL must match this hostname, e.g.:
-# PUBLIC_BASE_URL=https://stremio-addarr.example.com
+# REQUIREMENTS:
+#   - A custom Caddy binary with the DuckDNS DNS provider plugin is required.
+#     The standard APT caddy package does NOT include DNS plugins.
+#     Download from https://caddyserver.com/download (add github.com/caddy-dns/duckdns)
+#     or build with: xcaddy build --with github.com/caddy-dns/duckdns
 #
-# Requirements:
-# - `stremio-addarr.example.com` resolves to your Caddy host
-# - TCP 80/443 reachable for ACME HTTP challenge
-#   (or use DNS challenge if you cannot expose ports)
+#   - Store your DuckDNS token in /etc/caddy/caddy.env (not here):
+#       DUCKDNS_TOKEN=your-token-here
+#     and load it via a systemd drop-in EnvironmentFile (see README_HOST.md).
+#
+# Replace "myaddarr" with your actual DuckDNS subdomain.
 
-stremio-addarr.example.com {
+myaddarr.duckdns.org {
+    # DNS-01 ACME challenge — no router port forwarding required
+    tls {
+        dns duckdns {env.DUCKDNS_TOKEN}
+    }
+
     encode zstd gzip
     reverse_proxy 127.0.0.1:7010
 }
-
-# ─────────────────────────────────────────────────────────────
-# Advanced only (not recommended for stock Android TV):
-# Internal CA certificates may not be trusted by Stremio on non-root TV devices.
-#
-# local-name.lan {
-#     tls internal
-#     reverse_proxy 127.0.0.1:7010
-# }

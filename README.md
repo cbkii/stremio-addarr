@@ -37,14 +37,17 @@ Stock Android TV (API 24+) **only trusts system CA certificates**. This means:
 
 **You need a publicly trusted HTTPS certificate on a real DNS hostname.**
 
-This project supports two beginner-safe hosting modes:
+The certificate must be issued by a public CA (e.g. Let's Encrypt). The service itself can stay entirely private on your LAN — only the certificate needs to be public/trusted. Router port forwarding is **not required** when using a DNS-01 ACME challenge (the default path documented here).
+
+This project's recommended hosting path:
 
 | Mode | Description |
 |------|-------------|
-| **DuckDNS + Caddy + Let's Encrypt** | Free dynamic DNS + automatic HTTPS. Requires router port forwarding. *(Recommended default)* |
-| **Tailscale Funnel** | No port forwarding needed. Public HTTPS via `*.ts.net`. |
+| **DuckDNS + Caddy DNS-01 + local DNS override** | Free subdomain, automatic trusted cert, no port forwarding. *(Recommended default)* |
 
-See [README_HOST.md](README_HOST.md) for full step-by-step setup.
+Install order: choose your hostname → set up Caddy with the DuckDNS DNS plugin → verify HTTPS → set `PUBLIC_BASE_URL` → install in Stremio.
+
+See [README_HOST.md](README_HOST.md) for the full step-by-step setup guide.
 
 ---
 
@@ -96,16 +99,11 @@ node --version   # should show v20.x.x
 
 ## 5 — Choose a hosting mode
 
-Before installing the add-on, decide how you will expose it over HTTPS.
-
-| Mode | When to choose |
-|------|----------------|
-| **DuckDNS + Caddy + Let's Encrypt** | You can forward ports 80 + 443 on your router. *(Recommended)* |
-| **Tailscale Funnel** | You cannot forward ports (strict ISP, double NAT, etc.). |
+Before installing the add-on, set up HTTPS hosting. The recommended default is **DuckDNS + Caddy DNS-01 + local DNS override** — it is free, requires no router port forwarding, and works on stock non-root Android TV.
 
 👉 **Follow the full setup instructions in [README_HOST.md](README_HOST.md) now**, then come back here to continue.
 
-You will need your public HTTPS hostname (e.g. `myaddarr.duckdns.org` or `raspberrypi.tail1234.ts.net`) for the next steps.
+You will need your public HTTPS hostname (e.g. `myaddarr.duckdns.org`) for the next steps.
 
 ---
 
@@ -223,7 +221,7 @@ node dist/src/index.js
 
 If you haven't already completed hosting setup, do so now:
 
-👉 **[README_HOST.md](README_HOST.md)** — step-by-step DuckDNS + Caddy or Tailscale Funnel setup.
+👉 **[README_HOST.md](README_HOST.md)** — step-by-step DuckDNS + Caddy DNS-01 setup (no port forwarding required).
 
 ---
 
@@ -364,7 +362,7 @@ https://github.com/cbkii/stremio-addarr/releases/latest/download/stremio-addarr-
 ```
 Stremio (Android TV)
     ↓ HTTPS
-Caddy / Tailscale Funnel (public hostname, port 443)
+Caddy (public hostname, port 443) ← Let's Encrypt cert via DNS-01
     ↓ HTTP
 Node.js add-on (127.0.0.1:7010)
     ↓ HTTP
@@ -372,9 +370,27 @@ Sonarr / Radarr (LAN)
 ```
 
 - Node app binds to `127.0.0.1:7010` (private, not exposed directly).
-- Caddy or Tailscale Funnel handles TLS termination.
+- Caddy handles TLS termination. Certificate is issued by Let's Encrypt via DNS-01 — no port forwarding required.
 - `PUBLIC_BASE_URL` always points to the public HTTPS hostname.
 - All Arr credentials stay server-side in `.env`.
+
+---
+
+## Appendix — Tailscale Funnel (alternative, advanced)
+
+Tailscale Funnel is an alternative if you already use Tailscale, want zero DNS configuration, and are comfortable with the `*.ts.net` subdomain format. It is **not the primary documented path** for this add-on but can work in place of Caddy.
+
+### Setup overview
+
+1. Install Tailscale on the Pi: `curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`
+2. Enable HTTPS certificates in the [Tailscale admin console](https://login.tailscale.com/admin/dns) → DNS → HTTPS Certificates.
+3. Expose port 7010: `sudo tailscale funnel --bg 7010`
+4. Note your public hostname, e.g. `raspberrypi.tail1234.ts.net`.
+5. Set `PUBLIC_BASE_URL=https://raspberrypi.tail1234.ts.net` in `.env`.
+6. Restart the add-on: `sudo systemctl restart stremio-addarr`
+7. Verify: `curl -I https://raspberrypi.tail1234.ts.net/manifest.json`
+
+> Tailscale Funnel routes traffic through Tailscale's infrastructure. The add-on URL is publicly reachable (not LAN-only) while Funnel is active. No local DNS override is needed.
 
 ---
 
