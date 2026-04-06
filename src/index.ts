@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import express from 'express';
 import sdk from 'stremio-addon-sdk';
 import { loadConfig, validateConfig, type AppConfig } from './config.js';
@@ -27,15 +28,18 @@ function redactUrl(rawUrl: string): string {
 export function createApp(config: AppConfig) {
   const getRouter = (sdk as { getRouter: (addonInterface: unknown) => import('express').RequestHandler }).getRouter;
   const logger = createLogger(config.logLevel);
-  const { addonInterface, statusService } = createAddonInterface(config);
+  const { addonInterface, statusService } = createAddonInterface(config, logger);
 
   const app = express();
   app.disable('x-powered-by');
 
   app.use((req, res, next) => {
+    const reqId = randomUUID();
+    res.locals['reqId'] = reqId;
     const start = Date.now();
     res.on('finish', () => {
       logger.info('request', {
+        reqId,
         method: req.method,
         path: req.path,
         status: res.statusCode,

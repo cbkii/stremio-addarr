@@ -42,7 +42,7 @@ export interface AppConfig {
   tmdbApiKey?: string;
 }
 
-const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error']);
+const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 
 function readNumber(name: string, fallback: number): number {
@@ -161,7 +161,7 @@ export function loadConfig(): AppConfig {
 
   const logLevelRaw = readString('LOG_LEVEL', 'info') as LogLevel;
   if (!LOG_LEVELS.has(logLevelRaw)) {
-    throw new Error('LOG_LEVEL must be one of: debug, info, warn, error.');
+    throw new Error('LOG_LEVEL must be one of: debug, info, warn, error, none.');
   }
 
   const config: AppConfig = {

@@ -1,10 +1,12 @@
 import type { AppConfig } from '../config.js';
 import { TtlCache } from '../lib/cache.js';
 import { HttpError, HttpTimeoutError, JsonHttpClient } from '../lib/http.js';
+import { createLogger } from '../logger.js';
 import type { AddActionResult, ArrMovieStatus, RadarrLookupRecord, RadarrMovieRecord } from '../types.js';
 
 export class RadarrClient {
   private readonly http: JsonHttpClient;
+  private readonly logger: ReturnType<typeof createLogger>;
   private readonly moviesCache: TtlCache<RadarrMovieRecord[]>;
   private readonly queueCache: TtlCache<Array<{ movieId?: number }>>;
 
@@ -12,12 +14,15 @@ export class RadarrClient {
     private readonly config: AppConfig,
     injectedHttp?: JsonHttpClient
   ) {
+    this.logger = createLogger(config.logLevel);
     this.http =
       injectedHttp ??
       new JsonHttpClient({
         baseUrl: config.radarr.baseUrl,
         apiKey: config.radarr.apiKey,
-        timeoutMs: config.requestTimeoutMs
+        timeoutMs: config.requestTimeoutMs,
+        logger: this.logger,
+        serviceName: 'radarr'
       });
     this.moviesCache = new TtlCache<RadarrMovieRecord[]>(config.statusCacheTtlMs);
     this.queueCache = new TtlCache<Array<{ movieId?: number }>>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
@@ -70,8 +75,10 @@ export class RadarrClient {
       };
     }
 
+    this.logger.info('radarr add start', { imdbId });
     const current = await this.getMovieStatus(imdbId);
     if (current.state === 'downloaded' || current.state === 'added' || current.state === 'missing' || current.state === 'downloading') {
+      this.logger.info('radarr add skipped', { imdbId, reason: 'already_exists', state: current.state });
       return {
         ok: true,
         service: 'radarr',
@@ -83,6 +90,7 @@ export class RadarrClient {
 
     const lookup = await this.lookupMovie(imdbId);
     if (!lookup) {
+      this.logger.warn('radarr add failed', { imdbId, reason: 'lookup_failed' });
       return {
         ok: false,
         service: 'radarr',
@@ -93,6 +101,7 @@ export class RadarrClient {
     }
 
     if (!lookup.tmdbId) {
+      this.logger.warn('radarr add failed', { imdbId, reason: 'no_tmdb_id' });
       return {
         ok: false,
         service: 'radarr',
@@ -126,6 +135,7 @@ export class RadarrClient {
         /already been added/i.test(error.body)
       ) {
         this.moviesCache.clear();
+        this.logger.info('radarr add skipped', { imdbId, reason: 'already_exists_400', state: 'unknown' });
         return {
           ok: true,
           service: 'radarr',
@@ -138,6 +148,7 @@ export class RadarrClient {
     }
     this.moviesCache.clear();
 
+    this.logger.info('radarr add success', { imdbId, title: lookup.title, searchOnAdd: this.config.radarr.searchOnAdd });
     return {
       ok: true,
       service: 'radarr',
@@ -148,8 +159,10 @@ export class RadarrClient {
   }
 
   async triggerMovieSearch(imdbId: string): Promise<AddActionResult> {
+    this.logger.info('radarr search start', { imdbId });
     const status = await this.getMovieStatus(imdbId);
     if (status.state === 'unavailable') {
+      this.logger.warn('radarr search failed', { imdbId, reason: 'unavailable' });
       return {
         ok: false,
         service: 'radarr',
@@ -158,6 +171,7 @@ export class RadarrClient {
       };
     }
     if (status.state === 'not_added') {
+      this.logger.warn('radarr search failed', { imdbId, reason: 'not_added' });
       return {
         ok: false,
         service: 'radarr',
@@ -166,6 +180,7 @@ export class RadarrClient {
       };
     }
     if (status.state === 'downloaded') {
+      this.logger.info('radarr search skipped', { imdbId, reason: 'already_downloaded' });
       return {
         ok: true,
         service: 'radarr',
@@ -175,6 +190,7 @@ export class RadarrClient {
       };
     }
     if (!status.movieId) {
+      this.logger.warn('radarr search failed', { imdbId, reason: 'no_movie_id' });
       return {
         ok: false,
         service: 'radarr',
@@ -188,6 +204,7 @@ export class RadarrClient {
       movieIds: [status.movieId]
     });
     this.moviesCache.clear();
+    this.logger.info('radarr search queued', { imdbId, movieId: status.movieId });
     return {
       ok: true,
       service: 'radarr',

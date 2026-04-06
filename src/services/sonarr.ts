@@ -1,6 +1,7 @@
 import type { AppConfig } from '../config.js';
 import { TtlCache } from '../lib/cache.js';
 import { HttpError, HttpTimeoutError, JsonHttpClient } from '../lib/http.js';
+import { createLogger } from '../logger.js';
 import type {
   AddActionResult,
   ArrEpisodeStatus,
@@ -11,6 +12,7 @@ import type {
 
 export class SonarrClient {
   private readonly http: JsonHttpClient;
+  private readonly logger: ReturnType<typeof createLogger>;
   private readonly seriesCache: TtlCache<SonarrSeriesRecord[]>;
   private readonly episodeCache: TtlCache<SonarrEpisodeRecord[]>;
   private readonly queueCache: TtlCache<Array<{ episodeId?: number; seriesId?: number }>>;
@@ -19,12 +21,15 @@ export class SonarrClient {
     private readonly config: AppConfig,
     injectedHttp?: JsonHttpClient
   ) {
+    this.logger = createLogger(config.logLevel);
     this.http =
       injectedHttp ??
       new JsonHttpClient({
         baseUrl: config.sonarr.baseUrl,
         apiKey: config.sonarr.apiKey,
-        timeoutMs: config.requestTimeoutMs
+        timeoutMs: config.requestTimeoutMs,
+        logger: this.logger,
+        serviceName: 'sonarr'
       });
     this.seriesCache = new TtlCache<SonarrSeriesRecord[]>(config.statusCacheTtlMs);
     this.episodeCache = new TtlCache<SonarrEpisodeRecord[]>(config.statusCacheTtlMs);
@@ -91,8 +96,10 @@ export class SonarrClient {
       };
     }
 
+    this.logger.info('sonarr add start', { imdbId });
     const current = await this.findSeriesByImdbId(imdbId);
     if (current) {
+      this.logger.info('sonarr add skipped', { imdbId, reason: 'already_exists', title: current.title });
       return {
         ok: true,
         service: 'sonarr',
@@ -105,6 +112,7 @@ export class SonarrClient {
 
     const lookup = await this.lookupSeries(imdbId);
     if (!lookup) {
+      this.logger.warn('sonarr add failed', { imdbId, reason: 'lookup_failed', title: undefined });
       return {
         ok: false,
         service: 'sonarr',
@@ -115,6 +123,7 @@ export class SonarrClient {
     }
 
     if (!lookup.tvdbId) {
+      this.logger.warn('sonarr add failed', { imdbId, reason: 'no_tvdb_id', title: lookup.title });
       return {
         ok: false,
         service: 'sonarr',
@@ -151,6 +160,7 @@ export class SonarrClient {
       ) {
         this.seriesCache.clear();
         this.episodeCache.clear();
+        this.logger.info('sonarr add skipped', { imdbId, reason: 'already_exists_400', title: lookup.title });
         return {
           ok: true,
           service: 'sonarr',
@@ -164,6 +174,7 @@ export class SonarrClient {
     this.seriesCache.clear();
     this.episodeCache.clear();
 
+    this.logger.info('sonarr add success', { imdbId, title: lookup.title, searchOnAdd: this.config.sonarr.searchOnAdd });
     return {
       ok: true,
       service: 'sonarr',
@@ -174,8 +185,10 @@ export class SonarrClient {
   }
 
   async triggerEpisodeSearch(imdbId: string, season?: number, episode?: number): Promise<AddActionResult> {
+    this.logger.info('sonarr search start', { imdbId, season, episode });
     const status = await this.getEpisodeStatus(imdbId, season, episode);
     if (status.state === 'unavailable') {
+      this.logger.warn('sonarr search failed', { imdbId, reason: 'unavailable' });
       return {
         ok: false,
         service: 'sonarr',
@@ -184,6 +197,7 @@ export class SonarrClient {
       };
     }
     if (status.state === 'series_not_added') {
+      this.logger.warn('sonarr search failed', { imdbId, reason: 'not_added' });
       return {
         ok: false,
         service: 'sonarr',
@@ -192,6 +206,7 @@ export class SonarrClient {
       };
     }
     if (status.state === 'episode_downloaded') {
+      this.logger.info('sonarr search skipped', { imdbId, reason: 'already_downloaded' });
       return {
         ok: true,
         service: 'sonarr',
@@ -208,6 +223,7 @@ export class SonarrClient {
       });
       this.seriesCache.clear();
       this.episodeCache.clear();
+      this.logger.info('sonarr search queued', { imdbId, episodeId: status.episodeId });
       return {
         ok: true,
         service: 'sonarr',
@@ -223,6 +239,7 @@ export class SonarrClient {
       });
       this.seriesCache.clear();
       this.episodeCache.clear();
+      this.logger.info('sonarr search queued', { imdbId, seriesId: status.seriesId, type: 'missing_episode' });
       return {
         ok: true,
         service: 'sonarr',
@@ -231,6 +248,7 @@ export class SonarrClient {
       };
     }
 
+    this.logger.warn('sonarr search failed', { imdbId, reason: 'no_ids' });
     return {
       ok: false,
       service: 'sonarr',

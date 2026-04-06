@@ -1,8 +1,14 @@
+import type { Logger } from '../logger.js';
+
 export interface HttpClientOptions {
   baseUrl: string;
   apiKey: string;
   timeoutMs: number;
   apiKeyHeader?: string;
+  /** Optional logger for outgoing request/response diagnostics. */
+  logger?: Logger;
+  /** Service name used as a log field (e.g. 'radarr', 'sonarr'). */
+  serviceName?: string;
 }
 
 export class HttpError extends Error {
@@ -19,6 +25,14 @@ export class HttpTimeoutError extends Error {
   constructor(message: string) {
     super(message);
   }
+}
+
+function categorizeHttpError(status: number): string {
+  if (status === 401 || status === 403) return 'auth_error';
+  if (status === 404) return 'not_found';
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'server_error';
+  return `http_${status}`;
 }
 
 export class JsonHttpClient {
@@ -43,6 +57,12 @@ export class JsonHttpClient {
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
+    const start = Date.now();
+    const service = this.options.serviceName ?? 'http';
+    const method = (init.method ?? 'GET').toUpperCase();
+
+    this.options.logger?.debug('arr request', { service, method, path });
+
     try {
       const response = await fetch(`${this.options.baseUrl}${path}`, {
         ...init,
@@ -56,6 +76,14 @@ export class JsonHttpClient {
 
       const text = await response.text();
       if (!response.ok) {
+        this.options.logger?.warn('arr response error', {
+          service,
+          method,
+          path,
+          status: response.status,
+          durationMs: Date.now() - start,
+          errorCategory: categorizeHttpError(response.status)
+        });
         throw new HttpError(
           `Request failed with status ${response.status}`,
           response.status,
@@ -63,10 +91,15 @@ export class JsonHttpClient {
         );
       }
 
+      this.options.logger?.debug('arr response', { service, method, path, status: response.status, durationMs: Date.now() - start });
       return text ? (JSON.parse(text) as T) : ({} as T);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
+        this.options.logger?.warn('arr timeout', { service, method, path, durationMs: Date.now() - start, errorCategory: 'timeout' });
         throw new HttpTimeoutError(`Request timed out after ${this.options.timeoutMs}ms`);
+      }
+      if (!(error instanceof HttpError)) {
+        this.options.logger?.warn('arr request failed', { service, method, path, durationMs: Date.now() - start, errorCategory: 'network', error: error instanceof Error ? error.message : String(error) });
       }
       throw error;
     } finally {

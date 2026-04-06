@@ -232,7 +232,247 @@ curl -fsS https://YOUR_HOSTNAME/status.json
 
 ---
 
-## 7) Release and hosting docs
+## 7) Logs and diagnostics
+
+### Log format
+
+All logs are structured JSON, emitted to **stdout** (info/debug/warn) and **stderr** (error).
+Each line is a single JSON object with at minimum: `time`, `level`, `message`.
+
+```json
+{"time":"2024-11-01T14:32:01.123Z","level":"info","message":"request","reqId":"a1b2c3d4-...","method":"GET","path":"/stream/movie/tt1234567","status":200,"durationMs":42}
+{"time":"2024-11-01T14:32:01.081Z","level":"info","message":"radarr add success","imdbId":"tt1234567","title":"Example Movie","searchOnAdd":true}
+{"time":"2024-11-01T14:32:00.950Z","level":"debug","message":"arr response","service":"radarr","method":"GET","path":"/api/v3/movie","status":200,"durationMs":18}
+```
+
+Set `LOG_LEVEL` in `.env`:
+
+| Value   | What you get                                                   |
+|---------|----------------------------------------------------------------|
+| `error` | Fatal/unexpected failures only                                 |
+| `warn`  | Arr API errors, timeouts, auth failures, add/search warnings   |
+| `info`  | Every HTTP request + Arr add/search operations (recommended)   |
+| `debug` | All of the above + individual outgoing Arr API call timings    |
+| `none`  | Silence all log output                                         |
+
+For production Raspberry Pi use `LOG_LEVEL=info`. Switch to `debug` only while investigating a problem.
+
+### Collecting logs — systemd (Raspberry Pi / Linux service)
+
+```bash
+# Last 100 lines
+sudo journalctl -u stremio-addarr -n 100 --no-pager
+
+# Follow live
+sudo journalctl -u stremio-addarr -f
+
+# Tail and pretty-print with jq
+sudo journalctl -u stremio-addarr -n 200 --no-pager -o cat | jq .
+
+# Filter for problems only: warn captures Arr API/timeout/auth issues; error captures unexpected failures
+sudo journalctl -u stremio-addarr -n 500 --no-pager -o cat | jq 'select(.level == "error" or .level == "warn")'
+
+# Logs in a time window (e.g., last 10 minutes)
+sudo journalctl -u stremio-addarr --since "10 minutes ago" --no-pager -o cat | jq .
+```
+
+Expected startup output:
+
+```json
+{"time":"...","level":"warn","message":"Config issue","issue":"PUBLIC_BASE_URL uses HTTP"}
+{"time":"...","level":"info","message":"Server started","host":"127.0.0.1","port":7010,"manifest":"https://example.duckdns.org/manifest.json"}
+```
+
+### Collecting logs — Docker
+
+```bash
+# Last 200 lines
+docker logs stremio-addarr --tail 200
+
+# Follow live
+docker logs stremio-addarr -f
+
+# Filter errors with jq
+docker logs stremio-addarr --tail 500 2>&1 | jq 'select(.level == "error" or .level == "warn")'
+
+# Logs in a time window
+docker logs stremio-addarr --since 10m 2>&1 | jq .
+```
+
+### Collecting logs — local dev (`npm run dev`)
+
+Logs appear directly in the terminal. Pipe to `jq` for easier reading:
+
+```bash
+npm run dev 2>&1 | jq .
+```
+
+### Correlating a Stremio stream request end-to-end
+
+Each HTTP request gets a unique `reqId`. Find the Stremio stream request and trace it:
+
+```bash
+# Find the stream request for a specific title/id
+sudo journalctl -u stremio-addarr -n 500 --no-pager -o cat \
+  | jq 'select(.path and (.path | startswith("/stream/")))'
+
+# Example output:
+# {"time":"...","level":"info","message":"request","reqId":"abc-123","method":"GET","path":"/stream/movie/tt1234567","status":200,"durationMs":55}
+# {"time":"...","level":"info","message":"stream handler complete","type":"movie","id":"tt1234567","tileCount":1,"durationMs":48}
+```
+
+---
+
+## 8) Android TV + Stremio troubleshooting
+
+### Symptoms to capture from Stremio on Android TV
+
+When the add-on tile does not appear or shows an error in Stremio on Android TV:
+
+1. **Note the exact time** of the failed playback attempt (or when tiles didn't load).
+2. **Note the title** you were browsing (movie name or series/episode).
+3. Look at the tile name shown — for example `🛑 Down` means Arr was unreachable at that moment; `➕ Add Radarr` means the item was not found in Radarr.
+
+Stremio on Android TV does **not** expose an in-app log. There is no practical way to extract Stremio client logs from a stock Android TV without ADB. The most actionable path is to correlate the **time window** from the Android TV with addon-side logs.
+
+### Collecting addon logs for an Android TV playback attempt
+
+```bash
+# Get addon logs for the last 5 minutes after a failed playback
+sudo journalctl -u stremio-addarr --since "5 minutes ago" --no-pager -o cat | jq .
+
+# Filter for completed stream handler calls (info level — visible at LOG_LEVEL=info or lower)
+sudo journalctl -u stremio-addarr --since "5 minutes ago" --no-pager -o cat \
+  | jq 'select(.message == "stream handler complete")'
+
+# Note: "stream handler start" is logged at debug level and only visible with LOG_LEVEL=debug
+```
+
+### ADB log collection (advanced, requires USB debug mode on Android TV)
+
+If you have ADB access to the Android TV device:
+
+```bash
+adb connect <android-tv-ip>:5555
+adb logcat -d -s Stremio | tail -100
+```
+
+This is typically not available on stock Android TV without developer options enabled. If ADB is not available, rely on the addon-side logs correlated by time window.
+
+### Matching Android TV events to addon logs
+
+1. Note the approximate time the tile appeared/failed on Android TV.
+2. Pull addon logs for a ±2 minute window around that time:
+   ```bash
+   sudo journalctl -u stremio-addarr \
+     --since "2024-11-01 14:30:00" \
+     --until "2024-11-01 14:35:00" \
+     --no-pager -o cat | jq .
+   ```
+3. Look for `"message":"request"` lines with `"path"` starting with `/stream/` — the `reqId` field uniquely identifies each stream lookup.
+4. Look for `radarr` or `sonarr` lines with the same `imdbId` to trace what the service returned.
+
+---
+
+## 9) Troubleshooting playbook
+
+### Stremio shows `🛑 Down` tile
+
+**Cause:** Addon could not reach Radarr or Sonarr.
+
+```bash
+# 1. Check connectivity from Pi to Arr
+curl -fsS http://127.0.0.1:7878/api/v3/system/status \
+  -H "X-Api-Key: YOUR_RADARR_KEY" | jq .version
+
+# 2. Check addon health
+curl -fsS http://127.0.0.1:7010/health | jq .
+
+# 3. Check logs for timeout or auth errors
+sudo journalctl -u stremio-addarr -n 100 --no-pager -o cat \
+  | jq 'select(.level == "warn" or .level == "error")'
+```
+
+Common causes and fixes:
+
+| Log message / `errorCategory`   | Likely cause                                        | Fix                                                |
+|----------------------------------|-----------------------------------------------------|----------------------------------------------------|
+| `timeout`                        | Radarr/Sonarr took too long to respond              | Increase `REQUEST_TIMEOUT_MS`; check Arr load      |
+| `auth_error`                     | Wrong API key                                       | Verify `RADARR_API_KEY` / `SONARR_API_KEY` in `.env` |
+| `unreachable`                    | Network/firewall blocked or wrong base URL          | Check `RADARR_BASE_URL` / `SONARR_BASE_URL`        |
+| `not_found`                      | Wrong base URL path                                 | Remove trailing path segments from base URL        |
+| `rate_limited`                   | Too many requests to Arr                            | Increase `STATUS_CACHE_TTL_MS`                     |
+| `server_error`                   | Arr returned 5xx                                    | Check Arr service health/logs                      |
+
+---
+
+### Android TV shows no streams at all
+
+**Cause:** Usually a TLS/HTTPS issue — stock Android TV Stremio rejects non-HTTPS or self-signed certs.
+
+```bash
+# Check PUBLIC_BASE_URL is HTTPS and reachable from outside
+curl -fsI https://YOUR_HOSTNAME/manifest.json
+
+# Check addon status page
+curl -fsS https://YOUR_HOSTNAME/status.json | jq '{likelyAndroidTvCompatible, configIssues}'
+```
+
+- If `likelyAndroidTvCompatible` is `false`, follow [README_HOST.md](README_HOST.md) to set up Caddy + public certificate.
+- If the curl fails from outside, check Caddy is running and DuckDNS is pointing to your IP.
+
+---
+
+### Add action does nothing (tile shows but tapping does nothing)
+
+**Cause:** The `/action/...` route returned an error or the tile URL is unreachable.
+
+```bash
+# Check action route logs
+sudo journalctl -u stremio-addarr -n 100 --no-pager -o cat \
+  | jq 'select(.message == "Action completed" or .message == "Action execution failed")'
+```
+
+---
+
+### High latency / slow tiles
+
+**Cause:** Arr API is slow, or cache TTL is very short.
+
+```bash
+# Enable debug logging temporarily
+# In .env: LOG_LEVEL=debug
+sudo systemctl restart stremio-addarr
+
+# Then check arr response timings
+sudo journalctl -u stremio-addarr -n 200 --no-pager -o cat \
+  | jq 'select(.message == "arr response") | {service, path, durationMs}'
+```
+
+Tune `STATUS_CACHE_TTL_MS` (default 30000 ms) to reduce repeated Arr calls for the same title.
+
+---
+
+### Config issues at startup
+
+```bash
+# Check for config warnings at startup
+sudo journalctl -u stremio-addarr --since boot --no-pager -o cat \
+  | jq 'select(.message == "Config issue")'
+```
+
+Common startup warnings and fixes:
+
+| Issue message                              | Fix                                                                     |
+|--------------------------------------------|-------------------------------------------------------------------------|
+| `PUBLIC_BASE_URL uses HTTP`                | Set `PUBLIC_BASE_URL=https://...` and configure Caddy                   |
+| `PUBLIC_BASE_URL uses an IP address`       | Use a real DNS hostname (DuckDNS, etc.)                                 |
+| `Android TV compatibility likely broken`   | See [README_HOST.md](README_HOST.md)                                    |
+| `Neither Radarr nor Sonarr is enabled`     | Set `RADARR_ENABLED=true` and/or `SONARR_ENABLED=true`                  |
+
+---
+
+## 10) Release and hosting docs
 
 - Hosting/TLS (canonical): [README_HOST.md](README_HOST.md)
 - Example env variables: [.env.example](.env.example)
