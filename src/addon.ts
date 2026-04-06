@@ -1,5 +1,6 @@
 import { addonBuilder } from 'stremio-addon-sdk';
 import type { AppConfig } from './config.js';
+import type { Logger } from './logger.js';
 import { parseStremioId } from './lib/stremio-ids.js';
 import type { StatusTile } from './types.js';
 import { ArrStatusService } from './services/status.js';
@@ -14,7 +15,7 @@ function streamFromTile(tile: StatusTile) {
   };
 }
 
-export function createAddonInterface(config: AppConfig) {
+export function createAddonInterface(config: AppConfig, logger?: Logger) {
   const builder = new addonBuilder({
     id: 'org.cbkii.stremio-addarr',
     version: config.version,
@@ -37,8 +38,14 @@ export function createAddonInterface(config: AppConfig) {
       return { streams: [] };
     }
 
+    const start = Date.now();
+    logger?.debug('stream handler start', { type, id });
+
     const parsed = parseStremioId(type, id);
     const tiles = await statusService.buildTiles(parsed);
+
+    logger?.info('stream handler complete', { type, id, tileCount: tiles.length, durationMs: Date.now() - start });
+
     return {
       streams: tiles.map(streamFromTile),
       cacheMaxAge: config.streamCacheMaxAgeSec,
