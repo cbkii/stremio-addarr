@@ -83,7 +83,7 @@ dig +short myaddarr.duckdns.org
 # Should output your Pi's LAN IP, e.g. 192.168.1.100
 ```
 
-> ℹ️ You do NOT need a DuckDNS update cron job for this LAN-only setup. The A record just needs to exist and point somewhere (LAN IP is fine). Let's Encrypt only checks the TXT record for DNS-01, not the A record.
+> ℹ️ You do NOT need a DuckDNS update cron job for this LAN-only setup. The A record should point to your Pi's LAN IP (which you set in the step above) so LAN clients can connect. Let's Encrypt only checks the TXT record for DNS-01 certificate issuance — it does not check the A record — so you do not need a public/WAN IP for the cert to be issued.
 
 ### Option B — deSEC (advanced, bring-your-own-domain)
 
@@ -123,9 +123,11 @@ The official Caddy download page lets you select plugins and download a prebuilt
 On the Pi, download and install the binary:
 
 ```bash
-# Replace the URL with the one from the Caddy download page
-# Example URL format (yours will include a ?plugins= query string):
+# Replace the URL with the one from the Caddy download page.
+# Example URL format — replace "arm64" with "armv7" if your Pi is armv7l:
 CADDY_URL="https://caddyserver.com/api/download?os=linux&arch=arm64&p=github.com%2Fcaddy-dns%2Fduckdns"
+# For armv7 Pi models:
+# CADDY_URL="https://caddyserver.com/api/download?os=linux&arch=arm&arm=7&p=github.com%2Fcaddy-dns%2Fduckdns"
 
 sudo curl -fsSL "$CADDY_URL" -o /usr/local/bin/caddy
 sudo chmod +x /usr/local/bin/caddy
@@ -135,11 +137,12 @@ sudo chmod +x /usr/local/bin/caddy
 # Expected output: dns.providers.duckdns
 ```
 
-> ⚠️ **Do not use the standard `sudo apt install caddy`** — that package does not include third-party DNS plugins. If you previously installed Caddy via APT, you must replace the binary:
+> ⚠️ **Do not use the standard `sudo apt install caddy`** — that package does not include third-party DNS plugins. If you previously installed Caddy via APT, remove it first to avoid conflicts with future APT upgrades:
 > ```bash
-> sudo systemctl stop caddy
-> sudo cp /usr/local/bin/caddy /usr/bin/caddy   # replace the APT binary
+> sudo apt remove caddy
+> sudo systemctl stop caddy 2>/dev/null || true
 > ```
+> Then install the custom binary at `/usr/local/bin/caddy` as shown above. Ensure the Caddy systemd service uses `/usr/local/bin/caddy` (check with `systemctl cat caddy | grep ExecStart`).
 
 ### Method 2 — Build with xcaddy (alternative, requires Go)
 
@@ -198,7 +201,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable caddy
 ```
 
-> If this URL is unavailable, the service file is also available in the Caddy GitHub repo under `dist/init/caddy.service`.
+> If this URL is unavailable, the service file is available at:
+> `https://github.com/caddyserver/dist/blob/master/init/caddy.service`
 
 ---
 
@@ -304,7 +308,7 @@ Your DuckDNS hostname (`myaddarr.duckdns.org`) points to your Pi's LAN IP in pub
 
 Replace `192.168.1.100` with your Pi's actual LAN IP and `myaddarr.duckdns.org` with your actual hostname in the examples below.
 
-> **Why is this needed?** Without local DNS override, LAN clients send DNS queries to public resolvers. If your DuckDNS A record points to your LAN IP, public DNS will return that LAN IP, and this usually works. However, some ISP routers block "hairpin NAT" (using a public address to reach a LAN device), and some routers cache records aggressively. A local DNS override bypasses all of that and gives you reliable, instant resolution on your LAN.
+> **Why is this needed?** Without local DNS override, LAN clients query public DNS resolvers. Your DuckDNS A record points to a private LAN IP (`192.168.1.100`), and public DNS will return that private IP. Most of the time this works, but some routers have DNS forwarding quirks, apply aggressive TTL caching, or respond inconsistently for private-IP DNS records. A local DNS override bypasses public DNS entirely for this hostname, gives you instant and reliable resolution, and means the TV always finds the Pi directly on the LAN regardless of how your router handles public DNS queries.
 
 ### Option A — Pi-hole local DNS records
 
