@@ -14,8 +14,9 @@ export type ArrService = 'radarr' | 'sonarr';
 export interface StatusTile {
   name: string;
   description?: string;
-  externalUrl?: string;
+  url?: string;
   externalUris?: Array<{ uri: string; name?: string }>;
+  behaviorHints?: { notWebReady?: boolean };
   isAction?: boolean;
 }
 
@@ -24,6 +25,8 @@ export interface ArrMovieStatus {
   movieId?: number;
   monitored?: boolean;
   hasFile?: boolean;
+  title?: string;
+  year?: number;
   reason?: string;
 }
 
@@ -40,6 +43,7 @@ export interface ArrEpisodeStatus {
   episodeId?: number;
   monitored?: boolean;
   hasFile?: boolean;
+  title?: string;
   reason?: string;
 }
 
@@ -81,6 +85,7 @@ export interface SonarrSeriesRecord {
   title: string;
   imdbId?: string;
   tvdbId?: number;
+  year?: number;
   monitored?: boolean;
   statistics?: {
     episodeFileCount?: number;

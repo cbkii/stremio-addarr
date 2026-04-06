@@ -1,9 +1,53 @@
 import type { AppConfig } from '../config.js';
 import { TtlCache } from '../lib/cache.js';
-import { toStremioDetailLink } from '../lib/stremio-ids.js';
 import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
+
+// --- Tile formatting helpers ---
+
+/**
+ * Truncate a string to at most maxLen codepoints, appending '…' if trimmed.
+ */
+function truncate(s: string, maxLen: number): string {
+  const cps = Array.from(s);
+  if (cps.length <= maxLen) return s;
+  if (maxLen <= 1) return '…';
+  return cps.slice(0, maxLen - 1).join('') + '…';
+}
+
+/**
+ * First line of a movie tile description: emoji + title + year, ≤32 chars.
+ */
+function movieLine(title?: string, year?: number): string {
+  if (!title) return '📽 Not in Radarr';
+  const yearStr = year ? ` (${year})` : '';
+  const maxTitle = 32 - 3 - yearStr.length; // 3 = '📽 '.length (emoji is 2 UTF-16 units + space)
+  return `📽 ${truncate(title, maxTitle)}${yearStr}`;
+}
+
+/**
+ * First line of a series tile description: emoji + title, ≤32 chars.
+ */
+function seriesLine(title?: string): string {
+  if (!title) return '📺 Not in Sonarr';
+  return `📺 ${truncate(title, 29)}`; // 3 = '📺 '.length (emoji is 2 UTF-16 units + space), title ≤ 29
+}
+
+/**
+ * Season+episode label e.g. 'S01E02', or '' if not provided.
+ */
+function epLabel(season?: number, episode?: number): string {
+  if (season == null || episode == null) return '';
+  return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+}
+
+/**
+ * Join up to 3 non-empty lines into a newline-separated description.
+ */
+function desc(...lines: string[]): string {
+  return lines.filter(Boolean).slice(0, 3).join('\n');
+}
 
 export class ArrStatusService {
   private readonly radarr: RadarrClient;
@@ -34,50 +78,101 @@ export class ArrStatusService {
 
   private buildMovieTiles(status: ArrMovieStatus, parsed: ParsedStremioId): StatusTile[] {
     switch (status.state) {
-      case 'downloaded':
-        return [{ name: '✅ Downloaded', externalUris: this.buildKodiExternalUris() }];
+      case 'downloaded': {
+        const kodiUris = this.buildKodiExternalUris();
+        return [{
+          name: '✅\nDone',
+          description: desc(
+            movieLine(status.title, status.year),
+            '✅ File ready',
+            kodiUris.length > 0 ? '▶ Open in Kodi' : ''
+          ),
+          externalUris: kodiUris
+        }];
+      }
       case 'downloading':
-        return [{ name: '⁉️⏱️ Downloading for Kodi' }];
+        return [{
+          name: '⏱️\nLoad',
+          description: desc(movieLine(status.title, status.year), '⏱ Downloading now')
+        }];
       case 'missing':
-        return [{ name: '⭕🔍 Search on Radarr', externalUrl: this.buildActionLink('search', parsed), isAction: true }];
+        return [{
+          name: '🔍\nSearch\nRadarr',
+          description: desc(movieLine(status.title, status.year), '⭕ Monitored, missing', '🔍 Tap to search'),
+          url: this.buildActionLink('search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'added':
-        return [{ name: '⭕🔍 Search on Radarr', externalUrl: this.buildActionLink('search', parsed), isAction: true }];
+        return [{
+          name: '🔍\nSearch\nRadarr',
+          description: desc(movieLine(status.title, status.year), '⭕ Added, unmonitored', '🔍 Tap to search'),
+          url: this.buildActionLink('search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'not_added':
-        return [
-          {
-            name: '‼️➕🔍 Add+Search Radarr',
-            externalUrl: this.buildActionLink('add-search', parsed),
-            isAction: true
-          }
-        ];
+        return [{
+          name: '➕\nAdd\nRadarr',
+          description: desc('📽 Not in Radarr', '➕ Tap to add+search'),
+          url: this.buildActionLink('add-search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'unavailable':
       default:
-        return [{ name: '🛑 Arr Down', description: 'Radarr unreachable' }];
+        return [{ name: '🛑\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config') }];
     }
   }
 
   private buildSeriesTiles(status: ArrEpisodeStatus, parsed: ParsedStremioId): StatusTile[] {
+    const ep = epLabel(parsed.season, parsed.episode);
     switch (status.state) {
-      case 'episode_downloaded':
-        return [{ name: '✅ Downloaded', externalUris: this.buildKodiExternalUris() }];
+      case 'episode_downloaded': {
+        const kodiUris = this.buildKodiExternalUris();
+        return [{
+          name: '✅\nDone',
+          description: desc(
+            seriesLine(status.title),
+            ep ? `✅ ${ep} ready` : '✅ File ready',
+            kodiUris.length > 0 ? '▶ Open in Kodi' : ''
+          ),
+          externalUris: kodiUris
+        }];
+      }
       case 'episode_downloading':
-        return [{ name: '⁉️⏱️ Downloading for Kodi' }];
+        return [{
+          name: '⏱️\nLoad',
+          description: desc(seriesLine(status.title), ep ? `⏱ ${ep} downloading` : '⏱ Downloading now')
+        }];
       case 'episode_missing':
-        return [{ name: '⭕🔍 Search on Sonarr', externalUrl: this.buildActionLink('search', parsed), isAction: true }];
+        return [{
+          name: '🔍\nSearch\nSonarr',
+          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🔍 Tap to search'),
+          url: this.buildActionLink('search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'series_added':
       case 'episode_monitored':
-        return [{ name: '⭕🔍 Search on Sonarr', externalUrl: this.buildActionLink('search', parsed), isAction: true }];
+        return [{
+          name: '🔍\nSearch\nSonarr',
+          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🔍 Tap to search'),
+          url: this.buildActionLink('search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'series_not_added':
-        return [
-          {
-            name: '‼️➕🔍 Add+Search Sonarr',
-            externalUrl: this.buildActionLink('add-search', parsed),
-            isAction: true
-          }
-        ];
+        return [{
+          name: '➕\nAdd\nSonarr',
+          description: desc('📺 Not in Sonarr', '➕ Tap to add+search'),
+          url: this.buildActionLink('add-search', parsed),
+          behaviorHints: { notWebReady: true },
+          isAction: true
+        }];
       case 'unavailable':
       default:
-        return [{ name: '🛑 Arr Down', description: 'Sonarr unreachable' }];
+        return [{ name: '🛑\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config') }];
     }
   }
 
@@ -96,7 +191,7 @@ export class ArrStatusService {
       }
       const health = await this.getServiceHealth();
       if (!health.radarr.reachable) {
-        return [{ name: '🛑 Arr Down', description: 'Radarr unreachable' }];
+        return [{ name: '🛑\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config') }];
       }
       const status = await this.radarr.getMovieStatus(parsed.imdbId);
       return this.buildMovieTiles(status, parsed);
@@ -108,7 +203,7 @@ export class ArrStatusService {
 
     const health = await this.getServiceHealth();
     if (!health.sonarr.reachable) {
-      return [{ name: '🛑 Arr Down', description: 'Sonarr unreachable' }];
+      return [{ name: '🛑\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config') }];
     }
 
     const status = await this.sonarr.getEpisodeStatus(parsed.imdbId, parsed.season, parsed.episode);
@@ -148,10 +243,6 @@ export class ArrStatusService {
     this.healthCache.clear();
     this.radarr.invalidateCache();
     this.sonarr.invalidateCache();
-  }
-
-  buildReturnLink(parsed: ParsedStremioId): string {
-    return toStremioDetailLink(parsed);
   }
 
   async getServiceHealth(): Promise<{ radarr: ServiceHealth; sonarr: ServiceHealth }> {

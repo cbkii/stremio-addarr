@@ -84,7 +84,7 @@ test('root route returns tiny operator text only', async () => {
   });
 });
 
-test('search action route triggers Radarr search and returns JSON only', async () => {
+test('search action route triggers Radarr search and returns HLS stream', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
   const called: Array<{ path: string; method: string }> = [];
@@ -115,15 +115,14 @@ test('search action route triggers Radarr search and returns JSON only', async (
   await withServer(app, async (baseUrl) => {
     const res = await ORIGINAL_FETCH(`${baseUrl}/action/search/movie/tt1234567`);
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { ok: boolean; action: string };
-    assert.equal(body.ok, true);
-    assert.equal(body.action, 'search');
+    const text = await res.text();
+    assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
   });
 
   assert.ok(called.some((entry) => entry.path === '/api/v3/command' && entry.method === 'POST'));
 });
 
-test('add-search action route preserves exact episode detail link context in JSON', async () => {
+test('add-search action route performs add and search on Sonarr', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
 
@@ -162,13 +161,13 @@ test('add-search action route preserves exact episode detail link context in JSO
     const encoded = encodeURIComponent('tt7654321:2:5');
     const res = await ORIGINAL_FETCH(`${baseUrl}/action/add-search/series/${encoded}`);
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { returnUrl: string };
-    assert.equal(body.returnUrl, 'stremio:///detail/series/tt7654321/tt7654321:2:5');
+    const text = await res.text();
+    assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
   });
 });
 
 
-test('series action return link without episode preserves series detail context', async () => {
+test('series add-search action route triggers Sonarr add and search', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
 
@@ -190,7 +189,7 @@ test('series action return link without episode preserves series detail context'
   await withServer(app, async (baseUrl) => {
     const res = await ORIGINAL_FETCH(`${baseUrl}/action/add-search/series/tt1111111`);
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { returnUrl: string };
-    assert.equal(body.returnUrl, 'stremio:///detail/series/tt1111111/tt1111111');
+    const text = await res.text();
+    assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
   });
 });

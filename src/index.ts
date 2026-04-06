@@ -5,6 +5,10 @@ import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
 import { parseStremioId } from './lib/stremio-ids.js';
 
+// Minimal valid HLS end-of-stream playlist. Stremio's player resolves this as a
+// zero-duration stream that completes immediately — no browser is opened.
+const EMPTY_HLS = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-ENDLIST\n';
+
 function redactUrl(rawUrl: string): string {
   try {
     const parsed = new URL(rawUrl);
@@ -42,7 +46,7 @@ export function createApp(config: AppConfig) {
   });
 
   app.use((req, res, next) => {
-    const isStremioRoute = req.path === '/manifest.json' || req.path.startsWith('/stream/');
+    const isStremioRoute = req.path === '/manifest.json' || req.path.startsWith('/stream/') || req.path.startsWith('/action/');
     if (isStremioRoute) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
@@ -128,42 +132,42 @@ export function createApp(config: AppConfig) {
   app.get('/action/:action/:kind/:encodedId', async (req, res) => {
     const action = req.params.action;
     const kind = req.params.kind;
+
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-store');
+
     if (kind !== 'movie' && kind !== 'series') {
-      res.status(400).json({ ok: false, error: 'Unsupported action kind.' });
+      logger.error('Action request with unsupported kind', { kind, action });
+      res.send(EMPTY_HLS);
       return;
     }
     if (action !== 'search' && action !== 'add-search') {
-      res.status(400).json({ ok: false, error: 'Unsupported action.' });
+      logger.error('Action request with unsupported action', { kind, action });
+      res.send(EMPTY_HLS);
       return;
     }
 
     try {
       const rawId = decodeURIComponent(req.params.encodedId);
       const parsed = parseStremioId(kind, rawId);
-      const result =
-        action === 'add-search'
-          ? await statusService.triggerAddAndSearch(parsed)
-          : await statusService.triggerSearch(parsed);
-
-      statusService.invalidateStatusCaches();
-      res.setHeader('Cache-Control', 'no-store');
-      res.json({
-        ok: result.ok,
-        action,
-        title: result.title,
-        summary: result.summary,
-        returnUrl: statusService.buildReturnLink(parsed)
-      });
+      if (action === 'add-search') {
+        await statusService.triggerAddAndSearch(parsed);
+      } else {
+        await statusService.triggerSearch(parsed);
+      }
+      logger.info('Action completed', { action, kind, encodedId: req.params.encodedId });
     } catch (error) {
+      // Log the failure but always respond with a valid HLS stream so Stremio
+      // never falls back to opening an external browser.
       logger.error('Action execution failed', {
         error: error instanceof Error ? error.message : String(error),
         action,
         kind,
         encodedId: req.params.encodedId
       });
-      res.setHeader('Cache-Control', 'no-store');
-      res.status(500).json({ ok: false, action, error: 'Action failed' });
     }
+
+    res.send(EMPTY_HLS);
   });
 
   app.get('/', (_req, res) => {
