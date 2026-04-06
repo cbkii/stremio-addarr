@@ -268,7 +268,7 @@ sudo journalctl -u stremio-addarr -f
 # Tail and pretty-print with jq
 sudo journalctl -u stremio-addarr -n 200 --no-pager -o cat | jq .
 
-# Filter for errors/warnings only
+# Filter for problems only: warn captures Arr API/timeout/auth issues; error captures unexpected failures
 sudo journalctl -u stremio-addarr -n 500 --no-pager -o cat | jq 'select(.level == "error" or .level == "warn")'
 
 # Logs in a time window (e.g., last 10 minutes)
@@ -351,7 +351,7 @@ If you have ADB access to the Android TV device:
 
 ```bash
 adb connect <android-tv-ip>:5555
-adb logcat -d -s Stremio 2>/dev/null | tail -100
+adb logcat -d -s Stremio | tail -100
 ```
 
 This is typically not available on stock Android TV without developer options enabled. If ADB is not available, rely on the addon-side logs correlated by time window.

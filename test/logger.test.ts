@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createLogger } from '../src/logger.js';
 
 // Capture stdout/stderr lines during a callback
-async function captureConsoleOutput(fn: () => Promise<void> | void): Promise<{ stdout: string[]; stderr: string[] }> {
+async function captureConsoleOutput(callback: () => Promise<void> | void): Promise<{ stdout: string[]; stderr: string[] }> {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const origLog = console.log.bind(console);
@@ -11,7 +11,7 @@ async function captureConsoleOutput(fn: () => Promise<void> | void): Promise<{ s
   console.log = (...args: unknown[]) => stdout.push(args.map(String).join(' '));
   console.error = (...args: unknown[]) => stderr.push(args.map(String).join(' '));
   try {
-    await fn();
+    await callback();
   } finally {
     console.log = origLog;
     console.error = origErr;
