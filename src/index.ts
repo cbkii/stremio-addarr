@@ -134,17 +134,20 @@ export function createApp(config: AppConfig) {
     const action = req.params.action;
     const kind = req.params.kind;
     const encodedId = req.params.encodedId;
+    // Capture the request-correlation ID set by the logging middleware (PR#13)
+    // so it can be included in background log entries emitted after the response.
+    const reqId = typeof res.locals['reqId'] === 'string' ? res.locals['reqId'] : undefined;
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Cache-Control', 'no-store');
 
     if (kind !== 'movie' && kind !== 'series') {
-      logger.error('Action request with unsupported kind', { kind, action });
+      logger.error('Action request with unsupported kind', { reqId, kind, action });
       res.send(EMPTY_HLS);
       return;
     }
     if (action !== 'search' && action !== 'add-search') {
-      logger.error('Action request with unsupported action', { kind, action });
+      logger.error('Action request with unsupported action', { reqId, kind, action });
       res.send(EMPTY_HLS);
       return;
     }
@@ -154,6 +157,7 @@ export function createApp(config: AppConfig) {
       parsed = parseStremioId(kind, decodeURIComponent(encodedId));
     } catch (error) {
       logger.error('Action id parse error', {
+        reqId,
         error: error instanceof Error ? error.message : String(error),
         action,
         kind,
@@ -163,9 +167,9 @@ export function createApp(config: AppConfig) {
       return;
     }
 
-    // Respond immediately so Stremio's player is not kept waiting while Arr
-    // API calls execute. The trigger runs in the background; if Stremio drops
-    // the connection before this response arrives, the work still completes.
+    // Respond immediately so Stremio's player is never blocked waiting on Arr
+    // API calls. The trigger runs fire-and-forget; even if Stremio drops the
+    // connection, the add/search operations still complete on the server.
     res.send(EMPTY_HLS);
 
     const trigger = action === 'add-search'
@@ -174,9 +178,11 @@ export function createApp(config: AppConfig) {
 
     trigger.then((result) => {
       if (result.ok) {
-        logger.info('Action completed', { action, kind, encodedId, title: result.title });
+        logger.info('Action completed', { reqId, background: true, action, kind, encodedId, title: result.title });
       } else {
         logger.warn('Action rejected by Arr service', {
+          reqId,
+          background: true,
           action,
           kind,
           encodedId,
@@ -185,9 +191,11 @@ export function createApp(config: AppConfig) {
         });
       }
     }).catch((error: unknown) => {
-      // Log the failure; Stremio has already received the HLS response and
-      // will not open an external browser regardless of what happens here.
+      // Log the failure; Stremio has already received the HLS response and will
+      // not open an external browser regardless of what happens here.
       logger.error('Action execution failed', {
+        reqId,
+        background: true,
         error: error instanceof Error ? error.message : String(error),
         action,
         kind,
