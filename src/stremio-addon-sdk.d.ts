@@ -18,6 +18,7 @@ declare module 'stremio-addon-sdk' {
   export interface Stream {
     name: string;
     description?: string;
+    url?: string;
     externalUrl?: string;
     externalUris?: Array<{ uri: string; name?: string }>;
   }

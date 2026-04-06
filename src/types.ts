@@ -14,7 +14,7 @@ export type ArrService = 'radarr' | 'sonarr';
 export interface StatusTile {
   name: string;
   description?: string;
-  externalUrl?: string;
+  url?: string;
   externalUris?: Array<{ uri: string; name?: string }>;
   isAction?: boolean;
 }

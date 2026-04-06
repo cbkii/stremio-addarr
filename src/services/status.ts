@@ -1,6 +1,5 @@
 import type { AppConfig } from '../config.js';
 import { TtlCache } from '../lib/cache.js';
-import { toStremioDetailLink } from '../lib/stremio-ids.js';
 import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
@@ -39,14 +38,14 @@ export class ArrStatusService {
       case 'downloading':
         return [{ name: '⁉️⏱️ Downloading for Kodi' }];
       case 'missing':
-        return [{ name: '⭕🔍 Search on Radarr', externalUrl: this.buildActionLink('search', parsed), isAction: true }];
+        return [{ name: '⭕🔍 Search on Radarr', url: this.buildActionLink('search', parsed), isAction: true }];
       case 'added':
-        return [{ name: '⭕🔍 Search on Radarr', externalUrl: this.buildActionLink('search', parsed), isAction: true }];
+        return [{ name: '⭕🔍 Search on Radarr', url: this.buildActionLink('search', parsed), isAction: true }];
       case 'not_added':
         return [
           {
             name: '‼️➕🔍 Add+Search Radarr',
-            externalUrl: this.buildActionLink('add-search', parsed),
+            url: this.buildActionLink('add-search', parsed),
             isAction: true
           }
         ];
@@ -63,15 +62,15 @@ export class ArrStatusService {
       case 'episode_downloading':
         return [{ name: '⁉️⏱️ Downloading for Kodi' }];
       case 'episode_missing':
-        return [{ name: '⭕🔍 Search on Sonarr', externalUrl: this.buildActionLink('search', parsed), isAction: true }];
+        return [{ name: '⭕🔍 Search on Sonarr', url: this.buildActionLink('search', parsed), isAction: true }];
       case 'series_added':
       case 'episode_monitored':
-        return [{ name: '⭕🔍 Search on Sonarr', externalUrl: this.buildActionLink('search', parsed), isAction: true }];
+        return [{ name: '⭕🔍 Search on Sonarr', url: this.buildActionLink('search', parsed), isAction: true }];
       case 'series_not_added':
         return [
           {
             name: '‼️➕🔍 Add+Search Sonarr',
-            externalUrl: this.buildActionLink('add-search', parsed),
+            url: this.buildActionLink('add-search', parsed),
             isAction: true
           }
         ];
@@ -148,10 +147,6 @@ export class ArrStatusService {
     this.healthCache.clear();
     this.radarr.invalidateCache();
     this.sonarr.invalidateCache();
-  }
-
-  buildReturnLink(parsed: ParsedStremioId): string {
-    return toStremioDetailLink(parsed);
   }
 
   async getServiceHealth(): Promise<{ radarr: ServiceHealth; sonarr: ServiceHealth }> {
