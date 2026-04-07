@@ -33,6 +33,24 @@ export function createApp(config: AppConfig) {
   const logger = createLogger(config.logLevel);
   const { addonInterface, statusService } = createAddonInterface(config, logger);
 
+  // Simple in-memory token-bucket rate limiter for the /files route.
+  // Limits each IP to at most 120 file requests per minute to deter brute-force
+  // token guessing while allowing normal buffered video playback.
+  const fileRateMap = new Map<string, { count: number; resetAt: number }>();
+  const FILE_RATE_MAX = 120;
+  const FILE_RATE_WINDOW_MS = 60_000;
+
+  function isFilesRateLimited(ip: string): boolean {
+    const now = Date.now();
+    const entry = fileRateMap.get(ip);
+    if (!entry || now >= entry.resetAt) {
+      fileRateMap.set(ip, { count: 1, resetAt: now + FILE_RATE_WINDOW_MS });
+      return false;
+    }
+    entry.count++;
+    return entry.count > FILE_RATE_MAX;
+  }
+
   const app = express();
   app.disable('x-powered-by');
 
@@ -218,6 +236,12 @@ export function createApp(config: AppConfig) {
       return;
     }
 
+    const clientIp = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    if (isFilesRateLimited(clientIp)) {
+      res.status(429).end();
+      return;
+    }
+
     const { kind, fileId: fileIdRaw } = req.params;
     const token = typeof req.query['t'] === 'string' ? req.query['t'] : '';
 
@@ -258,7 +282,7 @@ export function createApp(config: AppConfig) {
     const allowedRoot = path.resolve(allowedRootRaw);
     const resolvedPath = path.resolve(filePath);
 
-    if (!resolvedPath.startsWith(allowedRoot + path.sep) && resolvedPath !== allowedRoot) {
+    if (!resolvedPath.startsWith(allowedRoot + path.sep)) {
       logger.warn('File streaming: path outside allowed root', { reqId, kind, fileId });
       res.status(403).end();
       return;

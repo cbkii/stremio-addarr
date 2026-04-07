@@ -280,3 +280,31 @@ test('file route includes CORS header for cross-origin Stremio access', async ()
     globalThis.fetch = ORIGINAL_FETCH;
   }
 });
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+
+test('file route returns 429 after exceeding rate limit', async () => {
+  const cfg = baseConfig();
+  cfg.fileStreaming.enabled = true;
+  cfg.fileStreaming.secret = FILE_SECRET;
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const urlPath = new URL(String(input)).pathname;
+    if (urlPath.startsWith('/api/v3/moviefile/')) return new Response('{}', { status: 200 });
+    return new Response('[]', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  const token = buildFileToken(FILE_SECRET, 'movie', 5);
+
+  await withServer(app, async (baseUrl) => {
+    // Send 121 requests — the 121st should be rate-limited (limit is 120/min).
+    let lastStatus = 0;
+    for (let i = 0; i <= 120; i++) {
+      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/5?t=${token}`);
+      lastStatus = res.status;
+    }
+    assert.equal(lastStatus, 429, 'should return 429 after limit is exceeded');
+  });
+});
