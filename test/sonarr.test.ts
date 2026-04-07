@@ -40,6 +40,56 @@ test('maps episode downloaded status', async () => {
   assert.equal(status.state, 'episode_downloaded');
 });
 
+test('episode downloaded status includes episodeFileId', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  const client = new SonarrClient(
+    cfg,
+    new FakeHttp({
+      get: {
+        '/api/v3/series': [{ id: 22, imdbId: 'tt9', title: 'Show' }],
+        '/api/v3/episode?seriesId=22': [{ id: 7, seasonNumber: 1, episodeNumber: 2, episodeFileId: 55, monitored: true }],
+        '/api/v3/queue?page=1&pageSize=250&includeUnknownSeriesItems=true': { records: [] }
+      }
+    }) as never
+  );
+
+  const status = await client.getEpisodeStatus('tt9', 1, 2);
+  assert.equal(status.state, 'episode_downloaded');
+  assert.equal(status.episodeFileId, 55);
+});
+
+test('getEpisodeFilePath returns path from Arr API', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  const http = {
+    async get<T>(reqPath: string): Promise<T> {
+      if (reqPath === '/api/v3/episodefile/55') return { path: '/tv/show/ep.mkv' } as T;
+      throw new Error(`Unexpected GET ${reqPath}`);
+    },
+    async post<T>(_reqPath: string): Promise<T> { return {} as T; }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  const filePath = await client.getEpisodeFilePath(55);
+  assert.equal(filePath, '/tv/show/ep.mkv');
+});
+
+test('getEpisodeFilePath returns null when Arr API fails', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  const http = {
+    async get<T>(_reqPath: string): Promise<T> { throw new Error('network error'); },
+    async post<T>(_reqPath: string): Promise<T> { return {} as T; }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  const filePath = await client.getEpisodeFilePath(55);
+  assert.equal(filePath, null);
+});
+
 test('duplicate add returns already exists', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;

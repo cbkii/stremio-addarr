@@ -111,3 +111,196 @@ test('stream cache hints are driven by config values', async () => {
     assert.equal(body.staleRevalidate, 11);
   });
 });
+
+test('downloaded tile includes playback url and omits Kodi fallback when file streaming is enabled', async () => {
+  const cfg = baseConfig();
+  cfg.fileStreaming.enabled = true;
+  cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
+  cfg.fileStreaming.playbackMode = 'direct';
+  cfg.radarr.enabled = true;
+  cfg.publicBaseUrl = 'https://pi.example.com';
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const urlPath = new URL(String(input)).pathname;
+    if (urlPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (urlPath === '/api/v3/movie') {
+      return new Response(
+        '[{"id":9,"imdbId":"tt1234567","title":"Test Movie","year":2020,"movieFile":{"id":77,"relativePath":"Test.Movie.2020.mkv","size":3221225472},"monitored":true}]',
+        { status: 200 }
+      );
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const body = (await response.json()) as {
+      streams: Array<{
+        name: string;
+        url?: string;
+        externalUris?: unknown[];
+        behaviorHints?: { notWebReady?: boolean; filename?: string; videoSize?: number };
+      }>;
+    };
+    assert.equal(body.streams[0].name, '✅\nDone');
+    assert.ok(body.streams[0].url?.startsWith('https://pi.example.com/files/movie/77?t='), 'should have a file streaming url');
+    assert.equal(body.streams[0].externalUris?.length ?? 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
+    assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
+    assert.equal(body.streams[0].behaviorHints?.filename, 'Test.Movie.2020.mkv');
+    assert.equal(body.streams[0].behaviorHints?.videoSize, 3221225472);
+  });
+});
+
+test('downloaded tile has no url when file streaming is disabled', async () => {
+  const cfg = baseConfig();
+  cfg.fileStreaming.enabled = false;
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const urlPath = new URL(String(input)).pathname;
+    if (urlPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (urlPath === '/api/v3/movie') {
+      return new Response(
+        '[{"id":9,"imdbId":"tt1234567","title":"Test Movie","year":2020,"movieFile":{"id":77},"monitored":true}]',
+        { status: 200 }
+      );
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const body = (await response.json()) as { streams: Array<{ name: string; url?: string }> };
+    assert.equal(body.streams[0].name, '✅\nDone');
+    assert.equal(body.streams[0].url, undefined, 'no url when file streaming disabled');
+  });
+});
+
+test('downloaded tile has no url when movieFile id is absent and keeps Kodi fallback in direct mode', async () => {
+  const cfg = baseConfig();
+  cfg.fileStreaming.enabled = true;
+  cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
+  cfg.fileStreaming.playbackMode = 'direct';
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const urlPath = new URL(String(input)).pathname;
+    if (urlPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    // hasFile=true but no movieFile object (older Radarr response format)
+    if (urlPath === '/api/v3/movie') {
+      return new Response('[{"id":9,"imdbId":"tt1234567","hasFile":true,"monitored":true}]', { status: 200 });
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const body = (await response.json()) as { streams: Array<{ url?: string; externalUris?: Array<{ uri: string }> }> };
+    assert.equal(body.streams[0].url, undefined, 'no url without movieFile.id');
+    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
+  });
+});
+
+test('episode downloaded tile keeps Kodi fallback in direct mode when episodeFileId is absent', async () => {
+  const cfg = baseConfig();
+  cfg.fileStreaming.enabled = true;
+  cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
+  cfg.fileStreaming.playbackMode = 'direct';
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    const urlPath = parsed.pathname;
+    if (urlPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (urlPath === '/api/v3/series') return new Response('[{"id":10,"imdbId":"tt9876543","title":"Test Show"}]', { status: 200 });
+    if (urlPath === '/api/v3/episode' && parsed.search.includes('seriesId=10')) {
+      return new Response('[{"id":5,"seasonNumber":1,"episodeNumber":2,"hasFile":true,"monitored":true}]', { status: 200 });
+    }
+    if (urlPath.startsWith('/api/v3/queue')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('[]', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt9876543%3A1%3A2.json`);
+    const body = (await response.json()) as { streams: Array<{ url?: string; externalUris?: Array<{ uri: string }> }> };
+    assert.equal(body.streams[0].url, undefined, 'no url without episodeFileId');
+    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
+  });
+});
+
+test('episode downloaded tile includes playback url and omits Kodi fallback when file streaming is enabled', async () => {
+  const cfg = baseConfig();
+  cfg.fileStreaming.enabled = true;
+  cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
+  cfg.fileStreaming.playbackMode = 'direct';
+  cfg.sonarr.enabled = true;
+  cfg.publicBaseUrl = 'https://pi.example.com';
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    const urlPath = parsed.pathname;
+    if (urlPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (urlPath === '/api/v3/series') {
+      return new Response('[{"id":10,"imdbId":"tt9876543","title":"Test Show"}]', { status: 200 });
+    }
+    if (urlPath === '/api/v3/episode' && parsed.search.includes('seriesId=10')) {
+      return new Response(
+        '[{"id":5,"seasonNumber":1,"episodeNumber":2,"episodeFileId":88,"episodeFile":{"relativePath":"Test.Show.S01E02.mkv","size":536870912},"monitored":true}]',
+        { status: 200 }
+      );
+    }
+    if (urlPath.startsWith('/api/v3/queue')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('[]', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt9876543%3A1%3A2.json`);
+    const body = (await response.json()) as {
+      streams: Array<{
+        name: string;
+        url?: string;
+        externalUris?: unknown[];
+        behaviorHints?: { notWebReady?: boolean; filename?: string; videoSize?: number };
+      }>;
+    };
+    assert.equal(body.streams[0].name, '✅\nDone');
+    assert.ok(body.streams[0].url?.startsWith('https://pi.example.com/files/series/88?t='), 'should have episode file streaming url');
+    assert.equal(body.streams[0].externalUris?.length ?? 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
+    assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
+    assert.equal(body.streams[0].behaviorHints?.filename, 'Test.Show.S01E02.mkv');
+    assert.equal(body.streams[0].behaviorHints?.videoSize, 536870912);
+  });
+});
+
+test('downloaded tile uses Kodi only when playback mode is set to kodi', async () => {
+  const cfg = baseConfig();
+  cfg.fileStreaming.enabled = true;
+  cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
+  cfg.fileStreaming.playbackMode = 'kodi';
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const urlPath = new URL(String(input)).pathname;
+    if (urlPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (urlPath === '/api/v3/movie') {
+      return new Response(
+        '[{"id":9,"imdbId":"tt1234567","title":"Test Movie","year":2020,"movieFile":{"id":77},"monitored":true}]',
+        { status: 200 }
+      );
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const body = (await response.json()) as { streams: Array<{ url?: string; externalUris?: Array<{ uri: string }> }> };
+    assert.equal(body.streams[0].url, undefined);
+    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/);
+  });
+});

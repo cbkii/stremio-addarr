@@ -61,7 +61,19 @@ export class SonarrClient {
       }
 
       if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
-        return { state: 'episode_downloaded', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: true, title: series.title };
+        const rawFileName = match.episodeFile?.relativePath ?? match.episodeFile?.path;
+        const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
+        return {
+          state: 'episode_downloaded',
+          seriesId: series.id,
+          episodeId: match.id,
+          episodeFileId: match.episodeFileId,
+          monitored: match.monitored,
+          hasFile: true,
+          title: series.title,
+          fileName,
+          fileSizeBytes: match.episodeFile?.size
+        };
       }
 
       let isDownloading = false;
@@ -261,6 +273,15 @@ export class SonarrClient {
     this.seriesCache.clear();
     this.episodeCache.clear();
     this.queueCache.clear();
+  }
+
+  async getEpisodeFilePath(episodeFileId: number): Promise<string | null> {
+    try {
+      const record = await this.http.get<{ path?: string }>(`/api/v3/episodefile/${episodeFileId}`);
+      return record.path ?? null;
+    } catch {
+      return null;
+    }
   }
 
   private async isEpisodeQueued(episodeId: number, seriesId: number): Promise<boolean> {

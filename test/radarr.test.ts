@@ -43,6 +43,56 @@ test('maps downloaded status', async () => {
   assert.equal(status.state, 'downloaded');
 });
 
+test('downloaded status includes movieFileId when movieFile is present', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const client = new RadarrClient(
+    cfg,
+    new FakeHttp({
+      get: {
+        '/api/v3/movie': [{ id: 5, imdbId: 'tt5', movieFile: { id: 99 }, monitored: true }],
+        '/api/v3/queue?page=1&pageSize=250&includeUnknownMovieItems=true': { records: [] }
+      }
+    }) as never
+  );
+
+  const status = await client.getMovieStatus('tt5');
+  assert.equal(status.state, 'downloaded');
+  assert.equal(status.movieFileId, 99);
+});
+
+test('getMovieFilePath returns path from Arr API', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const http = {
+    async get<T>(reqPath: string): Promise<T> {
+      if (reqPath === '/api/v3/moviefile/42') return { path: '/movies/test.mkv' } as T;
+      throw new Error(`Unexpected GET ${reqPath}`);
+    },
+    async post<T>(_reqPath: string): Promise<T> { return {} as T; }
+  };
+
+  const client = new RadarrClient(cfg, http as never);
+  const filePath = await client.getMovieFilePath(42);
+  assert.equal(filePath, '/movies/test.mkv');
+});
+
+test('getMovieFilePath returns null when Arr API fails', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const http = {
+    async get<T>(_reqPath: string): Promise<T> { throw new Error('network error'); },
+    async post<T>(_reqPath: string): Promise<T> { return {} as T; }
+  };
+
+  const client = new RadarrClient(cfg, http as never);
+  const filePath = await client.getMovieFilePath(42);
+  assert.equal(filePath, null);
+});
+
 test('prevents duplicate add when already exists', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;

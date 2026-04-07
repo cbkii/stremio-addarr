@@ -16,17 +16,20 @@ export interface StatusTile {
   description?: string;
   url?: string;
   externalUris?: Array<{ uri: string; name?: string }>;
-  behaviorHints?: { notWebReady?: boolean };
+  behaviorHints?: { notWebReady?: boolean; filename?: string; videoSize?: number };
   isAction?: boolean;
 }
 
 export interface ArrMovieStatus {
   state: 'not_added' | 'added' | 'downloaded' | 'downloading' | 'missing' | 'unavailable';
   movieId?: number;
+  movieFileId?: number;
   monitored?: boolean;
   hasFile?: boolean;
   title?: string;
   year?: number;
+  fileName?: string;
+  fileSizeBytes?: number;
   reason?: string;
 }
 
@@ -41,9 +44,12 @@ export interface ArrEpisodeStatus {
     | 'unavailable';
   seriesId?: number;
   episodeId?: number;
+  episodeFileId?: number;
   monitored?: boolean;
   hasFile?: boolean;
   title?: string;
+  fileName?: string;
+  fileSizeBytes?: number;
   reason?: string;
 }
 
@@ -69,7 +75,7 @@ export interface RadarrMovieRecord {
   tmdbId?: number;
   monitored?: boolean;
   hasFile?: boolean;
-  movieFile?: { id: number } | null;
+  movieFile?: { id: number; relativePath?: string; size?: number; path?: string } | null;
   year?: number;
 }
 
@@ -101,6 +107,7 @@ export interface SonarrEpisodeRecord {
   monitored?: boolean;
   hasFile?: boolean;
   episodeFileId?: number;
+  episodeFile?: { relativePath?: string; size?: number; path?: string };
 }
 
 export interface SonarrLookupRecord {
