@@ -10,6 +10,8 @@ export function baseConfig(): AppConfig {
     targetClient: 'android-tv',
     logLevel: 'error',
     requestTimeoutMs: 2000,
+    gracefulShutdownTimeoutMs: 10_000,
+    forcedShutdownExitCode: 0,
     statusCacheTtlMs: 10_000,
     serviceHealthCacheTtlMs: 2_000,
     streamCacheMaxAgeSec: 2,

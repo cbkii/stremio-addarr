@@ -355,8 +355,8 @@ if (isEntryPoint) {
     });
     setTimeout(() => {
       logger.warn('Shutdown timeout reached, forcing exit', { signal });
-      process.exit(1);
-    }, 10_000).unref();
+      process.exit(config.forcedShutdownExitCode);
+    }, config.gracefulShutdownTimeoutMs).unref();
   };
 
   process.on('SIGINT', () => shutdown('SIGINT'));

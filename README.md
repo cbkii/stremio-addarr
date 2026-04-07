@@ -105,6 +105,8 @@ HOST=127.0.0.1
 PORT=7010
 PUBLIC_BASE_URL=https://YOUR_HOSTNAME
 TARGET_CLIENT=android-tv
+GRACEFUL_SHUTDOWN_TIMEOUT_MS=10000
+FORCED_SHUTDOWN_EXIT_CODE=0
 
 RADARR_ENABLED=true
 RADARR_BASE_URL=http://127.0.0.1:7878
@@ -129,6 +131,9 @@ CATALOG_STALE_ERROR_SEC=120
 
 Notes:
 - `SONARR_SERIES_MONITOR` maps directly to Sonarr's `monitorNewItems` field and currently accepts `all` or `none`.
+- `SONARR_SERIES_MONITOR` is parsed case-insensitively (`ALL`, `All`, `none` all work).
+- Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
+- `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
 - Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
 
 Optional tuning:
