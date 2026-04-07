@@ -68,12 +68,6 @@ export interface ServiceHealth {
   detail?: string;
 }
 
-export interface ArrImageRecord {
-  coverType?: string;
-  url?: string;
-  remoteUrl?: string;
-}
-
 export interface RadarrMovieRecord {
   id: number;
   title: string;

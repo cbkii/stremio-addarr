@@ -24,6 +24,7 @@ export function createAddonInterface(config: AppConfig, logger?: Logger) {
     version: config.version,
     name: 'Arr Status & Add',
     description: 'Shows Radarr/Sonarr status and adds the current movie or series from Stremio.',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/d/df/Pctlogo.png',
     catalogs: [
       { id: 'radarr-recent', type: 'movie', name: 'Recent on Radarr', extra: [{ name: 'skip', isRequired: false }] },
       { id: 'sonarr-recent', type: 'series', name: 'Recent on Sonarr', extra: [{ name: 'skip', isRequired: false }] }

@@ -14,6 +14,13 @@ import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
 
 const DAY_MS = 86_400_000;
+const IMDB_ID_PATTERN = /^tt\d+$/i;
+
+function normalizeImdbId(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || !IMDB_ID_PATTERN.test(trimmed)) return undefined;
+  return `tt${trimmed.slice(2)}`;
+}
 
 function toTimestamp(value?: string): number {
   if (!value) return 0;
@@ -170,6 +177,7 @@ interface CatalogMetaPreview {
 
 function toMeta(item: CatalogItem): CatalogMetaPreview {
   return {
+    // Keep canonical IMDb IDs so Stremio can resolve posters/details via Cinemeta.
     id: item.imdbId,
     type: item.type,
     name: item.title,
@@ -229,7 +237,7 @@ export class CatalogService {
     for (const row of queue) {
       try {
         const movie = row.movieId != null ? moviesById.get(row.movieId) : undefined;
-        const imdbId = movie?.imdbId ?? row.movie?.imdbId;
+        const imdbId = normalizeImdbId(movie?.imdbId ?? row.movie?.imdbId);
         if (!imdbId) continue;
 
         const etaSeconds = parseEtaSeconds(row.timeleft) ?? (row.estimatedCompletionTime ? Math.max(0, Math.round((toTimestamp(row.estimatedCompletionTime) - nowMs) / 1000)) : undefined);
@@ -258,7 +266,7 @@ export class CatalogService {
     for (const row of history) {
       try {
         const movie = row.movieId != null ? moviesById.get(row.movieId) : undefined;
-        const imdbId = movie?.imdbId;
+        const imdbId = normalizeImdbId(movie?.imdbId);
         if (!imdbId) continue;
 
         const ts = toTimestamp(row.date);
@@ -301,7 +309,7 @@ export class CatalogService {
     for (const row of queue) {
       try {
         const series = row.seriesId != null ? bySeriesId.get(row.seriesId) : undefined;
-        const imdbId = series?.imdbId ?? row.series?.imdbId;
+        const imdbId = normalizeImdbId(series?.imdbId ?? row.series?.imdbId);
         if (!imdbId) continue;
 
         const etaSeconds = parseEtaSeconds(row.timeleft) ?? (row.estimatedCompletionTime ? Math.max(0, Math.round((toTimestamp(row.estimatedCompletionTime) - nowMs) / 1000)) : undefined);
@@ -333,7 +341,7 @@ export class CatalogService {
     for (const row of history) {
       try {
         const series = row.seriesId != null ? bySeriesId.get(row.seriesId) : undefined;
-        const imdbId = series?.imdbId;
+        const imdbId = normalizeImdbId(series?.imdbId);
         if (!imdbId) continue;
 
         const ts = toTimestamp(row.date);
