@@ -20,7 +20,6 @@ declare module 'stremio-addon-sdk' {
     description?: string;
     url?: string;
     externalUrl?: string;
-    externalUris?: Array<{ uri: string; name?: string }>;
     behaviorHints?: { notWebReady?: boolean };
   }
 
