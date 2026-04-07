@@ -14,6 +14,10 @@ export interface AppConfig {
   serviceHealthCacheTtlMs: number;
   streamCacheMaxAgeSec: number;
   streamStaleRevalidateSec: number;
+  fileStreaming: {
+    enabled: boolean;
+    secret: string;
+  };
   kodi: {
     enabled: boolean;
     packageName: string;
@@ -164,6 +168,12 @@ export function loadConfig(): AppConfig {
     throw new Error('LOG_LEVEL must be one of: debug, info, warn, error, none.');
   }
 
+  const fileStreamingEnabled = readBoolean('FILE_STREAMING_ENABLED', false);
+  const fileStreamingSecret = readString('FILE_STREAMING_SECRET');
+  if (fileStreamingEnabled && !fileStreamingSecret) {
+    throw new Error('FILE_STREAMING_SECRET is required when FILE_STREAMING_ENABLED=true.');
+  }
+
   const config: AppConfig = {
     appName: 'stremio-addarr',
     version: packageVersion,
@@ -177,6 +187,10 @@ export function loadConfig(): AppConfig {
     serviceHealthCacheTtlMs,
     streamCacheMaxAgeSec,
     streamStaleRevalidateSec,
+    fileStreaming: {
+      enabled: fileStreamingEnabled,
+      secret: fileStreamingSecret
+    },
     kodi: {
       enabled: readBoolean('KODI_ENABLED', true),
       packageName: readString('KODI_PACKAGE', 'org.xbmc.kodi')

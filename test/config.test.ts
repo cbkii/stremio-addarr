@@ -150,3 +150,23 @@ test('allows empty KODI_PACKAGE when Kodi is disabled', () => {
   const config = loadConfig();
   assert.equal(config.kodi.enabled, false);
 });
+
+test('file streaming defaults to disabled with no secret required', () => {
+  const config = loadConfig();
+  assert.equal(config.fileStreaming.enabled, false);
+  assert.equal(config.fileStreaming.secret, '');
+});
+
+test('file streaming loads when enabled with a secret', () => {
+  process.env.FILE_STREAMING_ENABLED = 'true';
+  process.env.FILE_STREAMING_SECRET = 'a-long-enough-secret-for-streaming!!';
+  const config = loadConfig();
+  assert.equal(config.fileStreaming.enabled, true);
+  assert.equal(config.fileStreaming.secret, 'a-long-enough-secret-for-streaming!!');
+});
+
+test('file streaming fails when enabled without a secret', () => {
+  process.env.FILE_STREAMING_ENABLED = 'true';
+  process.env.FILE_STREAMING_SECRET = '';
+  assert.throws(() => loadConfig(), /FILE_STREAMING_SECRET/);
+});

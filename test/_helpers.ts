@@ -14,6 +14,10 @@ export function baseConfig(): AppConfig {
     serviceHealthCacheTtlMs: 2_000,
     streamCacheMaxAgeSec: 2,
     streamStaleRevalidateSec: 5,
+    fileStreaming: {
+      enabled: false,
+      secret: ''
+    },
     kodi: {
       enabled: true,
       packageName: 'org.xbmc.kodi'

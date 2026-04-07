@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import express from 'express';
 import sdk from 'stremio-addon-sdk';
 import { loadConfig, validateConfig, type AppConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
 import { parseStremioId } from './lib/stremio-ids.js';
+import { verifyFileToken } from './lib/file-tokens.js';
 import type { ParsedStremioId } from './types.js';
 
 // Minimal valid HLS end-of-stream playlist. Stremio's player resolves this as a
@@ -51,7 +53,7 @@ export function createApp(config: AppConfig) {
   });
 
   app.use((req, res, next) => {
-    const isStremioRoute = req.path === '/manifest.json' || req.path.startsWith('/stream/') || req.path.startsWith('/action/');
+    const isStremioRoute = req.path === '/manifest.json' || req.path.startsWith('/stream/') || req.path.startsWith('/action/') || req.path.startsWith('/files/');
     if (isStremioRoute) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
@@ -205,6 +207,68 @@ export function createApp(config: AppConfig) {
         kind,
         encodedId
       });
+    });
+  });
+
+  app.get('/files/:kind/:fileId', async (req, res) => {
+    const reqId = typeof res.locals['reqId'] === 'string' ? res.locals['reqId'] : undefined;
+
+    if (!config.fileStreaming.enabled) {
+      res.status(404).end();
+      return;
+    }
+
+    const { kind, fileId: fileIdRaw } = req.params;
+    const token = typeof req.query['t'] === 'string' ? req.query['t'] : '';
+
+    if (kind !== 'movie' && kind !== 'series') {
+      res.status(400).end();
+      return;
+    }
+
+    const fileId = Number(fileIdRaw);
+    if (!Number.isInteger(fileId) || fileId <= 0) {
+      res.status(400).end();
+      return;
+    }
+
+    if (!verifyFileToken(config.fileStreaming.secret, kind, fileId, token)) {
+      logger.warn('File streaming: invalid token', { reqId, kind, fileId });
+      res.status(403).end();
+      return;
+    }
+
+    let filePath: string | null = null;
+    try {
+      filePath = kind === 'movie'
+        ? await statusService.getMovieFilePath(fileId)
+        : await statusService.getEpisodeFilePath(fileId);
+    } catch (error) {
+      logger.warn('File streaming: path lookup failed', { reqId, kind, fileId, error: error instanceof Error ? error.message : String(error) });
+    }
+
+    if (!filePath) {
+      res.status(404).end();
+      return;
+    }
+
+    const allowedRootRaw = kind === 'movie'
+      ? config.radarr.rootFolderPath
+      : config.sonarr.rootFolderPath;
+    const allowedRoot = path.resolve(allowedRootRaw);
+    const resolvedPath = path.resolve(filePath);
+
+    if (!resolvedPath.startsWith(allowedRoot + path.sep) && resolvedPath !== allowedRoot) {
+      logger.warn('File streaming: path outside allowed root', { reqId, kind, fileId });
+      res.status(403).end();
+      return;
+    }
+
+    res.sendFile(resolvedPath, (err) => {
+      if (err && !res.headersSent) {
+        logger.warn('File streaming: send error', { reqId, kind, fileId, error: err instanceof Error ? err.message : String(err) });
+        res.status(404).end();
+      }
     });
   });
 

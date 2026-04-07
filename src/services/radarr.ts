@@ -40,7 +40,7 @@ export class RadarrClient {
         return { state: 'not_added' };
       }
       if (existing.hasFile || existing.movieFile) {
-        return { state: 'downloaded', movieId: existing.id, monitored: existing.monitored, hasFile: true, title: existing.title, year: existing.year };
+        return { state: 'downloaded', movieId: existing.id, movieFileId: existing.movieFile?.id, monitored: existing.monitored, hasFile: true, title: existing.title, year: existing.year };
       }
 
       let isDownloading = false;
@@ -216,6 +216,15 @@ export class RadarrClient {
   invalidateCache(): void {
     this.moviesCache.clear();
     this.queueCache.clear();
+  }
+
+  async getMovieFilePath(movieFileId: number): Promise<string | null> {
+    try {
+      const record = await this.http.get<{ path?: string }>(`/api/v3/moviefile/${movieFileId}`);
+      return record.path ?? null;
+    } catch {
+      return null;
+    }
   }
 
   private async isMovieQueued(movieId: number): Promise<boolean> {

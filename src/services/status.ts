@@ -1,5 +1,6 @@
 import type { AppConfig } from '../config.js';
 import { TtlCache } from '../lib/cache.js';
+import { buildFileToken } from '../lib/file-tokens.js';
 import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
@@ -64,6 +65,11 @@ export class ArrStatusService {
     return `${this.config.publicBaseUrl}/action/${action}/${parsed.kind}/${encodeURIComponent(parsed.rawId)}`;
   }
 
+  buildFileStreamUrl(kind: 'movie' | 'series', fileId: number): string {
+    const token = buildFileToken(this.config.fileStreaming.secret, kind, fileId);
+    return `${this.config.publicBaseUrl}/files/${kind}/${fileId}?t=${token}`;
+  }
+
   private buildKodiExternalUris(): Array<{ uri: string; name?: string }> {
     if (!this.config.kodi.enabled) {
       return [];
@@ -80,13 +86,17 @@ export class ArrStatusService {
     switch (status.state) {
       case 'downloaded': {
         const kodiUris = this.buildKodiExternalUris();
+        const fileUrl = (this.config.fileStreaming.enabled && status.movieFileId != null)
+          ? this.buildFileStreamUrl('movie', status.movieFileId)
+          : undefined;
         return [{
           name: '✅\nDone',
           description: desc(
             movieLine(status.title, status.year),
             '✅ File ready',
-            kodiUris.length > 0 ? '▶ Open in Kodi' : ''
+            fileUrl ? '▶ Play on Pi' : (kodiUris.length > 0 ? '▶ Open in Kodi' : '')
           ),
+          url: fileUrl,
           externalUris: kodiUris
         }];
       }
@@ -130,13 +140,17 @@ export class ArrStatusService {
     switch (status.state) {
       case 'episode_downloaded': {
         const kodiUris = this.buildKodiExternalUris();
+        const fileUrl = (this.config.fileStreaming.enabled && status.episodeFileId != null)
+          ? this.buildFileStreamUrl('series', status.episodeFileId)
+          : undefined;
         return [{
           name: '✅\nDone',
           description: desc(
             seriesLine(status.title),
             ep ? `✅ ${ep} ready` : '✅ File ready',
-            kodiUris.length > 0 ? '▶ Open in Kodi' : ''
+            fileUrl ? '▶ Play on Pi' : (kodiUris.length > 0 ? '▶ Open in Kodi' : '')
           ),
+          url: fileUrl,
           externalUris: kodiUris
         }];
       }
@@ -243,6 +257,14 @@ export class ArrStatusService {
     this.healthCache.clear();
     this.radarr.invalidateCache();
     this.sonarr.invalidateCache();
+  }
+
+  async getMovieFilePath(movieFileId: number): Promise<string | null> {
+    return this.radarr.getMovieFilePath(movieFileId);
+  }
+
+  async getEpisodeFilePath(episodeFileId: number): Promise<string | null> {
+    return this.sonarr.getEpisodeFilePath(episodeFileId);
   }
 
   async getServiceHealth(): Promise<{ radarr: ServiceHealth; sonarr: ServiceHealth }> {

@@ -23,6 +23,7 @@ export interface StatusTile {
 export interface ArrMovieStatus {
   state: 'not_added' | 'added' | 'downloaded' | 'downloading' | 'missing' | 'unavailable';
   movieId?: number;
+  movieFileId?: number;
   monitored?: boolean;
   hasFile?: boolean;
   title?: string;
@@ -41,6 +42,7 @@ export interface ArrEpisodeStatus {
     | 'unavailable';
   seriesId?: number;
   episodeId?: number;
+  episodeFileId?: number;
   monitored?: boolean;
   hasFile?: boolean;
   title?: string;
