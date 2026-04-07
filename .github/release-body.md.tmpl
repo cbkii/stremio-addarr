@@ -1,21 +1,27 @@
-# ${TAG}
-
-## Install / Upgrade (canonical docs)
-
 Use the primary guides for complete and current steps:
 
 - Install/upgrade guide: [README.md](https://github.com/${REPO}/blob/${TAG}/README.md)
 - Hosting/TLS (Caddy + DuckDNS): [README_HOST.md](https://github.com/${REPO}/blob/${TAG}/README_HOST.md)
 
-Release assets:
-- [`stremio-addarr-install.tar.gz`](https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz)
-- [`stremio-addarr-install.tar.gz.sha256`](https://github.com/${REPO}/releases/download/${TAG}/stremio-addarr-install.tar.gz.sha256)
-
-Quick download:
+Quick Download:
 
 ```bash
 # gh auth login
-gh release download --repo ${REPO} ${TAG} --pattern 'stremio-addarr-install.tar.gz*' --clobber
+gh release download --repo ${REPO} ${TAG} --pattern 'stremio-addarr-install.tar.gz*'
+```
+
+Quick Upgrade:
+
+```
+gh release download --repo ${REPO} ${TAG} --pattern 'stremio-addarr-install.tar.gz*' --clobber && \
+sudo mkdir -p /opt/stremio-addarr && sudo tar -xzf stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1; \
+export SVC_USER="$(whoami)" && export SVC_GROUP="$(id -gn)" && sudo chown -R "$SVC_USER:$SVC_GROUP" /opt/stremio-addarr; \
+cd /opt/stremio-addarr && npm ci --omit=dev; \
+icdiff .env.example .env; icdiff deploy/stremio-addarr.service.example /etc/systemd/system/stremio-addarr.service; \
+sudo systemctl daemon-reload && sudo systemctl restart stremio-addarr; sleep 3; sudo systemctl is-active stremio-addarr; \
+source .env; curl http://127.0.0.1:7010/manifest.json; curl -fI "https://${PUBLIC_BASE_URL}/manifest.json"; \
+cat /opt/stremio-addarr/package.json; curl -fsS http://127.0.0.1:7010/healthz; curl -fsS "https://${PUBLIC_BASE_URL}/status.json"; \
+echo '' && echo "https://${PUBLIC_BASE_URL}/manifest.json"
 ```
 
 ---
@@ -32,6 +38,6 @@ After install or upgrade, verify in this order:
 
 - [ ] `sudo systemctl is-active stremio-addarr` returns `active`
 - [ ] `curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null` succeeds
-- [ ] `curl -fI https://YOUR_HOSTNAME/manifest.json` returns `200`
+- [ ] `curl -fI https://$PUBLIC_BASE_URL/manifest.json` returns `200`
 - [ ] `PUBLIC_BASE_URL` exactly matches the Caddy hostname (`https://YOUR_HOSTNAME`)
-- [ ] Stremio installs from `https://YOUR_HOSTNAME/manifest.json`
+- [ ] Stremio installs from `https://$PUBLIC_BASE_URL/manifest.json`
