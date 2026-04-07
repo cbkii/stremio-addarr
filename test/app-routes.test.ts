@@ -100,11 +100,11 @@ test('assets logo is served from local repo static path', async () => {
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/assets/logo.svg`);
+    const res = await fetch(`${baseUrl}/assets/logo.png`);
     assert.equal(res.status, 200);
-    assert.match(res.headers.get('content-type') ?? '', /image\/svg\+xml/);
-    const text = await res.text();
-    assert.ok(text.includes('<svg'));
+    assert.match(res.headers.get('content-type') ?? '', /image\/png/);
+    const body = await res.text();
+    assert.ok(body.length > 0);
   });
 });
 

@@ -44,10 +44,19 @@ function epLabel(season?: number, episode?: number): string {
 }
 
 /**
- * Join up to 3 non-empty lines into a newline-separated description.
+ * Normalize a URL-ish text for compact card display.
+ */
+function cardEndpointLine(raw: string): string {
+  const value = raw.trim().replace(/\/+$/, '');
+  const display = value.replace(/^https?:\/\//i, '');
+  return `📲 🔗  ${display}`;
+}
+
+/**
+ * Join non-empty lines into a newline-separated description.
  */
 function desc(...lines: string[]): string {
-  return ['—⭐—🦜—📀—', ...lines.filter(Boolean).slice(0, 3)].join('\n');
+  return ['📂 Pi  ══════════════════', ...lines.filter(Boolean)].join('\n');
 }
 
 export class ArrStatusService {
@@ -87,6 +96,18 @@ export class ArrStatusService {
     return `intent://launch#Intent;package=${encodeURIComponent(this.config.kodi.packageName)};action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end`;
   }
 
+  private supportLine(): string {
+    return 'ℹ️ "failed to play" = 📨👍';
+  }
+
+  private radarrCardLine(): string {
+    return cardEndpointLine(this.config.radarr.cardUrl || this.config.radarr.baseUrl);
+  }
+
+  private sonarrCardLine(): string {
+    return cardEndpointLine(this.config.sonarr.cardUrl || this.config.sonarr.baseUrl);
+  }
+
   private buildMovieTiles(status: ArrMovieStatus, parsed: ParsedStremioId): StatusTile[] {
     switch (status.state) {
       case 'downloaded': {
@@ -95,11 +116,11 @@ export class ArrStatusService {
           : undefined;
         const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
-          name: '✅🥧\nFile\nReady',
+          name: '✅\nFile\nReady',
           description: desc(
             movieLine(status.title, status.year),
             '✅ File ready',
-            fileUrl ? '▶ Play on Pi' : (kodiExternalUrl ? '▶ Open in Kodi' : '✅ Ready')
+            fileUrl ? '▶️ Play local Pi stream ►' : (kodiExternalUrl ? '▶️ Open in Kodi ►' : '✅ Ready')
           ),
           url: fileUrl,
           behaviorHints: fileUrl ? {
@@ -113,12 +134,12 @@ export class ArrStatusService {
       case 'downloading':
         return [{
           name: '⏱️\nLoad',
-          description: desc(movieLine(status.title, status.year), '⏱ Downloading now')
+          description: desc(movieLine(status.title, status.year), '⏱ Downloading now', this.radarrCardLine())
         }];
       case 'missing':
         return [{
           name: '🔍\nSearch\nRadarr',
-          description: desc(movieLine(status.title, status.year), '⭕ Monitored, missing', '🔍 Tap to search'),
+          description: desc(movieLine(status.title, status.year), '⭕ Monitored, missing', '🔍 Tap to search', this.supportLine(), this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -126,7 +147,7 @@ export class ArrStatusService {
       case 'added':
         return [{
           name: '🔍\nSearch\nRadarr',
-          description: desc(movieLine(status.title, status.year), '⭕ Added, unmonitored', '🔍 Tap to search'),
+          description: desc(movieLine(status.title, status.year), '⭕ Added, unmonitored', '🔍 Tap to search', this.supportLine(), this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -134,14 +155,14 @@ export class ArrStatusService {
       case 'not_added':
         return [{
           name: '➕\nAdd\nRadarr',
-          description: desc('📽 Not in Radarr', '➕ Tap to add+search'),
+          description: desc('📽 Not in Radarr', '➕ Tap to add+search', this.supportLine(), this.radarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'unavailable':
       default:
-        return [{ name: '🛑\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config') }];
+        return [{ name: '🛑\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config', this.radarrCardLine()) }];
     }
   }
 
@@ -154,11 +175,11 @@ export class ArrStatusService {
           : undefined;
         const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
-          name: '✅🥧\nFile\nReady',
+          name: '✅\nFile\nReady',
           description: desc(
             seriesLine(status.title),
             ep ? `✅ ${ep} ready` : '✅ File ready',
-            fileUrl ? '▶ Play on Pi' : (kodiExternalUrl ? '▶ Open in Kodi' : '✅ Ready')
+            fileUrl ? '▶️ Play local Pi stream ►' : (kodiExternalUrl ? '▶️ Open in Kodi ►' : '✅ Ready')
           ),
           url: fileUrl,
           behaviorHints: fileUrl ? {
@@ -172,12 +193,12 @@ export class ArrStatusService {
       case 'episode_downloading':
         return [{
           name: '⏱️\nLoad',
-          description: desc(seriesLine(status.title), ep ? `⏱ ${ep} downloading` : '⏱ Downloading now')
+          description: desc(seriesLine(status.title), ep ? `⏱ ${ep} downloading` : '⏱ Downloading now', this.sonarrCardLine())
         }];
       case 'episode_missing':
         return [{
           name: '🔍\nSearch\nSonarr',
-          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🔍 Tap to search'),
+          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🔍 Tap to search', this.supportLine(), this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -186,7 +207,7 @@ export class ArrStatusService {
       case 'episode_monitored':
         return [{
           name: '🔍\nSearch\nSonarr',
-          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🔍 Tap to search'),
+          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🔍 Tap to search', this.supportLine(), this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -194,14 +215,14 @@ export class ArrStatusService {
       case 'series_not_added':
         return [{
           name: '➕\nAdd\nSonarr',
-          description: desc('📺 Not in Sonarr', '➕ Tap to add+search'),
+          description: desc('📺 Not in Sonarr', '➕ Tap to add+search', this.supportLine(), this.sonarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'unavailable':
       default:
-        return [{ name: '🛑\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config') }];
+        return [{ name: '🛑\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config', this.sonarrCardLine()) }];
     }
   }
 
@@ -220,7 +241,7 @@ export class ArrStatusService {
       }
       const health = await this.getServiceHealth();
       if (!health.radarr.reachable) {
-        return [{ name: '🛑\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config') }];
+        return [{ name: '🛑\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config', this.radarrCardLine()) }];
       }
       const status = await this.radarr.getMovieStatus(parsed.imdbId);
       return this.buildMovieTiles(status, parsed);
@@ -232,7 +253,7 @@ export class ArrStatusService {
 
     const health = await this.getServiceHealth();
     if (!health.sonarr.reachable) {
-      return [{ name: '🛑\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config') }];
+      return [{ name: '🛑\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config', this.sonarrCardLine()) }];
     }
 
     const status = await this.sonarr.getEpisodeStatus(parsed.imdbId, parsed.season, parsed.episode);

@@ -33,6 +33,7 @@ export function baseConfig(): AppConfig {
     radarr: {
       enabled: false,
       baseUrl: 'http://radarr.local',
+      cardUrl: '192.168.1.50:7878',
       apiKey: 'radarr-key',
       rootFolderPath: '/movies',
       qualityProfileId: 1,
@@ -43,6 +44,7 @@ export function baseConfig(): AppConfig {
     sonarr: {
       enabled: false,
       baseUrl: 'http://sonarr.local',
+      cardUrl: '192.168.1.50:8989',
       apiKey: 'sonarr-key',
       rootFolderPath: '/tv',
       qualityProfileId: 1,
