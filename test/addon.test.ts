@@ -118,7 +118,7 @@ test('catalog handler degrades to empty metas when Arr services throw', async ()
   });
 });
 
-test('downloaded tile launches Kodi via externalUris when enabled', async () => {
+test('downloaded tile launches Kodi via externalUrl when enabled', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
 
@@ -132,15 +132,15 @@ test('downloaded tile launches Kodi via externalUris when enabled', async () => 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
-    const body = (await response.json()) as { streams: Array<{ name: string; description?: string; externalUris?: Array<{ uri: string }> }> };
+    const body = (await response.json()) as { streams: Array<{ name: string; description?: string; externalUrl?: string }> };
     assert.equal(body.streams[0].name, '✅\nDone');
     assert.ok(body.streams[0].description?.includes('Mock Movie'), 'description should include matched title');
     assert.ok(body.streams[0].description?.includes('2020'), 'description should include matched year');
-    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/);
+    assert.match(body.streams[0].externalUrl ?? '', /package=org.xbmc.kodi/);
   });
 });
 
-test('downloaded tile has no externalUris when Kodi is disabled', async () => {
+test('downloaded tile has no externalUrl when Kodi is disabled', async () => {
   const cfg = baseConfig();
   cfg.kodi.enabled = false;
   cfg.radarr.enabled = true;
@@ -155,8 +155,8 @@ test('downloaded tile has no externalUris when Kodi is disabled', async () => {
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
-    const body = (await response.json()) as { streams: Array<{ externalUris?: Array<{ uri: string }> }> };
-    assert.equal(body.streams[0].externalUris?.length ?? 0, 0);
+    const body = (await response.json()) as { streams: Array<{ externalUrl?: string }> };
+    assert.equal(body.streams[0].externalUrl ? 1 : 0, 0);
   });
 });
 
@@ -232,13 +232,13 @@ test('downloaded tile includes playback url and omits Kodi fallback when file st
       streams: Array<{
         name: string;
         url?: string;
-        externalUris?: unknown[];
+        externalUrl?: string;
         behaviorHints?: { notWebReady?: boolean; filename?: string; videoSize?: number };
       }>;
     };
     assert.equal(body.streams[0].name, '✅\nDone');
     assert.ok(body.streams[0].url?.startsWith('https://pi.example.com/files/movie/77?t='), 'should have a file streaming url');
-    assert.equal(body.streams[0].externalUris?.length ?? 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
+    assert.equal(body.streams[0].externalUrl ? 1 : 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
     assert.equal(body.streams[0].behaviorHints?.filename, 'Test.Movie.2020.mkv');
     assert.equal(body.streams[0].behaviorHints?.videoSize, 3221225472);
@@ -291,9 +291,9 @@ test('downloaded tile has no url when movieFile id is absent and keeps Kodi fall
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
-    const body = (await response.json()) as { streams: Array<{ url?: string; externalUris?: Array<{ uri: string }> }> };
+    const body = (await response.json()) as { streams: Array<{ url?: string; externalUrl?: string }> };
     assert.equal(body.streams[0].url, undefined, 'no url without movieFile.id');
-    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
+    assert.match(body.streams[0].externalUrl ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
   });
 });
 
@@ -319,9 +319,9 @@ test('episode downloaded tile keeps Kodi fallback in direct mode when episodeFil
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt9876543%3A1%3A2.json`);
-    const body = (await response.json()) as { streams: Array<{ url?: string; externalUris?: Array<{ uri: string }> }> };
+    const body = (await response.json()) as { streams: Array<{ url?: string; externalUrl?: string }> };
     assert.equal(body.streams[0].url, undefined, 'no url without episodeFileId');
-    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
+    assert.match(body.streams[0].externalUrl ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
   });
 });
 
@@ -357,13 +357,13 @@ test('episode downloaded tile includes playback url and omits Kodi fallback when
       streams: Array<{
         name: string;
         url?: string;
-        externalUris?: unknown[];
+        externalUrl?: string;
         behaviorHints?: { notWebReady?: boolean; filename?: string; videoSize?: number };
       }>;
     };
     assert.equal(body.streams[0].name, '✅\nDone');
     assert.ok(body.streams[0].url?.startsWith('https://pi.example.com/files/series/88?t='), 'should have episode file streaming url');
-    assert.equal(body.streams[0].externalUris?.length ?? 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
+    assert.equal(body.streams[0].externalUrl ? 1 : 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
     assert.equal(body.streams[0].behaviorHints?.filename, 'Test.Show.S01E02.mkv');
     assert.equal(body.streams[0].behaviorHints?.videoSize, 536870912);
@@ -392,8 +392,8 @@ test('downloaded tile uses Kodi only when playback mode is set to kodi', async (
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
-    const body = (await response.json()) as { streams: Array<{ url?: string; externalUris?: Array<{ uri: string }> }> };
+    const body = (await response.json()) as { streams: Array<{ url?: string; externalUrl?: string }> };
     assert.equal(body.streams[0].url, undefined);
-    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/);
+    assert.match(body.streams[0].externalUrl ?? '', /package=org.xbmc.kodi/);
   });
 });

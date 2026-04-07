@@ -15,7 +15,7 @@ export interface StatusTile {
   name: string;
   description?: string;
   url?: string;
-  externalUris?: Array<{ uri: string; name?: string }>;
+  externalUrl?: string;
   behaviorHints?: { notWebReady?: boolean; filename?: string; videoSize?: number };
   isAction?: boolean;
 }

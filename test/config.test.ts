@@ -160,6 +160,17 @@ test('enabled Sonarr accepts future as SONARR_SERIES_MONITOR', () => {
   assert.equal(config.sonarr.seriesMonitor, 'future');
 });
 
+test('enabled Sonarr accepts lastSeason as SONARR_SERIES_MONITOR', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://sonarr.local:8989';
+  process.env.SONARR_API_KEY = 'sonarr-key';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/data/tv';
+  process.env.SONARR_SERIES_MONITOR = 'lastSeason';
+
+  const config = loadConfig();
+  assert.equal(config.sonarr.seriesMonitor, 'lastSeason');
+});
+
 test('disabled Sonarr ignores invalid SONARR_SERIES_MONITOR', () => {
   process.env.SONARR_ENABLED = 'false';
   process.env.SONARR_SERIES_MONITOR = 'invalid_value';

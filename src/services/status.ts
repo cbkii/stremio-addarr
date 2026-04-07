@@ -80,16 +80,11 @@ export class ArrStatusService {
     return !fileUrl;
   }
 
-  private buildKodiExternalUris(): Array<{ uri: string; name?: string }> {
+  private buildKodiExternalUrl(): string | undefined {
     if (!this.config.kodi.enabled) {
-      return [];
+      return undefined;
     }
-    return [
-      {
-        name: 'Kodi',
-        uri: `intent://launch#Intent;package=${encodeURIComponent(this.config.kodi.packageName)};action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end`
-      }
-    ];
+    return `intent://launch#Intent;package=${encodeURIComponent(this.config.kodi.packageName)};action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end`;
   }
 
   private buildMovieTiles(status: ArrMovieStatus, parsed: ParsedStremioId): StatusTile[] {
@@ -98,13 +93,13 @@ export class ArrStatusService {
         const fileUrl = (this.canDirectStream() && status.movieFileId != null)
           ? this.buildFileStreamUrl('movie', status.movieFileId)
           : undefined;
-        const kodiUris = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUris() : [];
+        const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
           name: '✅\nDone',
           description: desc(
             movieLine(status.title, status.year),
             '✅ File ready',
-            fileUrl ? '▶ Play on Pi' : (kodiUris.length > 0 ? '▶ Open in Kodi' : '✅ Ready')
+            fileUrl ? '▶ Play on Pi' : (kodiExternalUrl ? '▶ Open in Kodi' : '✅ Ready')
           ),
           url: fileUrl,
           behaviorHints: fileUrl ? {
@@ -112,7 +107,7 @@ export class ArrStatusService {
             filename: status.fileName,
             videoSize: status.fileSizeBytes
           } : undefined,
-          externalUris: kodiUris
+          externalUrl: kodiExternalUrl
         }];
       }
       case 'downloading':
@@ -157,13 +152,13 @@ export class ArrStatusService {
         const fileUrl = (this.canDirectStream() && status.episodeFileId != null)
           ? this.buildFileStreamUrl('series', status.episodeFileId)
           : undefined;
-        const kodiUris = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUris() : [];
+        const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
           name: '✅\nDone',
           description: desc(
             seriesLine(status.title),
             ep ? `✅ ${ep} ready` : '✅ File ready',
-            fileUrl ? '▶ Play on Pi' : (kodiUris.length > 0 ? '▶ Open in Kodi' : '✅ Ready')
+            fileUrl ? '▶ Play on Pi' : (kodiExternalUrl ? '▶ Open in Kodi' : '✅ Ready')
           ),
           url: fileUrl,
           behaviorHints: fileUrl ? {
@@ -171,7 +166,7 @@ export class ArrStatusService {
             filename: status.fileName,
             videoSize: status.fileSizeBytes
           } : undefined,
-          externalUris: kodiUris
+          externalUrl: kodiExternalUrl
         }];
       }
       case 'episode_downloading':

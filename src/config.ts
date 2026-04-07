@@ -54,7 +54,20 @@ export interface AppConfig {
     rootFolderPath: string;
     qualityProfileId: number;
     languageProfileId: number;
-    seriesMonitor: 'all' | 'future' | 'missing' | 'existing' | 'pilot' | 'firstSeason' | 'latestSeason' | 'none';
+    seriesMonitor:
+      | 'all'
+      | 'future'
+      | 'missing'
+      | 'existing'
+      | 'firstSeason'
+      | 'lastSeason'
+      | 'latestSeason'
+      | 'pilot'
+      | 'recent'
+      | 'monitorSpecials'
+      | 'unmonitorSpecials'
+      | 'none'
+      | 'skip';
     tags: number[];
     searchOnAdd: boolean;
   };
@@ -69,10 +82,15 @@ const SONARR_MONITOR_ALIASES: Record<string, AppConfig['sonarr']['seriesMonitor'
   future: 'future',
   missing: 'missing',
   existing: 'existing',
-  pilot: 'pilot',
   firstseason: 'firstSeason',
+  lastseason: 'lastSeason',
   latestseason: 'latestSeason',
-  none: 'none'
+  pilot: 'pilot',
+  recent: 'recent',
+  monitorspecials: 'monitorSpecials',
+  unmonitorspecials: 'unmonitorSpecials',
+  none: 'none',
+  skip: 'skip'
 };
 
 function readNumber(name: string, fallback: number): number {
@@ -170,7 +188,7 @@ function parseSonarrSeriesMonitor(value: string): AppConfig['sonarr']['seriesMon
   const normalized = value.trim().toLowerCase();
   const resolved = SONARR_MONITOR_ALIASES[normalized];
   if (!resolved) {
-    throw new Error('SONARR_SERIES_MONITOR must be one of: all, future, missing, existing, pilot, firstSeason, latestSeason, none.');
+    throw new Error('SONARR_SERIES_MONITOR must be one of: all, future, missing, existing, firstSeason, lastSeason, latestSeason, pilot, recent, monitorSpecials, unmonitorSpecials, none, skip.');
   }
   return resolved;
 }
