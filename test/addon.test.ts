@@ -18,10 +18,12 @@ test('manifest endpoint shape sanity', async () => {
       resources: string[];
       types: string[];
       idPrefixes: string[];
+      logo: string;
     };
     assert.deepEqual(manifest.resources, ['stream', 'catalog']);
     assert.deepEqual(manifest.types, ['movie', 'series']);
     assert.deepEqual(manifest.idPrefixes, ['tt']);
+    assert.equal(manifest.logo, 'https://upload.wikimedia.org/wikipedia/commons/d/df/Pctlogo.png');
   });
 });
 
