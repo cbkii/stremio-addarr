@@ -291,7 +291,7 @@ export function loadConfig(): AppConfig {
         languageProfileId: readNumber('SONARR_LANGUAGE_PROFILE_ID', 1),
         seriesMonitor: sonarrEnabled
           ? parseSonarrSeriesMonitor(readString('SONARR_SERIES_MONITOR', 'all'))
-          : 'all' as const,
+          : 'all',
         tags: readStringList('SONARR_TAGS'),
         searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
       };
