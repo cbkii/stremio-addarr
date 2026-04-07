@@ -1,6 +1,6 @@
 {
   "name": "stremio-addarr",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Self-hosted Stremio add-on that shows Arr status and adds movies or series to Radarr/Sonarr.",
   "type": "module",

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
 import sdk from 'stremio-addon-sdk';
@@ -26,6 +27,11 @@ function redactUrl(rawUrl: string): string {
   } catch {
     return '***';
   }
+}
+
+function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
+  const relative = path.relative(rootPath, targetPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 export function createApp(config: AppConfig) {
@@ -153,7 +159,6 @@ export function createApp(config: AppConfig) {
       catalogCacheMaxAgeSec: config.catalogCacheMaxAgeSec,
       catalogStaleRevalidateSec: config.catalogStaleRevalidateSec,
       catalogStaleErrorSec: config.catalogStaleErrorSec,
-      tmdbNegativeCacheTtlMs: config.tmdbNegativeCacheTtlMs,
       radarr: {
         enabled: config.radarr.enabled,
         reachable: serviceHealth.radarr.reachable,
@@ -292,19 +297,43 @@ export function createApp(config: AppConfig) {
       return;
     }
 
-    const allowedRootRaw = kind === 'movie'
-      ? config.radarr.rootFolderPath
-      : config.sonarr.rootFolderPath;
-    const allowedRoot = path.resolve(allowedRootRaw);
-    const resolvedPath = path.resolve(filePath);
+    const allowedRootRaw = kind === 'movie' ? config.radarr.rootFolderPath : config.sonarr.rootFolderPath;
+    let allowedRootReal: string;
+    let resolvedPathReal: string;
+    try {
+      allowedRootReal = await fs.realpath(allowedRootRaw);
+    } catch (error) {
+      logger.error('File streaming: allowed root not accessible', {
+        reqId,
+        kind,
+        fileId,
+        allowedRoot: allowedRootRaw,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      res.status(500).end();
+      return;
+    }
 
-    if (!resolvedPath.startsWith(allowedRoot + path.sep)) {
-      logger.warn('File streaming: path outside allowed root', { reqId, kind, fileId });
+    try {
+      resolvedPathReal = await fs.realpath(filePath);
+    } catch {
+      res.status(404).end();
+      return;
+    }
+
+    if (!isPathInsideRoot(allowedRootReal, resolvedPathReal)) {
+      logger.warn('File streaming: path outside allowed root', {
+        reqId,
+        kind,
+        fileId,
+        allowedRoot: allowedRootReal,
+        resolvedFilePath: resolvedPathReal
+      });
       res.status(403).end();
       return;
     }
 
-    res.sendFile(resolvedPath, (err) => {
+    res.sendFile(resolvedPathReal, (err) => {
       if (err && !res.headersSent) {
         logger.warn('File streaming: send error', { reqId, kind, fileId, error: err instanceof Error ? err.message : String(err) });
         res.status(404).end();
@@ -327,6 +356,20 @@ if (isEntryPoint) {
   const config = loadConfig();
   const logger = createLogger(config.logLevel);
   const validation = validateConfig(config);
+  logger.info('Effective runtime config', {
+    version: config.version,
+    host: config.host,
+    port: config.port,
+    publicBaseUrl: config.publicBaseUrl,
+    fileStreamingEnabled: config.fileStreaming.enabled,
+    fileStreamingPlaybackMode: config.fileStreaming.playbackMode,
+    radarrEnabled: config.radarr.enabled,
+    sonarrEnabled: config.sonarr.enabled,
+    radarrRootFolderPath: config.radarr.rootFolderPath || null,
+    sonarrRootFolderPath: config.sonarr.rootFolderPath || null,
+    catalogPageSize: config.catalogPageSize,
+    catalogCacheTtlMs: config.catalogCacheTtlMs
+  });
   for (const issue of validation.issues) {
     logger.warn('Config issue', { issue });
   }

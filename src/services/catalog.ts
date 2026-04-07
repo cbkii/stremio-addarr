@@ -164,8 +164,6 @@ interface CatalogMetaPreview {
   id: string;
   type: 'movie' | 'series';
   name: string;
-  poster: string;
-  posterShape: 'poster';
   releaseInfo: string;
   description?: string;
 }
@@ -175,8 +173,6 @@ function toMeta(item: CatalogItem): CatalogMetaPreview {
     id: item.imdbId,
     type: item.type,
     name: item.title,
-    poster: item.poster,
-    posterShape: item.posterShape,
     releaseInfo: item.releaseInfo,
     description: item.description
   };
@@ -187,8 +183,6 @@ export class CatalogService {
   private readonly sonarr: SonarrClient;
   private readonly clock: Clock;
   private readonly mergedCache: TtlCache<CatalogItem[]>;
-  private readonly tmdbPosterCache: TtlCache<string>;
-  private readonly tmdbNegativeCache: TtlCache<boolean>;
 
   constructor(
     private readonly config: AppConfig,
@@ -198,8 +192,6 @@ export class CatalogService {
     this.sonarr = deps?.sonarr ?? new SonarrClient(config);
     this.clock = deps?.clock ?? systemClock;
     this.mergedCache = new TtlCache<CatalogItem[]>(config.catalogCacheTtlMs);
-    this.tmdbPosterCache = new TtlCache<string>(Math.max(10_000, config.catalogCacheTtlMs * 3));
-    this.tmdbNegativeCache = new TtlCache<boolean>(config.tmdbNegativeCacheTtlMs);
   }
 
   async buildCatalog(catalogId: string, skip: number, limit: number): Promise<{ metas: CatalogMetaPreview[] }> {
@@ -237,10 +229,8 @@ export class CatalogService {
     for (const row of queue) {
       try {
         const movie = row.movieId != null ? moviesById.get(row.movieId) : undefined;
-        const imdbId = movie?.imdbId;
+        const imdbId = movie?.imdbId ?? row.movie?.imdbId;
         if (!imdbId) continue;
-        const poster = (movie ? this.radarr.resolvePosterUrl(movie) : undefined) ?? await this.resolveTmdbPoster(imdbId, 'movie');
-        if (!poster) continue;
 
         const etaSeconds = parseEtaSeconds(row.timeleft) ?? (row.estimatedCompletionTime ? Math.max(0, Math.round((toTimestamp(row.estimatedCompletionTime) - nowMs) / 1000)) : undefined);
         const stalled = /stalled/i.test(`${row.trackedDownloadStatus ?? ''} ${row.trackedDownloadState ?? ''} ${row.status ?? ''}`) || /stalled/i.test(firstMessage(row.statusMessages) ?? '');
@@ -251,9 +241,7 @@ export class CatalogService {
           status: 'downloading',
           type: 'movie',
           imdbId,
-          title: movie?.title ?? row.title ?? 'Unknown movie',
-          poster,
-          posterShape: 'poster',
+          title: movie?.title ?? row.movie?.title ?? row.title ?? 'Unknown movie',
           releaseInfo: downloadingReleaseInfo(progressPct, etaSeconds, stalled),
           description: compact([row.quality?.quality?.name, row.protocol, stalled ? firstMessage(row.statusMessages) : undefined, row.title]),
           timestamp: nowMs,
@@ -272,8 +260,6 @@ export class CatalogService {
         const movie = row.movieId != null ? moviesById.get(row.movieId) : undefined;
         const imdbId = movie?.imdbId;
         if (!imdbId) continue;
-        const poster = (movie ? this.radarr.resolvePosterUrl(movie) : undefined) ?? await this.resolveTmdbPoster(imdbId, 'movie');
-        if (!poster) continue;
 
         const ts = toTimestamp(row.date);
         importItems.push({
@@ -282,8 +268,6 @@ export class CatalogService {
           type: 'movie',
           imdbId,
           title: movie?.title ?? 'Unknown movie',
-          poster,
-          posterShape: 'poster',
           releaseInfo: formatRelativeImport(ts, nowMs),
           description: compact([row.quality?.quality?.name, row.sourceTitle]),
           timestamp: ts
@@ -317,10 +301,8 @@ export class CatalogService {
     for (const row of queue) {
       try {
         const series = row.seriesId != null ? bySeriesId.get(row.seriesId) : undefined;
-        const imdbId = series?.imdbId;
+        const imdbId = series?.imdbId ?? row.series?.imdbId;
         if (!imdbId) continue;
-        const poster = (series ? this.sonarr.resolvePosterUrl(series) : undefined) ?? await this.resolveTmdbPoster(imdbId, 'series');
-        if (!poster) continue;
 
         const etaSeconds = parseEtaSeconds(row.timeleft) ?? (row.estimatedCompletionTime ? Math.max(0, Math.round((toTimestamp(row.estimatedCompletionTime) - nowMs) / 1000)) : undefined);
         const stalled = /stalled/i.test(`${row.trackedDownloadStatus ?? ''} ${row.trackedDownloadState ?? ''} ${row.status ?? ''}`) || /stalled/i.test(firstMessage(row.statusMessages) ?? '');
@@ -332,9 +314,7 @@ export class CatalogService {
           status: 'downloading',
           type: 'series',
           imdbId,
-          title: series?.title ?? row.title ?? 'Unknown series',
-          poster,
-          posterShape: 'poster',
+          title: series?.title ?? row.series?.title ?? row.title ?? 'Unknown series',
           releaseInfo: downloadingReleaseInfo(progressPct, etaSeconds, stalled),
           description: compact([ep || undefined, row.quality?.quality?.name, stalled ? firstMessage(row.statusMessages) : undefined]),
           timestamp: nowMs,
@@ -355,8 +335,6 @@ export class CatalogService {
         const series = row.seriesId != null ? bySeriesId.get(row.seriesId) : undefined;
         const imdbId = series?.imdbId;
         if (!imdbId) continue;
-        const poster = (series ? this.sonarr.resolvePosterUrl(series) : undefined) ?? await this.resolveTmdbPoster(imdbId, 'series');
-        if (!poster) continue;
 
         const ts = toTimestamp(row.date);
         const ep = episodeLabel(row.episode?.seasonNumber, row.episode?.episodeNumber);
@@ -366,8 +344,6 @@ export class CatalogService {
           type: 'series',
           imdbId,
           title: series?.title ?? 'Unknown series',
-          poster,
-          posterShape: 'poster',
           releaseInfo: formatRelativeImport(ts, nowMs),
           description: compact([ep ? `Latest: ${ep}` : undefined, row.quality?.quality?.name, row.sourceTitle]),
           timestamp: ts,
@@ -382,51 +358,6 @@ export class CatalogService {
       return mergeSeriesItems([...queueItems, ...importItems]).slice(skip, skip + limit);
     } catch {
       return [];
-    }
-  }
-
-  private async resolveTmdbPoster(imdbId: string, type: 'movie' | 'series'): Promise<string | undefined> {
-    if (!this.config.tmdbApiKey) return undefined;
-    const cacheKey = `${type}:${imdbId}`;
-    const cachedPoster = this.tmdbPosterCache.get(cacheKey);
-    if (cachedPoster) {
-      return cachedPoster;
-    }
-    if (this.tmdbNegativeCache.get(cacheKey)) {
-      return undefined;
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
-    try {
-      const url = new URL(`https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}`);
-      url.searchParams.set('external_source', 'imdb_id');
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${this.config.tmdbApiKey}`
-        }
-      });
-      if (!response.ok) {
-        this.tmdbNegativeCache.set(cacheKey, true);
-        return undefined;
-      }
-      const body = (await response.json()) as { movie_results?: Array<{ poster_path?: string }>; tv_results?: Array<{ poster_path?: string }> };
-      const posterPath = type === 'movie'
-        ? body.movie_results?.find((item) => item.poster_path)?.poster_path
-        : body.tv_results?.find((item) => item.poster_path)?.poster_path;
-      if (!posterPath) {
-        this.tmdbNegativeCache.set(cacheKey, true);
-        return undefined;
-      }
-      const poster = `https://image.tmdb.org/t/p/w500${posterPath}`;
-      this.tmdbPosterCache.set(cacheKey, poster);
-      return poster;
-    } catch {
-      this.tmdbNegativeCache.set(cacheKey, true);
-      return undefined;
-    } finally {
-      clearTimeout(timeout);
     }
   }
 }

@@ -47,7 +47,7 @@ function epLabel(season?: number, episode?: number): string {
  * Join up to 3 non-empty lines into a newline-separated description.
  */
 function desc(...lines: string[]): string {
-  return lines.filter(Boolean).slice(0, 3).join('\n');
+  return ['—⭐—🦜—📀—', ...lines.filter(Boolean).slice(0, 3)].join('\n');
 }
 
 export class ArrStatusService {
@@ -95,7 +95,7 @@ export class ArrStatusService {
           : undefined;
         const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
-          name: '✅\nDone',
+          name: '✅🥧\nFile\nReady',
           description: desc(
             movieLine(status.title, status.year),
             '✅ File ready',
@@ -154,7 +154,7 @@ export class ArrStatusService {
           : undefined;
         const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
-          name: '✅\nDone',
+          name: '✅🥧\nFile\nReady',
           description: desc(
             seriesLine(status.title),
             ep ? `✅ ${ep} ready` : '✅ File ready',

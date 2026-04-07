@@ -205,14 +205,22 @@ test('fails for negative catalog stale error hint', () => {
   assert.throws(() => loadConfig(), /CATALOG_STALE_ERROR_SEC/);
 });
 
-test('fails for negative tmdb negative-cache ttl', () => {
-  process.env.TMDB_NEGATIVE_CACHE_TTL_MS = '-1';
-  assert.throws(() => loadConfig(), /TMDB_NEGATIVE_CACHE_TTL_MS/);
-});
-
 test('fails for unknown TARGET_CLIENT', () => {
   process.env.TARGET_CLIENT = 'android-phone';
   assert.throws(() => loadConfig(), /TARGET_CLIENT/);
+});
+
+test('config version loads from package.json when npm_package_version is absent', () => {
+  delete process.env.npm_package_version;
+  delete process.env.APP_VERSION;
+  const config = loadConfig();
+  assert.equal(config.version, '0.1.1');
+});
+
+test('APP_VERSION overrides package version', () => {
+  process.env.APP_VERSION = '9.9.9-test';
+  const config = loadConfig();
+  assert.equal(config.version, '9.9.9-test');
 });
 
 test('allows empty KODI_PACKAGE when Kodi is disabled', () => {

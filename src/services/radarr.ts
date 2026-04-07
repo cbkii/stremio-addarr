@@ -303,9 +303,14 @@ export class RadarrClient {
     try {
       for (let page = startPage; page < startPage + 20 && collected.length < safeLimit; page++) {
         const response = await this.http.get<{ records?: RadarrHistoryRecord[] } | RadarrHistoryRecord[]>(
-          `/api/v3/history?page=${page}&pageSize=${pageSize}&sortKey=date&sortDirection=descending&eventType=downloadFolderImported`
+          `/api/v3/history?page=${page}&pageSize=${pageSize}&sortKey=date&sortDirection=descending`
         );
-        const records = (Array.isArray(response) ? response : (response.records ?? [])).filter((item) => item?.movieId != null);
+        const records = (Array.isArray(response) ? response : (response.records ?? []))
+          .filter((item) => item?.movieId != null)
+          .filter((item) => {
+            const eventType = `${item?.eventType ?? ''}`.toLowerCase();
+            return !eventType || eventType.includes('import');
+          });
         const pageRecords = page === startPage ? records.slice(inPageOffset) : records;
         collected.push(...pageRecords);
         if (records.length < pageSize) {
@@ -337,13 +342,6 @@ export class RadarrClient {
     return records;
   }
 
-  resolvePosterUrl(movie: RadarrMovieRecord): string | undefined {
-    const poster = movie.images?.find((image) => image.coverType === 'poster');
-    const raw = poster?.remoteUrl ?? poster?.url;
-    if (!raw) return undefined;
-    if (/^https?:\/\//i.test(raw)) return raw;
-    return `${this.config.radarr.baseUrl}${raw.startsWith('/') ? '' : '/'}${raw}`;
-  }
   private async lookupMovie(imdbId: string): Promise<RadarrLookupRecord | null> {
     // Radarr /movie/lookup/imdb returns a single RadarrLookupRecord (not an array).
     // Fallback: if the response is unexpectedly an array (older Radarr builds), handle both.
