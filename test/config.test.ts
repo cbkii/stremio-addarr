@@ -26,6 +26,19 @@ test('loads valid config', () => {
   const config = loadConfig();
   assert.equal(config.radarr.enabled, true);
   assert.equal(config.radarr.baseUrl, 'http://127.0.0.1:7878');
+  assert.equal(config.radarr.cardUrl, 'http://127.0.0.1:7878');
+});
+
+test('card urls allow display override without changing API base url', () => {
+  process.env.RADARR_ENABLED = 'true';
+  process.env.RADARR_BASE_URL = 'http://127.0.0.1:7878';
+  process.env.RADARR_CARD_URL = '192.168.1.50:7878';
+  process.env.RADARR_API_KEY = 'abc';
+  process.env.RADARR_ROOT_FOLDER_PATH = '/movies';
+
+  const config = loadConfig();
+  assert.equal(config.radarr.baseUrl, 'http://127.0.0.1:7878');
+  assert.equal(config.radarr.cardUrl, '192.168.1.50:7878');
 });
 
 test('fails for invalid timeout', () => {

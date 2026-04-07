@@ -41,6 +41,7 @@ export interface AppConfig {
   radarr: {
     enabled: boolean;
     baseUrl: string;
+    cardUrl: string;
     apiKey: string;
     rootFolderPath: string;
     qualityProfileId: number;
@@ -51,6 +52,7 @@ export interface AppConfig {
   sonarr: {
     enabled: boolean;
     baseUrl: string;
+    cardUrl: string;
     apiKey: string;
     rootFolderPath: string;
     qualityProfileId: number;
@@ -335,6 +337,7 @@ export function loadConfig(): AppConfig {
     radarr: {
       enabled: readBoolean('RADARR_ENABLED', false),
       baseUrl: stripTrailingSlash(readString('RADARR_BASE_URL')),
+      cardUrl: stripTrailingSlash(readString('RADARR_CARD_URL')),
       apiKey: readString('RADARR_API_KEY'),
       rootFolderPath: readString('RADARR_ROOT_FOLDER_PATH'),
       qualityProfileId: readNumber('RADARR_QUALITY_PROFILE_ID', 1),
@@ -347,6 +350,7 @@ export function loadConfig(): AppConfig {
       return {
         enabled: sonarrEnabled,
         baseUrl: stripTrailingSlash(readString('SONARR_BASE_URL')),
+        cardUrl: stripTrailingSlash(readString('SONARR_CARD_URL')),
         apiKey: readString('SONARR_API_KEY'),
         rootFolderPath: readString('SONARR_ROOT_FOLDER_PATH'),
         qualityProfileId: readNumber('SONARR_QUALITY_PROFILE_ID', 1),
@@ -393,9 +397,19 @@ export function loadConfig(): AppConfig {
 
   if (config.radarr.enabled) {
     config.radarr.baseUrl = ensureHttpUrl('RADARR_BASE_URL', config.radarr.baseUrl);
+    if (config.radarr.cardUrl) {
+      config.radarr.cardUrl = stripTrailingSlash(config.radarr.cardUrl);
+    } else {
+      config.radarr.cardUrl = config.radarr.baseUrl;
+    }
   }
   if (config.sonarr.enabled) {
     config.sonarr.baseUrl = ensureHttpUrl('SONARR_BASE_URL', config.sonarr.baseUrl);
+    if (config.sonarr.cardUrl) {
+      config.sonarr.cardUrl = stripTrailingSlash(config.sonarr.cardUrl);
+    } else {
+      config.sonarr.cardUrl = config.sonarr.baseUrl;
+    }
   }
 
   return config;
