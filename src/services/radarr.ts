@@ -8,6 +8,7 @@ import type {
   RadarrHistoryRecord,
   RadarrLookupRecord,
   RadarrMovieRecord,
+  RadarrReleaseRecord,
   RadarrQueueRecord
 } from '../types.js';
 
@@ -218,18 +219,42 @@ export class RadarrClient {
       };
     }
 
-    await this.http.post('/api/v3/command', {
-      name: 'MoviesSearch',
-      movieIds: [status.movieId]
-    });
+    const grabbed = await this.tryGrabTopRelease(status.movieId);
+    if (!grabbed) {
+      await this.http.post('/api/v3/command', {
+        name: 'MoviesSearch',
+        movieIds: [status.movieId]
+      });
+    }
     this.moviesCache.clear();
-    this.logger.info('radarr search queued', { imdbId, movieId: status.movieId });
+    this.logger.info('radarr search queued', { imdbId, movieId: status.movieId, method: grabbed ? 'release_grab' : 'command_search' });
     return {
       ok: true,
       service: 'radarr',
       title: 'Search triggered',
-      summary: 'Radarr movie search queued.'
+      summary: grabbed ? 'Radarr release grabbed for download.' : 'Radarr movie search queued.'
     };
+  }
+
+  private async tryGrabTopRelease(movieId: number): Promise<boolean> {
+    try {
+      const releases = await this.http.get<RadarrReleaseRecord[]>(`/api/v3/release?movieId=${movieId}`);
+      const candidate = releases
+        .filter((item) => item.approved && !item.rejected && item.downloadAllowed !== false && item.guid && item.indexerId != null)
+        .sort((a, b) => (b.releaseWeight ?? Number.NEGATIVE_INFINITY) - (a.releaseWeight ?? Number.NEGATIVE_INFINITY))[0];
+      if (!candidate?.guid || candidate.indexerId == null) {
+        return false;
+      }
+      await this.http.post('/api/v3/release', {
+        guid: candidate.guid,
+        indexerId: candidate.indexerId,
+        movieId,
+        ...(candidate.downloadClientId != null ? { downloadClientId: candidate.downloadClientId } : {})
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   invalidateCache(): void {

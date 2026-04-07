@@ -9,6 +9,7 @@ import type {
   SonarrHistoryRecord,
   SonarrLookupRecord,
   SonarrQueueRecord,
+  SonarrReleaseRecord,
   SonarrSeriesRecord
 } from '../types.js';
 
@@ -231,34 +232,40 @@ export class SonarrClient {
     }
 
     if (status.episodeId) {
-      await this.http.post('/api/v3/command', {
-        name: 'EpisodeSearch',
-        episodeIds: [status.episodeId]
-      });
+      const grabbed = await this.tryGrabTopRelease(status.seriesId, status.episodeId, season);
+      if (!grabbed) {
+        await this.http.post('/api/v3/command', {
+          name: 'EpisodeSearch',
+          episodeIds: [status.episodeId]
+        });
+      }
       this.seriesCache.clear();
       this.episodeCache.clear();
-      this.logger.info('sonarr search queued', { imdbId, episodeId: status.episodeId });
+      this.logger.info('sonarr search queued', { imdbId, episodeId: status.episodeId, method: grabbed ? 'release_grab' : 'command_search' });
       return {
         ok: true,
         service: 'sonarr',
         title: 'Search triggered',
-        summary: 'Sonarr episode search queued.'
+        summary: grabbed ? 'Sonarr release grabbed for download.' : 'Sonarr episode search queued.'
       };
     }
 
     if (status.seriesId) {
-      await this.http.post('/api/v3/command', {
-        name: 'MissingEpisodeSearch',
-        seriesId: status.seriesId
-      });
+      const grabbed = await this.tryGrabTopRelease(status.seriesId, undefined, season);
+      if (!grabbed) {
+        await this.http.post('/api/v3/command', {
+          name: 'MissingEpisodeSearch',
+          seriesId: status.seriesId
+        });
+      }
       this.seriesCache.clear();
       this.episodeCache.clear();
-      this.logger.info('sonarr search queued', { imdbId, seriesId: status.seriesId, type: 'missing_episode' });
+      this.logger.info('sonarr search queued', { imdbId, seriesId: status.seriesId, type: 'missing_episode', method: grabbed ? 'release_grab' : 'command_search' });
       return {
         ok: true,
         service: 'sonarr',
         title: 'Search triggered',
-        summary: 'Sonarr missing-episode search queued.'
+        summary: grabbed ? 'Sonarr release grabbed for download.' : 'Sonarr missing-episode search queued.'
       };
     }
 
@@ -414,6 +421,41 @@ export class SonarrClient {
       `/api/v3/series/lookup?term=${encodeURIComponent(`imdb:${imdbId}`)}`
     );
     return results.find((item) => item.imdbId === imdbId) ?? results[0] ?? null;
+  }
+
+  private async tryGrabTopRelease(
+    seriesId: number | undefined,
+    episodeId: number | undefined,
+    season?: number
+  ): Promise<boolean> {
+    if (!seriesId) {
+      return false;
+    }
+    const params = new URLSearchParams({ seriesId: String(seriesId) });
+    if (season != null) {
+      params.set('seasonNumber', String(season));
+    }
+    if (episodeId != null) {
+      params.set('episodeId', String(episodeId));
+    }
+    try {
+      const releases = await this.http.get<SonarrReleaseRecord[]>(`/api/v3/release?${params.toString()}`);
+      const candidate = releases
+        .filter((item) => item.approved && !item.rejected && item.downloadAllowed !== false && item.guid && item.indexerId != null)
+        .sort((a, b) => (b.releaseWeight ?? Number.NEGATIVE_INFINITY) - (a.releaseWeight ?? Number.NEGATIVE_INFINITY))[0];
+      if (!candidate?.guid || candidate.indexerId == null) {
+        return false;
+      }
+      await this.http.post('/api/v3/release', {
+        guid: candidate.guid,
+        indexerId: candidate.indexerId,
+        ...(episodeId ? { episodeIds: [episodeId] } : { seriesId }),
+        ...(candidate.downloadClientId != null ? { downloadClientId: candidate.downloadClientId } : {})
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async ping(): Promise<{ reachable: boolean; detail?: string }> {
