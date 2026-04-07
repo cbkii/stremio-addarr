@@ -42,6 +42,10 @@ export function createApp(config: AppConfig) {
 
   function isFilesRateLimited(ip: string): boolean {
     const now = Date.now();
+    // Evict expired entries on each check to prevent unbounded memory growth from unique IPs.
+    for (const [key, entry] of fileRateMap) {
+      if (now >= entry.resetAt) fileRateMap.delete(key);
+    }
     const entry = fileRateMap.get(ip);
     if (!entry || now >= entry.resetAt) {
       fileRateMap.set(ip, { count: 1, resetAt: now + FILE_RATE_WINDOW_MS });
