@@ -270,3 +270,26 @@ test('triggerEpisodeSearch returns unavailable reason when status lookup fails',
   assert.equal(result.title, 'Sonarr unavailable');
   assert.match(result.summary, /unavailable/);
 });
+
+test('listRecentSeriesImports honors offset paging across pages', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/history?page=1&pageSize=50&sortKey=date&sortDirection=descending&eventType=downloadFolderImported') {
+        return { records: Array.from({ length: 50 }, (_, i) => ({ seriesId: i + 1 })) } as T;
+      }
+      if (path === '/api/v3/history?page=2&pageSize=50&sortKey=date&sortDirection=descending&eventType=downloadFolderImported') {
+        return { records: Array.from({ length: 50 }, (_, i) => ({ seriesId: i + 51 })) } as T;
+      }
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string): Promise<T> {
+      return {} as T;
+    }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  const records = await client.listRecentSeriesImports(5, 52);
+  assert.deepEqual(records.map((record) => record.seriesId), [53, 54, 55, 56, 57]);
+});

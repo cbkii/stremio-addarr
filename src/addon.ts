@@ -60,10 +60,19 @@ export function createAddonInterface(config: AppConfig, logger?: Logger) {
     };
   });
 
-  builder.defineCatalogHandler(async ({ id, extra }: { id: string; extra?: Record<string, string | undefined> }) => {
+  builder.defineCatalogHandler(async ({ id, type, extra }: { id: string; type: string; extra?: Record<string, string | undefined> }) => {
+    const expectedType = id === 'radarr-recent' ? 'movie' : id === 'sonarr-recent' ? 'series' : null;
     const rawSkip = Number(extra?.skip ?? 0);
     const skip = Number.isFinite(rawSkip) && rawSkip > 0 ? Math.floor(rawSkip) : 0;
     const limit = Math.min(catalogHardMax, catalogPageSize);
+    if (!expectedType || type !== expectedType) {
+      return {
+        metas: [],
+        cacheMaxAge: config.catalogCacheMaxAgeSec,
+        staleRevalidate: config.catalogStaleRevalidateSec,
+        staleError: config.catalogStaleErrorSec
+      };
+    }
     const result = await catalogService.buildCatalog(id, skip, limit);
     return {
       metas: result.metas,

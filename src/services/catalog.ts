@@ -85,6 +85,15 @@ function downloadingSortKey(item: CatalogItem): [number, number, number, string]
   ];
 }
 
+function shouldPreferDownloading(candidate: CatalogItem, existing: CatalogItem): boolean {
+  const ck = downloadingSortKey(candidate);
+  const ek = downloadingSortKey(existing);
+  if (ck[0] !== ek[0]) return ck[0] < ek[0];
+  if (ck[1] !== ek[1]) return ck[1] < ek[1];
+  if (ck[2] !== ek[2]) return ck[2] < ek[2];
+  return ck[3] < ek[3];
+}
+
 export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
   const bestByImdb = new Map<string, CatalogItem>();
   for (const item of items) {
@@ -95,6 +104,12 @@ export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
     }
     if (current.status === 'imported' && item.status === 'downloading') {
       bestByImdb.set(item.imdbId, item);
+      continue;
+    }
+    if (current.status === 'downloading' && item.status === 'downloading') {
+      if (shouldPreferDownloading(item, current)) {
+        bestByImdb.set(item.imdbId, item);
+      }
       continue;
     }
     if (current.status === item.status && item.timestamp > current.timestamp) {
@@ -122,6 +137,12 @@ export function mergeSeriesItems(items: CatalogItem[]): CatalogItem[] {
     }
     if (current.status === 'imported' && item.status === 'downloading') {
       byImdb.set(item.imdbId, item);
+      continue;
+    }
+    if (current.status === 'downloading' && item.status === 'downloading') {
+      if (shouldPreferDownloading(item, current)) {
+        byImdb.set(item.imdbId, item);
+      }
       continue;
     }
     if (current.status === item.status && item.timestamp > current.timestamp) {
@@ -200,12 +221,12 @@ export class CatalogService {
 
   private async buildRadarrItems(skip: number, limit: number): Promise<CatalogItem[]> {
     if (!this.config.radarr.enabled) return [];
-    const nowMs = this.clock.now();
-    const [movies, queue, history] = await Promise.all([
-      this.radarr.listMovies(),
-      this.radarr.listMovieQueueDetails(),
-      this.radarr.listRecentMovieImports(limit * 4, 0)
-    ]);
+    try {
+      const nowMs = this.clock.now();
+      const movies = await this.radarr.listMovies().catch(() => []);
+      const queue = await this.radarr.listMovieQueueDetails().catch(() => []);
+      const historyWindow = Math.max(50, skip + limit + queue.length + 25);
+      const history = await this.radarr.listRecentMovieImports(historyWindow, 0).catch(() => []);
 
     const moviesById = new Map<number, RadarrMovieRecord>();
     for (const movie of movies) {
@@ -272,17 +293,20 @@ export class CatalogService {
       }
     }
 
-    return mergeMovieItems([...queueItems, ...importItems]).slice(skip, skip + limit);
+      return mergeMovieItems([...queueItems, ...importItems]).slice(skip, skip + limit);
+    } catch {
+      return [];
+    }
   }
 
   private async buildSonarrItems(skip: number, limit: number): Promise<CatalogItem[]> {
     if (!this.config.sonarr.enabled) return [];
-    const nowMs = this.clock.now();
-    const [seriesList, queue, history] = await Promise.all([
-      this.sonarr.listSeries(),
-      this.sonarr.listSeriesQueueDetails(),
-      this.sonarr.listRecentSeriesImports(limit * 4, 0)
-    ]);
+    try {
+      const nowMs = this.clock.now();
+      const seriesList = await this.sonarr.listSeries().catch(() => []);
+      const queue = await this.sonarr.listSeriesQueueDetails().catch(() => []);
+      const historyWindow = Math.max(50, skip + limit + queue.length + 25);
+      const history = await this.sonarr.listRecentSeriesImports(historyWindow, 0).catch(() => []);
 
     const bySeriesId = new Map<number, SonarrSeriesRecord>();
     for (const series of seriesList) {
@@ -355,7 +379,10 @@ export class CatalogService {
       }
     }
 
-    return mergeSeriesItems([...queueItems, ...importItems]).slice(skip, skip + limit);
+      return mergeSeriesItems([...queueItems, ...importItems]).slice(skip, skip + limit);
+    } catch {
+      return [];
+    }
   }
 
   private async resolveTmdbPoster(imdbId: string, type: 'movie' | 'series'): Promise<string | undefined> {
@@ -373,9 +400,13 @@ export class CatalogService {
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
     try {
       const url = new URL(`https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}`);
-      url.searchParams.set('api_key', this.config.tmdbApiKey);
       url.searchParams.set('external_source', 'imdb_id');
-      const response = await fetch(url, { signal: controller.signal });
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${this.config.tmdbApiKey}`
+        }
+      });
       if (!response.ok) {
         this.tmdbNegativeCache.set(cacheKey, true);
         return undefined;

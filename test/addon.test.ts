@@ -79,6 +79,45 @@ test('catalog cache hints are driven by config values', async () => {
   });
 });
 
+test('catalog handler returns empty metas when endpoint type does not match catalog type', async () => {
+  const app = createApp(baseConfig());
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/series/radarr-recent.json`);
+    const body = (await response.json()) as { metas: unknown[] };
+    assert.equal(response.status, 200);
+    assert.deepEqual(body.metas, []);
+  });
+});
+
+test('catalog route includes CORS headers', async () => {
+  const app = createApp(baseConfig());
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+  });
+});
+
+test('catalog handler degrades to empty metas when Arr services throw', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    if (parsed.hostname.includes('radarr')) {
+      throw new Error('radarr unreachable');
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    const body = (await response.json()) as { metas: unknown[] };
+    assert.equal(response.status, 200);
+    assert.deepEqual(body.metas, []);
+  });
+});
+
 test('downloaded tile launches Kodi via externalUris when enabled', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;

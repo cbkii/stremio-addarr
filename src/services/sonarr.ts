@@ -344,14 +344,25 @@ export class SonarrClient {
 
   async listRecentSeriesImports(limit: number, offset = 0): Promise<SonarrHistoryRecord[]> {
     if (!this.config.sonarr.enabled) return [];
-    const page = Math.floor(offset / Math.max(limit, 1)) + 1;
-    const pageSize = Math.max(1, Math.min(250, limit));
+    const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
+    const safeOffset = Math.max(0, Math.floor(offset));
+    const pageSize = Math.min(250, Math.max(50, Math.min(250, safeLimit)));
+    const startPage = Math.floor(safeOffset / pageSize) + 1;
+    const inPageOffset = safeOffset % pageSize;
+    const collected: SonarrHistoryRecord[] = [];
     try {
-      const response = await this.http.get<{ records?: SonarrHistoryRecord[] } | SonarrHistoryRecord[]>(
-        `/api/v3/history?page=${page}&pageSize=${pageSize}&sortKey=date&sortDirection=descending&eventType=downloadFolderImported`
-      );
-      const records = Array.isArray(response) ? response : (response.records ?? []);
-      return records.filter((item) => item?.seriesId != null);
+      for (let page = startPage; page < startPage + 20 && collected.length < safeLimit; page++) {
+        const response = await this.http.get<{ records?: SonarrHistoryRecord[] } | SonarrHistoryRecord[]>(
+          `/api/v3/history?page=${page}&pageSize=${pageSize}&sortKey=date&sortDirection=descending&eventType=downloadFolderImported`
+        );
+        const records = (Array.isArray(response) ? response : (response.records ?? [])).filter((item) => item?.seriesId != null);
+        const pageRecords = page === startPage ? records.slice(inPageOffset) : records;
+        collected.push(...pageRecords);
+        if (records.length < pageSize) {
+          break;
+        }
+      }
+      return collected.slice(0, safeLimit);
     } catch {
       return [];
     }

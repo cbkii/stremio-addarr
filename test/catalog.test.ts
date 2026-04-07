@@ -29,6 +29,15 @@ test('downloading movie beats imported movie for same imdb id', () => {
   assert.equal(merged[0].status, 'downloading');
 });
 
+test('better downloading movie row wins when same imdb has multiple queue rows', () => {
+  const merged = mergeMovieItems([
+    movieItem({ imdbId: 'tt30', status: 'downloading', stalled: true, progressPct: 95, etaSeconds: 120, timestamp: 1 }),
+    movieItem({ imdbId: 'tt30', status: 'downloading', stalled: false, progressPct: 20, etaSeconds: 600, timestamp: 1 })
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].stalled, false);
+});
+
 test('imported movie items sort newest first', () => {
   const merged = mergeMovieItems([
     movieItem({ imdbId: 'tt11', timestamp: 100 }),
@@ -87,7 +96,14 @@ test('catalog service can enrich posters from TMDB when Arr posters are missing'
   cfg.tmdbApiKey = 'tmdb-test-key';
   cfg.catalogCacheTtlMs = 10_000;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response('{"movie_results":[{"poster_path":"/abc.jpg"}]}', { status: 200 })) as typeof fetch;
+  let authHeader = '';
+  let requestUrl = '';
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    const headers = new Headers(init?.headers as HeadersInit);
+    authHeader = headers.get('authorization') ?? '';
+    return new Response('{"movie_results":[{"poster_path":"/abc.jpg"}]}', { status: 200 });
+  }) as typeof fetch;
 
   const fakeRadarr = {
     async listMovies() {
@@ -108,6 +124,8 @@ test('catalog service can enrich posters from TMDB when Arr posters are missing'
   try {
     const result = await service.buildCatalog('radarr-recent', 0, 25);
     assert.equal(result.metas[0]?.poster, 'https://image.tmdb.org/t/p/w500/abc.jpg');
+    assert.ok(authHeader.startsWith('Bearer '));
+    assert.ok(!requestUrl.includes('api_key='));
   } finally {
     globalThis.fetch = originalFetch;
   }
