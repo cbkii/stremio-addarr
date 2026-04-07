@@ -153,6 +153,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.pr-comment-gate.outputs.pr_sha || github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
 
       # ── Resolve final tag ────────────────────────────────────────────
       - name: Resolve tag
@@ -265,8 +267,7 @@ jobs:
           REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git fetch --tags --force
-          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -n1 || true)
+          PREV_TAG=$(git tag --sort=-version:refname | grep -vxF "${TAG}" | head -n1 || true)
           if [[ -n "${PREV_TAG}" ]]; then
             RANGE="${PREV_TAG}..${TAG}"
             SINCE_ISO=$(git log -1 --format=%cI "${PREV_TAG}")
@@ -287,14 +288,16 @@ jobs:
             git log --reverse --pretty=format:'- [%h](https://github.com/'"${REPO}"'/commit/%H) %s' "${RANGE}"
             echo ""
             echo "### Pull requests"
-            PR_LINES=$(gh pr list \
+            if ! PR_LINES=$(gh pr list \
               --repo "${REPO}" \
               --state merged \
               --search "merged:${SINCE_ISO}..${UNTIL_ISO}" \
               --limit 200 \
               --json number,title,url \
-              --jq 'sort_by(.number)[] | "- [#\(.number)](\(.url)) \(.title)"' \
-              || true)
+              --jq 'sort_by(.number)[] | "- [#\(.number)](\(.url)) \(.title)"'); then
+              echo "::error::Failed to query merged pull requests for release notes."
+              exit 1
+            fi
             if [[ -n "${PR_LINES}" ]]; then
               echo "${PR_LINES}"
             else
