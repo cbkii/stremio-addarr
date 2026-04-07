@@ -153,6 +153,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.pr-comment-gate.outputs.pr_sha || github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
 
       # ── Resolve final tag ────────────────────────────────────────────
       - name: Resolve tag
@@ -263,9 +265,59 @@ jobs:
         env:
           TAG:  ${{ steps.tag.outputs.tag }}
           REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Only substitute the two known variables; other $VAR patterns are left as-is.
+          PREV_TAG=$(git tag --sort=-version:refname | grep -vxF "${TAG}" | head -n1 || true)
+          if [[ -n "${PREV_TAG}" ]]; then
+            RANGE="${PREV_TAG}..${TAG}"
+            SINCE_ISO=$(git log -1 --format=%cI "${PREV_TAG}")
+          else
+            RANGE="${TAG}"
+            SINCE_ISO=$(git log --reverse --format=%cI | head -n1)
+          fi
+          UNTIL_ISO=$(git log -1 --format=%cI "${TAG}")
+
+          {
+            if [[ -n "${PREV_TAG}" ]]; then
+              echo "_Changes since [${PREV_TAG}](https://github.com/${REPO}/releases/tag/${PREV_TAG})_"
+            else
+              echo "_Changes included in the first tagged release_"
+            fi
+            echo ""
+            echo "### Commits"
+            git log --reverse --pretty=format:'- [%h](https://github.com/'"${REPO}"'/commit/%H) %s' "${RANGE}"
+            echo ""
+            echo "### Pull requests"
+            if ! PR_LINES=$(gh pr list \
+              --repo "${REPO}" \
+              --state merged \
+              --search "merged:${SINCE_ISO}..${UNTIL_ISO}" \
+              --limit 200 \
+              --json number,title,url \
+              --jq 'sort_by(.number)[] | "- [#\(.number)](\(.url)) \(.title)"'); then
+              echo "::error::Failed to query merged pull requests for release notes."
+              exit 1
+            fi
+            if [[ -n "${PR_LINES}" ]]; then
+              echo "${PR_LINES}"
+            else
+              echo "- None"
+            fi
+          } > /tmp/version-notes.md
+
+          # Only substitute known variables from template and keep all others intact.
           envsubst '${TAG} ${REPO}' < .github/release-body.md.tmpl > /tmp/release-body.md
+
+          python - <<'PY'
+          from pathlib import Path
+          release_body = Path("/tmp/release-body.md")
+          notes = Path("/tmp/version-notes.md").read_text().rstrip() + "\n"
+          token = "${VERSION_NOTES}"
+          content = release_body.read_text()
+          if token not in content:
+              raise SystemExit(f"missing token: {token}")
+          release_body.write_text(content.replace(token, notes))
+          PY
 
       - name: Create GitHub Release
         if: steps.flags.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
