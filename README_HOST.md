@@ -258,6 +258,8 @@ Set `YOUR_HOSTNAME` to exactly `$ADDARR_HOSTNAME`, then restart app:
 sudo systemctl restart stremio-addarr
 ```
 
+If you changed `/opt/stremio-addarr/.env`, restart is mandatory because systemd only reads `EnvironmentFile=` on service start/restart.
+
 Run the complete verification sequence:
 
 ```bash

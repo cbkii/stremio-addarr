@@ -175,7 +175,27 @@ jobs:
             TAG="v${VER}"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "### Release tag: \`$TAG\`  |  dry_run=${{ steps.flags.outputs.dry_run }}" >> "$GITHUB_STEP_SUMMARY"
+
+      # For manual dispatch releases, update package manifests before build so
+      # runtime manifest version and packaged version match the release tag.
+      - name: Sync package version for workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Verify package version matches release tag
+        env:
+          TAG_VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$PKG_VERSION" != "$TAG_VERSION" ]]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match release tag version ($TAG_VERSION)."
+            exit 1
+          fi
 
       # ── Build & verify ────────────────────────────────────────────────
       - name: Setup Node

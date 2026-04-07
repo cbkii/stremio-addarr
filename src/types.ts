@@ -83,7 +83,7 @@ export interface RadarrMovieRecord {
   hasFile?: boolean;
   movieFile?: { id: number; relativePath?: string; size?: number; path?: string } | null;
   year?: number;
-  images?: ArrImageRecord[];
+  added?: string;
 }
 
 export interface RadarrLookupRecord {
@@ -117,6 +117,7 @@ export interface RadarrQueueRecord {
   outputPath?: string;
   protocol?: string;
   quality?: { quality?: { name?: string } };
+  movie?: { imdbId?: string; title?: string };
 }
 
 export interface SonarrSeriesRecord {
@@ -126,7 +127,7 @@ export interface SonarrSeriesRecord {
   tvdbId?: number;
   year?: number;
   monitored?: boolean;
-  images?: ArrImageRecord[];
+  added?: string;
   statistics?: {
     episodeFileCount?: number;
     episodeCount?: number;
@@ -179,6 +180,7 @@ export interface SonarrQueueRecord {
   size?: number;
   protocol?: string;
   quality?: { quality?: { name?: string } };
+  series?: { imdbId?: string; title?: string };
 }
 
 export interface CatalogItem {
@@ -187,8 +189,6 @@ export interface CatalogItem {
   type: 'movie' | 'series';
   imdbId: string;
   title: string;
-  poster: string;
-  posterShape: 'poster';
   releaseInfo: string;
   description?: string;
   timestamp: number;

@@ -21,7 +21,6 @@ export function baseConfig(): AppConfig {
     catalogCacheMaxAgeSec: 15,
     catalogStaleRevalidateSec: 60,
     catalogStaleErrorSec: 120,
-    tmdbNegativeCacheTtlMs: 60_000,
     fileStreaming: {
       enabled: false,
       secret: '',
@@ -51,8 +50,7 @@ export function baseConfig(): AppConfig {
       seriesMonitor: 'all',
       tags: [],
       searchOnAdd: true
-    },
-    tmdbApiKey: undefined
+    }
   };
 }
 

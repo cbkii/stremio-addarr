@@ -289,11 +289,11 @@ test('listRecentMovieImports honors offset paging across pages', async () => {
   cfg.radarr.enabled = true;
   const http = {
     async get<T>(path: string): Promise<T> {
-      if (path === '/api/v3/history?page=1&pageSize=50&sortKey=date&sortDirection=descending&eventType=downloadFolderImported') {
-        return { records: Array.from({ length: 50 }, (_, i) => ({ movieId: i + 1 })) } as T;
+      if (path === '/api/v3/history?page=1&pageSize=50&sortKey=date&sortDirection=descending') {
+        return { records: Array.from({ length: 50 }, (_, i) => ({ movieId: i + 1, eventType: 'downloadFolderImported' })) } as T;
       }
-      if (path === '/api/v3/history?page=2&pageSize=50&sortKey=date&sortDirection=descending&eventType=downloadFolderImported') {
-        return { records: Array.from({ length: 50 }, (_, i) => ({ movieId: i + 51 })) } as T;
+      if (path === '/api/v3/history?page=2&pageSize=50&sortKey=date&sortDirection=descending') {
+        return { records: Array.from({ length: 50 }, (_, i) => ({ movieId: i + 51, eventType: 'downloadFolderImported' })) } as T;
       }
       throw new Error(`Unexpected GET ${path}`);
     },

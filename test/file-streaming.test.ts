@@ -158,9 +158,12 @@ test('file route returns 403 when Arr returns path outside root folder', async (
   cfg.fileStreaming.secret = FILE_SECRET;
   cfg.radarr.enabled = true;
   cfg.radarr.rootFolderPath = path.join(tmpDir, 'movies');
+  fs.mkdirSync(cfg.radarr.rootFolderPath, { recursive: true });
 
   // Arr API returns a path outside the configured root folder
   const evilPath = path.join(tmpDir, 'secret', 'passwords.txt');
+  fs.mkdirSync(path.dirname(evilPath), { recursive: true });
+  fs.writeFileSync(evilPath, 'sensitive');
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const urlPath = new URL(String(input)).pathname;
     if (urlPath === '/api/v3/moviefile/7') {
@@ -175,6 +178,79 @@ test('file route returns 403 when Arr returns path outside root folder', async (
     const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/7?t=${token}`);
     assert.equal(res.status, 403);
   });
+});
+
+test('file route allows canonicalized path when configured root is a symlink (false 403 regression)', async () => {
+  const rootParent = fs.mkdtempSync(path.join(os.tmpdir(), 'addarr-root-parent-'));
+  const realRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'addarr-real-root-'));
+  const symlinkRoot = path.join(rootParent, 'movies-link');
+  const realFile = path.join(realRoot, 'movie.mp4');
+  fs.writeFileSync(realFile, 'canonical-content');
+  fs.symlinkSync(realRoot, symlinkRoot, 'dir');
+
+  try {
+    const cfg = baseConfig();
+    cfg.fileStreaming.enabled = true;
+    cfg.fileStreaming.secret = FILE_SECRET;
+    cfg.radarr.enabled = true;
+    cfg.radarr.rootFolderPath = symlinkRoot;
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const urlPath = new URL(String(input)).pathname;
+      if (urlPath === '/api/v3/moviefile/88') {
+        return new Response(JSON.stringify({ path: realFile }), { status: 200 });
+      }
+      return new Response('[]', { status: 200 });
+    }) as typeof fetch;
+
+    const app = createApp(cfg);
+    const token = buildFileToken(FILE_SECRET, 'movie', 88);
+    await withServer(app, async (baseUrl) => {
+      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/88?t=${token}`);
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), 'canonical-content');
+    });
+  } finally {
+    fs.rmSync(rootParent, { recursive: true, force: true });
+    fs.rmSync(realRoot, { recursive: true, force: true });
+    globalThis.fetch = ORIGINAL_FETCH;
+  }
+});
+
+test('file route rejects symlink escape outside configured root', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'addarr-root-'));
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'addarr-outside-'));
+  const outsideFile = path.join(outsideDir, 'secret.mp4');
+  const linkedFile = path.join(root, 'linked.mp4');
+  fs.writeFileSync(outsideFile, 'not-allowed');
+  fs.symlinkSync(outsideFile, linkedFile, 'file');
+
+  try {
+    const cfg = baseConfig();
+    cfg.fileStreaming.enabled = true;
+    cfg.fileStreaming.secret = FILE_SECRET;
+    cfg.radarr.enabled = true;
+    cfg.radarr.rootFolderPath = root;
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const urlPath = new URL(String(input)).pathname;
+      if (urlPath === '/api/v3/moviefile/89') {
+        return new Response(JSON.stringify({ path: linkedFile }), { status: 200 });
+      }
+      return new Response('[]', { status: 200 });
+    }) as typeof fetch;
+
+    const app = createApp(cfg);
+    const token = buildFileToken(FILE_SECRET, 'movie', 89);
+    await withServer(app, async (baseUrl) => {
+      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/89?t=${token}`);
+      assert.equal(res.status, 403);
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+    globalThis.fetch = ORIGINAL_FETCH;
+  }
 });
 
 // ── Happy path: file is served ────────────────────────────────────────────────

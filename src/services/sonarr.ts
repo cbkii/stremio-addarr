@@ -353,9 +353,14 @@ export class SonarrClient {
     try {
       for (let page = startPage; page < startPage + 20 && collected.length < safeLimit; page++) {
         const response = await this.http.get<{ records?: SonarrHistoryRecord[] } | SonarrHistoryRecord[]>(
-          `/api/v3/history?page=${page}&pageSize=${pageSize}&sortKey=date&sortDirection=descending&eventType=downloadFolderImported`
+          `/api/v3/history?page=${page}&pageSize=${pageSize}&sortKey=date&sortDirection=descending`
         );
-        const records = (Array.isArray(response) ? response : (response.records ?? [])).filter((item) => item?.seriesId != null);
+        const records = (Array.isArray(response) ? response : (response.records ?? []))
+          .filter((item) => item?.seriesId != null)
+          .filter((item) => {
+            const eventType = `${item?.eventType ?? ''}`.toLowerCase();
+            return !eventType || eventType.includes('import');
+          });
         const pageRecords = page === startPage ? records.slice(inPageOffset) : records;
         collected.push(...pageRecords);
         if (records.length < pageSize) {
@@ -385,14 +390,6 @@ export class SonarrClient {
 
     this.queueCache.set('details', records);
     return records;
-  }
-
-  resolvePosterUrl(series: SonarrSeriesRecord): string | undefined {
-    const poster = series.images?.find((image) => image.coverType === 'poster');
-    const raw = poster?.remoteUrl ?? poster?.url;
-    if (!raw) return undefined;
-    if (/^https?:\/\//i.test(raw)) return raw;
-    return `${this.config.sonarr.baseUrl}${raw.startsWith('/') ? '' : '/'}${raw}`;
   }
 
   private async findSeriesByImdbId(imdbId: string): Promise<SonarrSeriesRecord | undefined> {

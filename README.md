@@ -6,6 +6,7 @@ It also exposes two browseable personal catalogs in Stremio Discover/Board:
 - **Recent on Radarr** (movies)
 - **Recent on Sonarr** (series)
 These rows combine active downloads and recent imports from your local Arr services.
+Catalog cards intentionally use minimal metadata (IMDb id, name, description, releaseInfo) and rely on Stremio/Cinemeta for artwork.
 
 
 This README is the **canonical install and upgrade guide**.
@@ -142,7 +143,6 @@ Optional tuning:
 - `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint sent to Stremio for catalog responses.
 - `CATALOG_STALE_REVALIDATE_SEC` (default `60`): stale-while-revalidate hint sent to Stremio.
 - `CATALOG_STALE_ERROR_SEC` (default `120`): stale-if-error hint sent to Stremio.
-- `TMDB_NEGATIVE_CACHE_TTL_MS` (default `60000`): retry delay after a failed TMDB poster lookup.
 
 ### Step 5 — Install systemd service
 
@@ -247,6 +247,11 @@ sudo systemctl is-active stremio-addarr
 curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null
 curl -fI https://YOUR_HOSTNAME/manifest.json
 ```
+
+Important for systemd operators:
+- If `/opt/stremio-addarr/.env` changes, you must restart `stremio-addarr` (systemd does not hot-reload `EnvironmentFile`).
+- To inspect live runtime environment on Linux: `sudo tr '\0' '\n' </proc/$(systemctl show -p MainPID --value stremio-addarr)/environ | sort`.
+- If Stremio still shows stale add-on metadata after deploy, remove/reinstall the add-on or force manifest refresh from the add-on URL.
 
 If your hostname/TLS setup changed, re-run the hosting guide: [README_HOST.md](README_HOST.md).
 
@@ -463,6 +468,10 @@ sudo journalctl -u stremio-addarr -n 100 --no-pager -o cat \
   | jq 'select(.message == "Action completed" or .message == "Action execution failed")'
 ```
 
+The route returns a tiny HLS response immediately and executes Arr add/search in the background. Validate both:
+- HTTP request log line for `/action/...` with `status: 200`
+- follow-up `"Action completed"` or `"Action rejected by Arr service"` entry in logs
+
 ---
 
 ### High latency / slow tiles
@@ -499,6 +508,16 @@ Common startup warnings and fixes:
 | `PUBLIC_BASE_URL uses an IP address`       | Use a real DNS hostname (DuckDNS, etc.)                                 |
 | `Android TV compatibility likely broken`   | See [README_HOST.md](README_HOST.md)                                    |
 | `Neither Radarr nor Sonarr is enabled`     | Set `RADARR_ENABLED=true` and/or `SONARR_ENABLED=true`                  |
+
+### File streaming returns 403 "path outside allowed root"
+
+This route uses canonical path validation (`realpath` + relative path check), so symlink/bind-mount paths are resolved before comparison.
+
+Checklist:
+1. Ensure `RADARR_ROOT_FOLDER_PATH` / `SONARR_ROOT_FOLDER_PATH` points to the same mounted path namespace used by Arr.
+2. Restart `stremio-addarr` after changing `.env` (systemd `EnvironmentFile` values stay stale until restart).
+3. Confirm live root path from startup log (`"Effective runtime config"`).
+4. Compare startup root path with Arr file API output (`/api/v3/moviefile/:id` or `/api/v3/episodefile/:id`).
 
 ---
 

@@ -11,8 +11,6 @@ function movieItem(partial: Partial<CatalogItem>): CatalogItem {
     type: 'movie',
     imdbId: 'tt1',
     title: 'Movie',
-    poster: 'https://x/poster.jpg',
-    posterShape: 'poster',
     releaseInfo: 'Imported today',
     timestamp: 1,
     ...partial
@@ -71,18 +69,17 @@ test('catalog service uses injectable clock for deterministic imported relative 
 
   const fakeRadarr = {
     async listMovies() {
-      return [{ id: 1, title: 'Movie A', imdbId: 'tt100', images: [{ coverType: 'poster', remoteUrl: 'https://img/p.jpg' }] }];
+      return [{ id: 1, title: 'Movie A', imdbId: 'tt100' }];
     },
     async listMovieQueueDetails() { return []; },
     async listRecentMovieImports() {
       return [{ movieId: 1, date: '1970-01-02T00:00:00Z' }];
-    },
-    resolvePosterUrl() { return 'https://img/p.jpg'; }
+    }
   };
 
   const service = new CatalogService(cfg, {
     radarr: fakeRadarr as never,
-    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; }, resolvePosterUrl() { return undefined; } } as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never,
     clock: { now: () => Date.parse('1970-01-04T00:00:00Z') }
   });
 
@@ -90,71 +87,75 @@ test('catalog service uses injectable clock for deterministic imported relative 
   assert.equal(result.metas[0]?.releaseInfo, 'Imported 2d ago');
 });
 
-test('catalog service can enrich posters from TMDB when Arr posters are missing', async () => {
+test('catalog service includes queue-only items (no import history)', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
-  cfg.tmdbApiKey = 'tmdb-test-key';
-  cfg.catalogCacheTtlMs = 10_000;
-  const originalFetch = globalThis.fetch;
-  let authHeader = '';
-  let requestUrl = '';
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    requestUrl = String(input);
-    const headers = new Headers(init?.headers as HeadersInit);
-    authHeader = headers.get('authorization') ?? '';
-    return new Response('{"movie_results":[{"poster_path":"/abc.jpg"}]}', { status: 200 });
-  }) as typeof fetch;
-
-  const fakeRadarr = {
-    async listMovies() {
-      return [{ id: 1, title: 'Movie B', imdbId: 'tt101' }];
-    },
-    async listMovieQueueDetails() { return []; },
-    async listRecentMovieImports() {
-      return [{ movieId: 1, date: '1970-01-02T00:00:00Z' }];
-    },
-    resolvePosterUrl() { return undefined; }
-  };
 
   const service = new CatalogService(cfg, {
-    radarr: fakeRadarr as never,
-    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; }, resolvePosterUrl() { return undefined; } } as never
+    radarr: {
+      async listMovies() { return [{ id: 1, title: 'Movie Q', imdbId: 'tt301' }]; },
+      async listMovieQueueDetails() { return [{ movieId: 1, trackedDownloadStatus: 'downloading', size: 100, sizeleft: 50 }]; },
+      async listRecentMovieImports() { return []; }
+    } as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never
   });
 
-  try {
-    const result = await service.buildCatalog('radarr-recent', 0, 25);
-    assert.equal(result.metas[0]?.poster, 'https://image.tmdb.org/t/p/w500/abc.jpg');
-    assert.ok(authHeader.startsWith('Bearer '));
-    assert.ok(!requestUrl.includes('api_key='));
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const result = await service.buildCatalog('radarr-recent', 0, 25);
+  assert.equal(result.metas.length, 1);
+  assert.equal(result.metas[0]?.id, 'tt301');
 });
 
-test('catalog merge output uses short ttl cache', async () => {
+test('catalog service includes import-only items (no queue)', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  const service = new CatalogService(cfg, {
+    radarr: { async listMovies() { return []; }, async listMovieQueueDetails() { return []; }, async listRecentMovieImports() { return []; } } as never,
+    sonarr: {
+      async listSeries() { return [{ id: 2, title: 'Series I', imdbId: 'tt302' }]; },
+      async listSeriesQueueDetails() { return []; },
+      async listRecentSeriesImports() { return [{ seriesId: 2, date: '1970-01-02T00:00:00Z' }]; }
+    } as never
+  });
+
+  const result = await service.buildCatalog('sonarr-recent', 0, 25);
+  assert.equal(result.metas.length, 1);
+  assert.equal(result.metas[0]?.id, 'tt302');
+});
+
+test('catalog merge deduplicates queue/import by imdb id', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
-  cfg.catalogCacheTtlMs = 10_000;
-  let moviesCalls = 0;
-
-  const fakeRadarr = {
-    async listMovies() {
-      moviesCalls++;
-      return [{ id: 1, title: 'Movie C', imdbId: 'tt102', images: [{ coverType: 'poster', remoteUrl: 'https://img/p2.jpg' }] }];
-    },
-    async listMovieQueueDetails() { return []; },
-    async listRecentMovieImports() {
-      return [{ movieId: 1, date: '1970-01-02T00:00:00Z' }];
-    },
-    resolvePosterUrl() { return 'https://img/p2.jpg'; }
-  };
 
   const service = new CatalogService(cfg, {
-    radarr: fakeRadarr as never,
-    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; }, resolvePosterUrl() { return undefined; } } as never
+    radarr: {
+      async listMovies() { return [{ id: 3, title: 'Movie M', imdbId: 'tt303' }]; },
+      async listMovieQueueDetails() { return [{ movieId: 3, trackedDownloadStatus: 'downloading', size: 100, sizeleft: 10 }]; },
+      async listRecentMovieImports() { return [{ movieId: 3, date: '1970-01-02T00:00:00Z' }]; }
+    } as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never
   });
 
-  await service.buildCatalog('radarr-recent', 0, 25);
-  await service.buildCatalog('radarr-recent', 0, 25);
-  assert.equal(moviesCalls, 1);
+  const result = await service.buildCatalog('radarr-recent', 0, 25);
+  assert.equal(result.metas.length, 1);
+  assert.match(result.metas[0]?.releaseInfo ?? '', /Downloading/);
 });
+
+test('catalog output does not depend on poster availability', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const service = new CatalogService(cfg, {
+    radarr: {
+      async listMovies() { return [{ id: 4, title: 'No Poster Movie', imdbId: 'tt304' }]; },
+      async listMovieQueueDetails() { return []; },
+      async listRecentMovieImports() { return [{ movieId: 4, date: '1970-01-02T00:00:00Z' }]; }
+    } as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 25);
+  assert.equal(result.metas.length, 1);
+  assert.equal('poster' in result.metas[0], false);
+});
+

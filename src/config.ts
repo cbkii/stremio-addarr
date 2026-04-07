@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { LogLevel } from './logger.js';
 import type { ConfigValidation } from './types.js';
 
@@ -26,8 +29,6 @@ export interface AppConfig {
   catalogStaleRevalidateSec: number;
   /** How long Stremio may serve stale catalog if revalidation errors. */
   catalogStaleErrorSec: number;
-  /** Retry window for failed TMDB poster lookups (negative cache). */
-  tmdbNegativeCacheTtlMs: number;
   fileStreaming: {
     enabled: boolean;
     secret: string;
@@ -71,7 +72,6 @@ export interface AppConfig {
     tags: number[];
     searchOnAdd: boolean;
   };
-  tmdbApiKey?: string;
 }
 
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
@@ -210,8 +210,33 @@ function isInternalOnlyHostname(hostname: string): boolean {
   return !lower.includes('.');
 }
 
+function readVersionFromPackageJson(): string | undefined {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [process.cwd(), here, path.resolve(here, '..'), path.resolve(here, '../..'), path.resolve(here, '../../..')];
+  for (const baseDir of candidates) {
+    try {
+      const raw = fs.readFileSync(path.join(baseDir, 'package.json'), 'utf8');
+      const parsed = JSON.parse(raw) as { version?: unknown };
+      if (typeof parsed.version === 'string' && parsed.version.trim()) {
+        return parsed.version.trim();
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+function resolveVersion(): string {
+  const appVersion = readString('APP_VERSION');
+  if (appVersion) return appVersion;
+  const npmPackageVersion = process.env.npm_package_version?.trim();
+  if (npmPackageVersion) return npmPackageVersion;
+  return readVersionFromPackageJson() ?? '0.1.0';
+}
+
 export function loadConfig(): AppConfig {
-  const packageVersion = process.env.npm_package_version?.trim() || '0.1.0';
+  const packageVersion = resolveVersion();
   const host = readString('HOST', '127.0.0.1');
   const port = readNumber('PORT', 7010);
   const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
@@ -234,7 +259,6 @@ export function loadConfig(): AppConfig {
   const catalogCacheMaxAgeSec = readNumber('CATALOG_CACHE_MAX_AGE_SEC', 15);
   const catalogStaleRevalidateSec = readNumber('CATALOG_STALE_REVALIDATE_SEC', 60);
   const catalogStaleErrorSec = readNumber('CATALOG_STALE_ERROR_SEC', 120);
-  const tmdbNegativeCacheTtlMs = readNumber('TMDB_NEGATIVE_CACHE_TTL_MS', 60_000);
 
   if (requestTimeoutMs < 1000) throw new Error('REQUEST_TIMEOUT_MS must be at least 1000.');
   if (gracefulShutdownTimeoutMs < 1000) throw new Error('GRACEFUL_SHUTDOWN_TIMEOUT_MS must be at least 1000.');
@@ -263,9 +287,6 @@ export function loadConfig(): AppConfig {
   }
   if (catalogStaleErrorSec < 0) {
     throw new Error('CATALOG_STALE_ERROR_SEC must be at least 0.');
-  }
-  if (tmdbNegativeCacheTtlMs < 0) {
-    throw new Error('TMDB_NEGATIVE_CACHE_TTL_MS must be at least 0.');
   }
 
   const logLevelRaw = readString('LOG_LEVEL', 'info') as LogLevel;
@@ -302,7 +323,6 @@ export function loadConfig(): AppConfig {
     catalogCacheMaxAgeSec,
     catalogStaleRevalidateSec,
     catalogStaleErrorSec,
-    tmdbNegativeCacheTtlMs,
     fileStreaming: {
       enabled: fileStreamingEnabled,
       secret: fileStreamingSecret,
@@ -337,8 +357,7 @@ export function loadConfig(): AppConfig {
         tags: readNumberList('SONARR_TAGS'),
         searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
       };
-    })(),
-    tmdbApiKey: readString('TMDB_API_KEY') || undefined
+    })()
   };
 
   if (config.radarr.enabled && (!config.radarr.baseUrl || !config.radarr.apiKey)) {
