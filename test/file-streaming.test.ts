@@ -281,6 +281,44 @@ test('file route includes CORS header for cross-origin Stremio access', async ()
   }
 });
 
+test('file route supports HTTP range requests for large video seeking', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'addarr-test-'));
+  const tmpFile = path.join(tmpDir, 'movie.mp4');
+  fs.writeFileSync(tmpFile, '0123456789');
+
+  try {
+    const cfg = baseConfig();
+    cfg.fileStreaming.enabled = true;
+    cfg.fileStreaming.secret = FILE_SECRET;
+    cfg.radarr.enabled = true;
+    cfg.radarr.rootFolderPath = tmpDir;
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const urlPath = new URL(String(input)).pathname;
+      if (urlPath === '/api/v3/moviefile/3') {
+        return new Response(JSON.stringify({ path: tmpFile }), { status: 200 });
+      }
+      return new Response('[]', { status: 200 });
+    }) as typeof fetch;
+
+    const app = createApp(cfg);
+    const token = buildFileToken(FILE_SECRET, 'movie', 3);
+    await withServer(app, async (baseUrl) => {
+      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/3?t=${token}`, {
+        headers: { Range: 'bytes=0-3' }
+      });
+      assert.equal(res.status, 206);
+      assert.equal(res.headers.get('accept-ranges'), 'bytes');
+      assert.equal(res.headers.get('content-range'), 'bytes 0-3/10');
+      const body = await res.text();
+      assert.equal(body, '0123');
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    globalThis.fetch = ORIGINAL_FETCH;
+  }
+});
+
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 
 test('file route returns 429 after exceeding rate limit', async () => {

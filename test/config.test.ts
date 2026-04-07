@@ -155,6 +155,7 @@ test('file streaming defaults to disabled with no secret required', () => {
   const config = loadConfig();
   assert.equal(config.fileStreaming.enabled, false);
   assert.equal(config.fileStreaming.secret, '');
+  assert.equal(config.fileStreaming.playbackMode, 'kodi');
 });
 
 test('file streaming loads when enabled with a secret', () => {
@@ -163,6 +164,20 @@ test('file streaming loads when enabled with a secret', () => {
   const config = loadConfig();
   assert.equal(config.fileStreaming.enabled, true);
   assert.equal(config.fileStreaming.secret, 'a-long-enough-secret-for-streaming!!');
+  assert.equal(config.fileStreaming.playbackMode, 'direct');
+});
+
+test('file streaming allows explicit kodi playback mode', () => {
+  process.env.FILE_STREAMING_ENABLED = 'true';
+  process.env.FILE_STREAMING_SECRET = 'a-long-enough-secret-for-streaming!!';
+  process.env.FILE_STREAMING_PLAYBACK_MODE = 'kodi';
+  const config = loadConfig();
+  assert.equal(config.fileStreaming.playbackMode, 'kodi');
+});
+
+test('file streaming rejects unknown playback mode', () => {
+  process.env.FILE_STREAMING_PLAYBACK_MODE = 'vlc';
+  assert.throws(() => loadConfig(), /FILE_STREAMING_PLAYBACK_MODE/);
 });
 
 test('file streaming fails when enabled without a secret', () => {

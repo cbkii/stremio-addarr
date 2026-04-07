@@ -16,7 +16,8 @@ export function baseConfig(): AppConfig {
     streamStaleRevalidateSec: 5,
     fileStreaming: {
       enabled: false,
-      secret: ''
+      secret: '',
+      playbackMode: 'kodi'
     },
     kodi: {
       enabled: true,
