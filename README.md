@@ -111,6 +111,8 @@ HOST=127.0.0.1
 PORT=7010
 PUBLIC_BASE_URL=https://YOUR_HOSTNAME
 TARGET_CLIENT=android-tv
+GRACEFUL_SHUTDOWN_TIMEOUT_MS=10000
+FORCED_SHUTDOWN_EXIT_CODE=0
 
 RADARR_ENABLED=true
 RADARR_BASE_URL=http://127.0.0.1:7878
@@ -124,7 +126,20 @@ SONARR_API_KEY=replace-with-sonarr-api-key
 SONARR_ROOT_FOLDER_PATH=/media/tv
 SONARR_QUALITY_PROFILE_ID=1
 SONARR_LANGUAGE_PROFILE_ID=1
+SONARR_SERIES_MONITOR=all
+
+CATALOG_PAGE_SIZE=25
+CATALOG_CACHE_TTL_MS=5000
+CATALOG_CACHE_MAX_AGE_SEC=15
+CATALOG_STALE_REVALIDATE_SEC=60
+CATALOG_STALE_ERROR_SEC=120
 ```
+
+Notes:
+- `SONARR_SERIES_MONITOR` maps directly to Sonarr's `monitorNewItems` field and currently accepts `all` or `none`.
+- `SONARR_SERIES_MONITOR` is parsed case-insensitively (`ALL`, `All`, `none` all work).
+- Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
+- `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
 
 ### Step 5 — Install systemd service
 

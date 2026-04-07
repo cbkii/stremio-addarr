@@ -10,6 +10,8 @@ export interface AppConfig {
   targetClient: 'android-tv' | 'generic';
   logLevel: LogLevel;
   requestTimeoutMs: number;
+  gracefulShutdownTimeoutMs: number;
+  forcedShutdownExitCode: 0 | 1;
   statusCacheTtlMs: number;
   serviceHealthCacheTtlMs: number;
   streamCacheMaxAgeSec: number;
@@ -52,7 +54,7 @@ export interface AppConfig {
     rootFolderPath: string;
     qualityProfileId: number;
     languageProfileId: number;
-    seriesMonitor: string;
+    seriesMonitor: 'all' | 'none';
     tags: string[];
     searchOnAdd: boolean;
   };
@@ -62,6 +64,7 @@ export interface AppConfig {
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
+const SONARR_SERIES_MONITOR_VALUES = new Set<AppConfig['sonarr']['seriesMonitor']>(['all', 'none']);
 
 function readNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -140,6 +143,14 @@ function parseFileStreamingPlaybackMode(value: string): AppConfig['fileStreaming
   return normalized;
 }
 
+function parseSonarrSeriesMonitor(value: string): AppConfig['sonarr']['seriesMonitor'] {
+  const normalized = value.trim().toLowerCase() as AppConfig['sonarr']['seriesMonitor'];
+  if (!SONARR_SERIES_MONITOR_VALUES.has(normalized)) {
+    throw new Error('SONARR_SERIES_MONITOR must be one of: all, none.');
+  }
+  return normalized;
+}
+
 function isIpAddress(hostname: string): boolean {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
     return hostname.split('.').every((part) => {
@@ -164,6 +175,8 @@ export function loadConfig(): AppConfig {
   const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
   const targetClient = parseTargetClient(readString('TARGET_CLIENT', 'android-tv'));
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);
+  const gracefulShutdownTimeoutMs = readNumber('GRACEFUL_SHUTDOWN_TIMEOUT_MS', 10_000);
+  const forcedShutdownExitCodeRaw = readNumber('FORCED_SHUTDOWN_EXIT_CODE', 0);
   const statusCacheTtlMs = readNumber('STATUS_CACHE_TTL_MS', 30000);
   const serviceHealthCacheTtlMs = readNumber('SERVICE_HEALTH_CACHE_TTL_MS', 10000);
   const streamCacheMaxAgeSec = readNumber(
@@ -182,6 +195,10 @@ export function loadConfig(): AppConfig {
   const tmdbNegativeCacheTtlMs = readNumber('TMDB_NEGATIVE_CACHE_TTL_MS', 60_000);
 
   if (requestTimeoutMs < 1000) throw new Error('REQUEST_TIMEOUT_MS must be at least 1000.');
+  if (gracefulShutdownTimeoutMs < 1000) throw new Error('GRACEFUL_SHUTDOWN_TIMEOUT_MS must be at least 1000.');
+  if (forcedShutdownExitCodeRaw !== 0 && forcedShutdownExitCodeRaw !== 1) {
+    throw new Error('FORCED_SHUTDOWN_EXIT_CODE must be 0 or 1.');
+  }
   if (statusCacheTtlMs < 1000) throw new Error('STATUS_CACHE_TTL_MS must be at least 1000.');
   if (serviceHealthCacheTtlMs < 1000) {
     throw new Error('SERVICE_HEALTH_CACHE_TTL_MS must be at least 1000.');
@@ -232,6 +249,8 @@ export function loadConfig(): AppConfig {
     targetClient,
     logLevel: logLevelRaw,
     requestTimeoutMs,
+    gracefulShutdownTimeoutMs,
+    forcedShutdownExitCode: forcedShutdownExitCodeRaw as 0 | 1,
     statusCacheTtlMs,
     serviceHealthCacheTtlMs,
     streamCacheMaxAgeSec,
@@ -268,7 +287,7 @@ export function loadConfig(): AppConfig {
       rootFolderPath: readString('SONARR_ROOT_FOLDER_PATH'),
       qualityProfileId: readNumber('SONARR_QUALITY_PROFILE_ID', 1),
       languageProfileId: readNumber('SONARR_LANGUAGE_PROFILE_ID', 1),
-      seriesMonitor: readString('SONARR_SERIES_MONITOR', 'all'),
+      seriesMonitor: parseSonarrSeriesMonitor(readString('SONARR_SERIES_MONITOR', 'all')),
       tags: readStringList('SONARR_TAGS'),
       searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
     },
