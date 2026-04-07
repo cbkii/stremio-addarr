@@ -61,6 +61,7 @@ If you run the service as a dedicated account, set `SVC_USER`/`SVC_GROUP` to tha
 
 - **Fresh install from scratch** → go to [4) Fresh install](#4-fresh-install-from-scratch)
 - **Upgrade existing install** → go to [5) Upgrade existing install](#5-upgrade-existing-install)
+- **Docker (optional alternative)**: `Dockerfile` and `docker-compose.example.yml` are provided for containerized deployment; the systemd path in this README remains the canonical/default setup.
 
 ---
 
@@ -318,7 +319,9 @@ Expected startup output:
 {"time":"...","level":"info","message":"Server started","host":"127.0.0.1","port":7010,"manifest":"https://example.duckdns.org/manifest.json"}
 ```
 
-### Collecting logs — Docker
+### Collecting logs — Docker (optional alternative deployment)
+
+Use this section only if you deployed with Docker.
 
 ```bash
 # Last 200 lines
