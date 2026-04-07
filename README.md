@@ -1,18 +1,12 @@
 # Arr Status & Add (`stremio-addarr`)
 
 Self-hosted Stremio add-on that shows Sonarr/Radarr status tiles and provides one-click add actions.
+
 It also exposes two browseable personal catalogs in Stremio Discover/Board:
 - **Recent on Radarr** (movies)
 - **Recent on Sonarr** (series)
-
 These rows combine active downloads and recent imports from your local Arr services.
-Optional tuning:
-- `CATALOG_PAGE_SIZE` (default `25`, max effective `50`): how many cards each catalog page returns.
-- `CATALOG_CACHE_TTL_MS` (default `5000`): short in-memory cache for merged Arr queue+history results.
-- `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint sent to Stremio for catalog responses.
-- `CATALOG_STALE_REVALIDATE_SEC` (default `60`): stale-while-revalidate hint sent to Stremio.
-- `CATALOG_STALE_ERROR_SEC` (default `120`): stale-if-error hint sent to Stremio.
-- `TMDB_NEGATIVE_CACHE_TTL_MS` (default `60000`): retry delay after a failed TMDB poster lookup.
+
 
 This README is the **canonical install and upgrade guide**.
 
@@ -140,6 +134,15 @@ Notes:
 - `SONARR_SERIES_MONITOR` is parsed case-insensitively (`ALL`, `All`, `none` all work).
 - Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
 - `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
+- Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
+
+Optional tuning:
+- `CATALOG_PAGE_SIZE` (default `25`, max effective `50`): how many cards each catalog page returns.
+- `CATALOG_CACHE_TTL_MS` (default `5000`): short in-memory cache for merged Arr queue+history results.
+- `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint sent to Stremio for catalog responses.
+- `CATALOG_STALE_REVALIDATE_SEC` (default `60`): stale-while-revalidate hint sent to Stremio.
+- `CATALOG_STALE_ERROR_SEC` (default `120`): stale-if-error hint sent to Stremio.
+- `TMDB_NEGATIVE_CACHE_TTL_MS` (default `60000`): retry delay after a failed TMDB poster lookup.
 
 ### Step 5 — Install systemd service
 

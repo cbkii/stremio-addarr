@@ -280,17 +280,22 @@ export function loadConfig(): AppConfig {
       tags: readStringList('RADARR_TAGS'),
       searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true)
     },
-    sonarr: {
-      enabled: readBoolean('SONARR_ENABLED', false),
-      baseUrl: stripTrailingSlash(readString('SONARR_BASE_URL')),
-      apiKey: readString('SONARR_API_KEY'),
-      rootFolderPath: readString('SONARR_ROOT_FOLDER_PATH'),
-      qualityProfileId: readNumber('SONARR_QUALITY_PROFILE_ID', 1),
-      languageProfileId: readNumber('SONARR_LANGUAGE_PROFILE_ID', 1),
-      seriesMonitor: parseSonarrSeriesMonitor(readString('SONARR_SERIES_MONITOR', 'all')),
-      tags: readStringList('SONARR_TAGS'),
-      searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
-    },
+    sonarr: (() => {
+      const sonarrEnabled = readBoolean('SONARR_ENABLED', false);
+      return {
+        enabled: sonarrEnabled,
+        baseUrl: stripTrailingSlash(readString('SONARR_BASE_URL')),
+        apiKey: readString('SONARR_API_KEY'),
+        rootFolderPath: readString('SONARR_ROOT_FOLDER_PATH'),
+        qualityProfileId: readNumber('SONARR_QUALITY_PROFILE_ID', 1),
+        languageProfileId: readNumber('SONARR_LANGUAGE_PROFILE_ID', 1),
+        seriesMonitor: sonarrEnabled
+          ? parseSonarrSeriesMonitor(readString('SONARR_SERIES_MONITOR', 'all'))
+          : 'all',
+        tags: readStringList('SONARR_TAGS'),
+        searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
+      };
+    })(),
     tmdbApiKey: readString('TMDB_API_KEY') || undefined
   };
 
