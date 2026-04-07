@@ -345,7 +345,7 @@ export class RadarrClient {
     return `${this.config.radarr.baseUrl}${raw.startsWith('/') ? '' : '/'}${raw}`;
   }
   private async lookupMovie(imdbId: string): Promise<RadarrLookupRecord | null> {
-    // Radarr /movie/lookup/imdb returns a single MovieResource object (not an array).
+    // Radarr /movie/lookup/imdb returns a single RadarrLookupRecord (not an array).
     // Fallback: if the response is unexpectedly an array (older Radarr builds), handle both.
     const response = await this.http.get<RadarrLookupRecord | RadarrLookupRecord[]>(
       `/api/v3/movie/lookup/imdb?imdbId=${encodeURIComponent(imdbId)}`
