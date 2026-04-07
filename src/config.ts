@@ -17,6 +17,7 @@ export interface AppConfig {
   fileStreaming: {
     enabled: boolean;
     secret: string;
+    playbackMode: 'direct' | 'kodi';
   };
   kodi: {
     enabled: boolean;
@@ -48,6 +49,7 @@ export interface AppConfig {
 
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
+const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
 
 function readNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -118,6 +120,14 @@ function parseTargetClient(value: string): AppConfig['targetClient'] {
   return normalized;
 }
 
+function parseFileStreamingPlaybackMode(value: string): AppConfig['fileStreaming']['playbackMode'] {
+  const normalized = value.trim().toLowerCase() as AppConfig['fileStreaming']['playbackMode'];
+  if (!FILE_STREAMING_PLAYBACK_MODES.has(normalized)) {
+    throw new Error('FILE_STREAMING_PLAYBACK_MODE must be one of: direct, kodi.');
+  }
+  return normalized;
+}
+
 function isIpAddress(hostname: string): boolean {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
     return hostname.split('.').every((part) => {
@@ -170,6 +180,9 @@ export function loadConfig(): AppConfig {
 
   const fileStreamingEnabled = readBoolean('FILE_STREAMING_ENABLED', false);
   const fileStreamingSecret = readString('FILE_STREAMING_SECRET');
+  const fileStreamingPlaybackMode = parseFileStreamingPlaybackMode(
+    readString('FILE_STREAMING_PLAYBACK_MODE', fileStreamingEnabled ? 'direct' : 'kodi')
+  );
   if (fileStreamingEnabled && !fileStreamingSecret) {
     throw new Error('FILE_STREAMING_SECRET is required when FILE_STREAMING_ENABLED=true.');
   }
@@ -189,7 +202,8 @@ export function loadConfig(): AppConfig {
     streamStaleRevalidateSec,
     fileStreaming: {
       enabled: fileStreamingEnabled,
-      secret: fileStreamingSecret
+      secret: fileStreamingSecret,
+      playbackMode: fileStreamingPlaybackMode
     },
     kodi: {
       enabled: readBoolean('KODI_ENABLED', true),

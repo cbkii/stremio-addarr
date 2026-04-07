@@ -61,7 +61,19 @@ export class SonarrClient {
       }
 
       if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
-        return { state: 'episode_downloaded', seriesId: series.id, episodeId: match.id, episodeFileId: match.episodeFileId, monitored: match.monitored, hasFile: true, title: series.title };
+        const rawFileName = match.episodeFile?.relativePath ?? match.episodeFile?.path;
+        const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
+        return {
+          state: 'episode_downloaded',
+          seriesId: series.id,
+          episodeId: match.id,
+          episodeFileId: match.episodeFileId,
+          monitored: match.monitored,
+          hasFile: true,
+          title: series.title,
+          fileName,
+          fileSizeBytes: match.episodeFile?.size
+        };
       }
 
       let isDownloading = false;
