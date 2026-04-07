@@ -346,3 +346,35 @@ test('file route returns 429 after exceeding rate limit', async () => {
     assert.equal(lastStatus, 429, 'should return 429 after limit is exceeded');
   });
 });
+
+test('file route rate limiting is keyed by forwarded client IP behind trusted loopback proxy', async () => {
+  const cfg = baseConfig();
+  cfg.fileStreaming.enabled = true;
+  cfg.fileStreaming.secret = FILE_SECRET;
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const urlPath = new URL(String(input)).pathname;
+    if (urlPath.startsWith('/api/v3/moviefile/')) return new Response('{}', { status: 200 });
+    return new Response('[]', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  const token = buildFileToken(FILE_SECRET, 'movie', 5);
+
+  await withServer(app, async (baseUrl) => {
+    let statusIp1 = 0;
+    for (let i = 0; i <= 120; i++) {
+      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/5?t=${token}`, {
+        headers: { 'X-Forwarded-For': '203.0.113.1' }
+      });
+      statusIp1 = res.status;
+    }
+    assert.equal(statusIp1, 429, 'first forwarded client should be rate limited');
+
+    const resIp2 = await ORIGINAL_FETCH(`${baseUrl}/files/movie/5?t=${token}`, {
+      headers: { 'X-Forwarded-For': '203.0.113.2' }
+    });
+    assert.notEqual(resIp2.status, 429, 'different forwarded client should not share same limiter bucket');
+  });
+});
