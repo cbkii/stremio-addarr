@@ -120,6 +120,16 @@ export interface RadarrQueueRecord {
   movie?: { imdbId?: string; title?: string };
 }
 
+export interface RadarrReleaseRecord {
+  guid?: string;
+  indexerId?: number;
+  approved?: boolean;
+  rejected?: boolean;
+  downloadAllowed?: boolean;
+  releaseWeight?: number;
+  downloadClientId?: number | null;
+}
+
 export interface SonarrSeriesRecord {
   id: number;
   title: string;
@@ -181,6 +191,17 @@ export interface SonarrQueueRecord {
   protocol?: string;
   quality?: { quality?: { name?: string } };
   series?: { imdbId?: string; title?: string };
+}
+
+export interface SonarrReleaseRecord {
+  guid?: string;
+  indexerId?: number;
+  approved?: boolean;
+  rejected?: boolean;
+  downloadAllowed?: boolean;
+  releaseWeight?: number;
+  downloadClientId?: number | null;
+  episodeIds?: number[];
 }
 
 export interface CatalogItem {
