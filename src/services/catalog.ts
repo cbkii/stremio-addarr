@@ -77,6 +77,18 @@ function episodeLabel(season?: number, episode?: number): string {
   return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 }
 
+function pickPoster(images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>): string | undefined {
+  if (!images?.length) return undefined;
+  const preferred = images.find((img) => /^poster$/i.test(img.coverType ?? ''))
+    ?? images.find((img) => /^fanart$/i.test(img.coverType ?? ''))
+    ?? images[0];
+  const remote = preferred?.remoteUrl?.trim();
+  if (remote && /^https?:\/\//i.test(remote)) {
+    return remote;
+  }
+  return undefined;
+}
+
 export function downloadingReleaseInfo(progressPct?: number, etaSeconds?: number, stalled?: boolean): string {
   if (stalled) return 'Downloading • Stalled';
   if (progressPct != null) return `Downloading ${progressPct}% • ${formatEta(etaSeconds)}`;
@@ -108,6 +120,9 @@ export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
     if (!current) {
       bestByImdb.set(item.imdbId, item);
       continue;
+    }
+    if (!current.poster && item.poster) {
+      current.poster = item.poster;
     }
     if (current.status === 'imported' && item.status === 'downloading') {
       bestByImdb.set(item.imdbId, item);
@@ -142,6 +157,9 @@ export function mergeSeriesItems(items: CatalogItem[]): CatalogItem[] {
       byImdb.set(item.imdbId, item);
       continue;
     }
+    if (!current.poster && item.poster) {
+      current.poster = item.poster;
+    }
     if (current.status === 'imported' && item.status === 'downloading') {
       byImdb.set(item.imdbId, item);
       continue;
@@ -171,8 +189,13 @@ interface CatalogMetaPreview {
   id: string;
   type: 'movie' | 'series';
   name: string;
+  poster: string;
   releaseInfo: string;
   description?: string;
+}
+
+function metahubPoster(imdbId: string): string {
+  return `https://images.metahub.space/poster/medium/${encodeURIComponent(imdbId)}/img`;
 }
 
 function toMeta(item: CatalogItem): CatalogMetaPreview {
@@ -181,6 +204,7 @@ function toMeta(item: CatalogItem): CatalogMetaPreview {
     id: item.imdbId,
     type: item.type,
     name: item.title,
+    poster: item.poster ?? metahubPoster(item.imdbId),
     releaseInfo: item.releaseInfo,
     description: item.description
   };
@@ -250,6 +274,7 @@ export class CatalogService {
           type: 'movie',
           imdbId,
           title: movie?.title ?? row.movie?.title ?? row.title ?? 'Unknown movie',
+          poster: pickPoster(movie?.images),
           releaseInfo: downloadingReleaseInfo(progressPct, etaSeconds, stalled),
           description: compact([row.quality?.quality?.name, row.protocol, stalled ? firstMessage(row.statusMessages) : undefined, row.title]),
           timestamp: nowMs,
@@ -276,6 +301,7 @@ export class CatalogService {
           type: 'movie',
           imdbId,
           title: movie?.title ?? 'Unknown movie',
+          poster: pickPoster(movie?.images),
           releaseInfo: formatRelativeImport(ts, nowMs),
           description: compact([row.quality?.quality?.name, row.sourceTitle]),
           timestamp: ts
@@ -323,6 +349,7 @@ export class CatalogService {
           type: 'series',
           imdbId,
           title: series?.title ?? row.series?.title ?? row.title ?? 'Unknown series',
+          poster: pickPoster(series?.images),
           releaseInfo: downloadingReleaseInfo(progressPct, etaSeconds, stalled),
           description: compact([ep || undefined, row.quality?.quality?.name, stalled ? firstMessage(row.statusMessages) : undefined]),
           timestamp: nowMs,
@@ -352,6 +379,7 @@ export class CatalogService {
           type: 'series',
           imdbId,
           title: series?.title ?? 'Unknown series',
+          poster: pickPoster(series?.images),
           releaseInfo: formatRelativeImport(ts, nowMs),
           description: compact([ep ? `Latest: ${ep}` : undefined, row.quality?.quality?.name, row.sourceTitle]),
           timestamp: ts,
