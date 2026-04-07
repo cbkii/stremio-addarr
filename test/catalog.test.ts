@@ -159,3 +159,36 @@ test('catalog output does not depend on poster availability', async () => {
   assert.equal('poster' in result.metas[0], false);
 });
 
+test('catalog normalizes uppercase imdb ids for native Stremio metadata lookup', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const service = new CatalogService(cfg, {
+    radarr: {
+      async listMovies() { return [{ id: 5, title: 'Uppercase IMDb', imdbId: 'TT305' }]; },
+      async listMovieQueueDetails() { return []; },
+      async listRecentMovieImports() { return [{ movieId: 5, date: '1970-01-02T00:00:00Z' }]; }
+    } as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 25);
+  assert.equal(result.metas[0]?.id, 'tt305');
+});
+
+test('catalog drops invalid non-imdb ids to avoid broken native poster lookups', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  const service = new CatalogService(cfg, {
+    radarr: { async listMovies() { return []; }, async listMovieQueueDetails() { return []; }, async listRecentMovieImports() { return []; } } as never,
+    sonarr: {
+      async listSeries() { return [{ id: 6, title: 'Bad Id', imdbId: '12345' }]; },
+      async listSeriesQueueDetails() { return []; },
+      async listRecentSeriesImports() { return [{ seriesId: 6, date: '1970-01-02T00:00:00Z' }]; }
+    } as never
+  });
+
+  const result = await service.buildCatalog('sonarr-recent', 0, 25);
+  assert.equal(result.metas.length, 0);
+});

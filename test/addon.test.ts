@@ -34,12 +34,12 @@ test('catalog handler returns rows for radarr-recent and sonarr-recent', async (
     const parsed = new URL(String(input));
     const path = parsed.pathname + parsed.search;
     if (parsed.hostname.includes('radarr')) {
-      if (path === '/api/v3/movie') return new Response('[{"id":1,"title":"Movie A","imdbId":"tt100","images":[{"coverType":"poster","remoteUrl":"https://img/m.jpg"}]}]', { status: 200 });
+      if (path === '/api/v3/movie') return new Response('[{"id":1,"title":"Movie A","imdbId":"tt100"}]', { status: 200 });
       if (path.startsWith('/api/v3/queue/details')) return new Response('[]', { status: 200 });
       if (path.startsWith('/api/v3/history')) return new Response('{"records":[{"movieId":1,"date":"2026-04-07T00:00:00Z"}]}', { status: 200 });
     }
     if (parsed.hostname.includes('sonarr')) {
-      if (path === '/api/v3/series') return new Response('[{"id":2,"title":"Show A","imdbId":"tt200","images":[{"coverType":"poster","remoteUrl":"https://img/s.jpg"}]}]', { status: 200 });
+      if (path === '/api/v3/series') return new Response('[{"id":2,"title":"Show A","imdbId":"tt200"}]', { status: 200 });
       if (path.startsWith('/api/v3/queue/details')) return new Response('[]', { status: 200 });
       if (path.startsWith('/api/v3/history')) return new Response('{"records":[{"seriesId":2,"date":"2026-04-07T00:00:00Z","episode":{"seasonNumber":2,"episodeNumber":4}}]}', { status: 200 });
     }
