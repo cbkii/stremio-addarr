@@ -143,6 +143,12 @@ export function createApp(config: AppConfig) {
       requestTimeoutMs: config.requestTimeoutMs,
       streamCacheMaxAge: config.streamCacheMaxAgeSec,
       streamStaleRevalidate: config.streamStaleRevalidateSec,
+      catalogPageSize: config.catalogPageSize,
+      catalogCacheTtlMs: config.catalogCacheTtlMs,
+      catalogCacheMaxAgeSec: config.catalogCacheMaxAgeSec,
+      catalogStaleRevalidateSec: config.catalogStaleRevalidateSec,
+      catalogStaleErrorSec: config.catalogStaleErrorSec,
+      tmdbNegativeCacheTtlMs: config.tmdbNegativeCacheTtlMs,
       radarr: {
         enabled: config.radarr.enabled,
         reachable: serviceHealth.radarr.reachable,

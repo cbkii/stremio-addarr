@@ -3,6 +3,7 @@ import type { AppConfig } from './config.js';
 import type { Logger } from './logger.js';
 import { parseStremioId } from './lib/stremio-ids.js';
 import type { StatusTile } from './types.js';
+import { CatalogService } from './services/catalog.js';
 import { ArrStatusService } from './services/status.js';
 
 function streamFromTile(tile: StatusTile) {
@@ -16,13 +17,18 @@ function streamFromTile(tile: StatusTile) {
 }
 
 export function createAddonInterface(config: AppConfig, logger?: Logger) {
+  const catalogHardMax = 50;
+  const catalogPageSize = Math.max(1, Math.min(config.catalogPageSize, catalogHardMax));
   const builder = new addonBuilder({
     id: 'org.cbkii.stremio-addarr',
     version: config.version,
     name: 'Arr Status & Add',
     description: 'Shows Radarr/Sonarr status and adds the current movie or series from Stremio.',
-    catalogs: [],
-    resources: ['stream'],
+    catalogs: [
+      { id: 'radarr-recent', type: 'movie', name: 'Recent on Radarr', extra: [{ name: 'skip', isRequired: false }] },
+      { id: 'sonarr-recent', type: 'series', name: 'Recent on Sonarr', extra: [{ name: 'skip', isRequired: false }] }
+    ],
+    resources: ['stream', 'catalog'],
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
     behaviorHints: {
@@ -32,6 +38,7 @@ export function createAddonInterface(config: AppConfig, logger?: Logger) {
   });
 
   const statusService = new ArrStatusService(config);
+  const catalogService = new CatalogService(config);
 
   builder.defineStreamHandler(async ({ type, id }: { type: string; id: string }) => {
     if (type !== 'movie' && type !== 'series') {
@@ -50,6 +57,19 @@ export function createAddonInterface(config: AppConfig, logger?: Logger) {
       streams: tiles.map(streamFromTile),
       cacheMaxAge: config.streamCacheMaxAgeSec,
       staleRevalidate: config.streamStaleRevalidateSec
+    };
+  });
+
+  builder.defineCatalogHandler(async ({ id, extra }: { id: string; extra?: Record<string, string | undefined> }) => {
+    const rawSkip = Number(extra?.skip ?? 0);
+    const skip = Number.isFinite(rawSkip) && rawSkip > 0 ? Math.floor(rawSkip) : 0;
+    const limit = Math.min(catalogHardMax, catalogPageSize);
+    const result = await catalogService.buildCatalog(id, skip, limit);
+    return {
+      metas: result.metas,
+      cacheMaxAge: config.catalogCacheMaxAgeSec,
+      staleRevalidate: config.catalogStaleRevalidateSec,
+      staleError: config.catalogStaleErrorSec
     };
   });
 

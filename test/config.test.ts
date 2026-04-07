@@ -139,6 +139,21 @@ test('fails for negative stream cache hints', () => {
   assert.throws(() => loadConfig(), /STREAM_CACHE_MAX_AGE/);
 });
 
+test('fails for invalid catalog page size', () => {
+  process.env.CATALOG_PAGE_SIZE = '0';
+  assert.throws(() => loadConfig(), /CATALOG_PAGE_SIZE/);
+});
+
+test('fails for negative catalog stale error hint', () => {
+  process.env.CATALOG_STALE_ERROR_SEC = '-1';
+  assert.throws(() => loadConfig(), /CATALOG_STALE_ERROR_SEC/);
+});
+
+test('fails for negative tmdb negative-cache ttl', () => {
+  process.env.TMDB_NEGATIVE_CACHE_TTL_MS = '-1';
+  assert.throws(() => loadConfig(), /TMDB_NEGATIVE_CACHE_TTL_MS/);
+});
+
 test('fails for unknown TARGET_CLIENT', () => {
   process.env.TARGET_CLIENT = 'android-phone';
   assert.throws(() => loadConfig(), /TARGET_CLIENT/);
