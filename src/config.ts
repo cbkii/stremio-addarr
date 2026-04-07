@@ -319,6 +319,9 @@ export function loadConfig(): AppConfig {
     if (config.sonarr.languageProfileId <= 0) {
       throw new Error('SONARR_LANGUAGE_PROFILE_ID must be greater than 0.');
     }
+    if (!SONARR_SERIES_MONITOR_VALUES.has(config.sonarr.seriesMonitor)) {
+      throw new Error('SONARR_SERIES_MONITOR must be one of: all, none.');
+    }
   }
 
   if (config.kodi.enabled && !config.kodi.packageName) {
