@@ -141,7 +141,7 @@ test('catalog merge deduplicates queue/import by imdb id', async () => {
   assert.match(result.metas[0]?.releaseInfo ?? '', /Downloading/);
 });
 
-test('catalog output does not depend on poster availability', async () => {
+test('catalog output includes metahub poster URL for card rendering', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
 
@@ -156,7 +156,36 @@ test('catalog output does not depend on poster availability', async () => {
 
   const result = await service.buildCatalog('radarr-recent', 0, 25);
   assert.equal(result.metas.length, 1);
-  assert.equal('poster' in result.metas[0], false);
+  assert.equal(result.metas[0]?.poster, 'https://images.metahub.space/poster/medium/tt304/img');
+});
+
+test('catalog prefers Arr remote poster when available and falls back to metahub otherwise', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const service = new CatalogService(cfg, {
+    radarr: {
+      async listMovies() {
+        return [
+          { id: 7, title: 'Arr Poster Movie', imdbId: 'tt307', images: [{ coverType: 'poster', remoteUrl: 'https://image.tmdb.org/t/p/w342/abc.jpg' }] },
+          { id: 8, title: 'No Arr Poster Movie', imdbId: 'tt308', images: [{ coverType: 'poster', url: '/MediaCover/8/poster.jpg' }] }
+        ];
+      },
+      async listMovieQueueDetails() { return []; },
+      async listRecentMovieImports() {
+        return [
+          { movieId: 7, date: '1970-01-02T00:00:00Z' },
+          { movieId: 8, date: '1970-01-02T00:00:00Z' }
+        ];
+      }
+    } as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 25);
+  const byId = new Map(result.metas.map((meta) => [meta.id, meta]));
+  assert.equal(byId.get('tt307')?.poster, 'https://image.tmdb.org/t/p/w342/abc.jpg');
+  assert.equal(byId.get('tt308')?.poster, 'https://images.metahub.space/poster/medium/tt308/img');
 });
 
 test('catalog normalizes uppercase imdb ids for native Stremio metadata lookup', async () => {

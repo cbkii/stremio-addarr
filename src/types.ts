@@ -78,6 +78,7 @@ export interface RadarrMovieRecord {
   movieFile?: { id: number; relativePath?: string; size?: number; path?: string } | null;
   year?: number;
   added?: string;
+  images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
 }
 
 export interface RadarrLookupRecord {
@@ -137,6 +138,7 @@ export interface SonarrSeriesRecord {
     episodeCount?: number;
     totalEpisodeCount?: number;
   };
+  images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
 }
 
 export interface SonarrEpisodeRecord {
@@ -206,6 +208,7 @@ export interface CatalogItem {
   title: string;
   releaseInfo: string;
   description?: string;
+  poster?: string;
   timestamp: number;
   progressPct?: number;
   etaSeconds?: number;
