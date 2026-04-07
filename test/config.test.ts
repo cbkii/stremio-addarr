@@ -149,6 +149,14 @@ test('enabled Sonarr accepts case-insensitive SONARR_SERIES_MONITOR', () => {
   assert.equal(config.sonarr.seriesMonitor, 'all');
 });
 
+test('disabled Sonarr ignores invalid SONARR_SERIES_MONITOR', () => {
+  process.env.SONARR_ENABLED = 'false';
+  process.env.SONARR_SERIES_MONITOR = 'future';
+  const config = loadConfig();
+  assert.equal(config.sonarr.enabled, false);
+  assert.equal(config.sonarr.seriesMonitor, 'all');
+});
+
 test('fails for invalid FORCED_SHUTDOWN_EXIT_CODE', () => {
   process.env.FORCED_SHUTDOWN_EXIT_CODE = '2';
   assert.throws(() => loadConfig(), /FORCED_SHUTDOWN_EXIT_CODE/);
