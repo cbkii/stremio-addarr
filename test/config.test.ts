@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { loadConfig, validateConfig } from '../src/config.js';
 import { baseConfig } from './_helpers.js';
+
+const PKG_VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -214,7 +217,7 @@ test('config version loads from package.json when npm_package_version is absent'
   delete process.env.npm_package_version;
   delete process.env.APP_VERSION;
   const config = loadConfig();
-  assert.equal(config.version, '0.1.1');
+  assert.equal(config.version, PKG_VERSION);
 });
 
 test('APP_VERSION overrides package version', () => {
