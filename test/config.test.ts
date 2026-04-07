@@ -134,7 +134,7 @@ test('enabled Sonarr validates SONARR_SERIES_MONITOR enum', () => {
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
   process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-  process.env.SONARR_SERIES_MONITOR = 'future';
+  process.env.SONARR_SERIES_MONITOR = 'invalid_value';
   assert.throws(() => loadConfig(), /SONARR_SERIES_MONITOR/);
 });
 
@@ -149,9 +149,31 @@ test('enabled Sonarr accepts case-insensitive SONARR_SERIES_MONITOR', () => {
   assert.equal(config.sonarr.seriesMonitor, 'all');
 });
 
+test('enabled Sonarr accepts future as SONARR_SERIES_MONITOR', () => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_SERIES_MONITOR = 'future';
+  const config = loadConfig();
+  assert.equal(config.sonarr.seriesMonitor, 'future');
+});
+
+test('enabled Sonarr accepts lastSeason as SONARR_SERIES_MONITOR', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://sonarr.local:8989';
+  process.env.SONARR_API_KEY = 'sonarr-key';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/data/tv';
+  process.env.SONARR_SERIES_MONITOR = 'lastSeason';
+
+  const config = loadConfig();
+  assert.equal(config.sonarr.seriesMonitor, 'lastSeason');
+});
+
 test('disabled Sonarr ignores invalid SONARR_SERIES_MONITOR', () => {
   process.env.SONARR_ENABLED = 'false';
-  process.env.SONARR_SERIES_MONITOR = 'future';
+  process.env.SONARR_SERIES_MONITOR = 'invalid_value';
   const config = loadConfig();
   assert.equal(config.sonarr.enabled, false);
   assert.equal(config.sonarr.seriesMonitor, 'all');

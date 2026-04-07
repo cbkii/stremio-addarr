@@ -306,3 +306,32 @@ test('listRecentMovieImports honors offset paging across pages', async () => {
   const records = await client.listRecentMovieImports(5, 52);
   assert.deepEqual(records.map((record) => record.movieId), [53, 54, 55, 56, 57]);
 });
+
+test('addMovieByImdbId handles single-object lookup response from Radarr API', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  let capturedBody: Record<string, unknown> | undefined;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/movie') return [] as T;
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      // Radarr /movie/lookup/imdb returns a single object (not an array)
+      if (path.startsWith('/api/v3/movie/lookup/imdb')) {
+        return { title: 'Single Movie', imdbId: 'tt100', tmdbId: 100 } as T;
+      }
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string, body?: unknown): Promise<T> {
+      capturedBody = body as Record<string, unknown>;
+      return {} as T;
+    }
+  };
+
+  const client = new RadarrClient(cfg, http as never);
+  const result = await client.addMovieByImdbId('tt100');
+  assert.equal(result.ok, true);
+  assert.ok(capturedBody, 'POST body should be captured');
+  assert.equal(capturedBody.title, 'Single Movie');
+  assert.equal(capturedBody.imdbId, 'tt100');
+  assert.equal(capturedBody.tmdbId, 100);
+});

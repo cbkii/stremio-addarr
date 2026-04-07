@@ -345,10 +345,15 @@ export class RadarrClient {
     return `${this.config.radarr.baseUrl}${raw.startsWith('/') ? '' : '/'}${raw}`;
   }
   private async lookupMovie(imdbId: string): Promise<RadarrLookupRecord | null> {
-    const records = await this.http.get<RadarrLookupRecord[]>(
+    // Radarr /movie/lookup/imdb returns a single RadarrLookupRecord (not an array).
+    // Fallback: if the response is unexpectedly an array (older Radarr builds), handle both.
+    const response = await this.http.get<RadarrLookupRecord | RadarrLookupRecord[]>(
       `/api/v3/movie/lookup/imdb?imdbId=${encodeURIComponent(imdbId)}`
     );
-    return records.find((entry) => entry.imdbId === imdbId) ?? records[0] ?? null;
+    if (Array.isArray(response)) {
+      return response.find((entry) => entry.imdbId === imdbId) ?? response[0] ?? null;
+    }
+    return response ?? null;
   }
 
   async ping(): Promise<{ reachable: boolean; detail?: string }> {

@@ -11,7 +11,7 @@ function streamFromTile(tile: StatusTile) {
     name: tile.name,
     description: tile.description,
     url: tile.url,
-    externalUris: tile.externalUris,
+    externalUrl: tile.externalUrl,
     behaviorHints: tile.behaviorHints
   };
 }

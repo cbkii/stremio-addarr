@@ -3,8 +3,8 @@ declare module 'stremio-addon-sdk' {
     id: string;
     version: string;
     name: string;
-    description?: string;
-    catalogs?: unknown[];
+    description: string;
+    catalogs: unknown[];
     resources: Array<'catalog' | 'meta' | 'stream' | 'subtitles' | string>;
     types: string[];
     idPrefixes?: string[];
@@ -20,7 +20,6 @@ declare module 'stremio-addon-sdk' {
     description?: string;
     url?: string;
     externalUrl?: string;
-    externalUris?: Array<{ uri: string; name?: string }>;
     behaviorHints?: { notWebReady?: boolean };
   }
 
