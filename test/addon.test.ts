@@ -23,7 +23,7 @@ test('manifest endpoint shape sanity', async () => {
     assert.deepEqual(manifest.resources, ['stream', 'catalog']);
     assert.deepEqual(manifest.types, ['movie', 'series']);
     assert.deepEqual(manifest.idPrefixes, ['tt']);
-    assert.equal(manifest.logo, 'https://upload.wikimedia.org/wikipedia/commons/d/df/Pctlogo.png');
+    assert.equal(manifest.logo, 'http://127.0.0.1:7010/assets/logo.svg');
   });
 });
 

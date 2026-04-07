@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs/promises';
+import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
 import sdk from 'stremio-addon-sdk';
@@ -27,6 +28,26 @@ function redactUrl(rawUrl: string): string {
   } catch {
     return '***';
   }
+}
+
+
+function resolveAssetsDir(): string {
+  const candidates = [
+    path.resolve(import.meta.dirname, '../assets'),
+    path.resolve(import.meta.dirname, '../../assets'),
+    path.resolve(process.cwd(), 'assets')
+  ];
+  for (const candidate of candidates) {
+    try {
+      const stat = fs.statSync(candidate);
+      if (stat.isDirectory()) {
+        return candidate;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return candidates[candidates.length - 1];
 }
 
 function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
@@ -64,6 +85,8 @@ export function createApp(config: AppConfig) {
   const app = express();
   app.set('trust proxy', 'loopback');
   app.disable('x-powered-by');
+
+  app.use('/assets', express.static(resolveAssetsDir(), { maxAge: '7d' }));
 
   app.use((req, res, next) => {
     const reqId = randomUUID();
@@ -301,7 +324,7 @@ export function createApp(config: AppConfig) {
     let allowedRootReal: string;
     let resolvedPathReal: string;
     try {
-      allowedRootReal = await fs.realpath(allowedRootRaw);
+      allowedRootReal = await fsPromises.realpath(allowedRootRaw);
     } catch (error) {
       logger.error('File streaming: allowed root not accessible', {
         reqId,
@@ -315,7 +338,7 @@ export function createApp(config: AppConfig) {
     }
 
     try {
-      resolvedPathReal = await fs.realpath(filePath);
+      resolvedPathReal = await fsPromises.realpath(filePath);
     } catch {
       res.status(404).end();
       return;

@@ -94,6 +94,20 @@ test('root route returns tiny operator text only', async () => {
   });
 });
 
+
+test('assets logo is served from local repo static path', async () => {
+  const cfg = baseConfig();
+  const app = createApp(cfg);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/assets/logo.svg`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /image\/svg\+xml/);
+    const text = await res.text();
+    assert.ok(text.includes('<svg'));
+  });
+});
+
 test('search action route triggers Radarr search and returns HLS stream', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
