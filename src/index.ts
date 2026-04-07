@@ -76,7 +76,12 @@ export function createApp(config: AppConfig) {
   });
 
   app.use((req, res, next) => {
-    const isStremioRoute = req.path === '/manifest.json' || req.path.startsWith('/stream/') || req.path.startsWith('/action/') || req.path.startsWith('/files/');
+    const isStremioRoute =
+      req.path === '/manifest.json' ||
+      req.path.startsWith('/stream/') ||
+      req.path.startsWith('/catalog/') ||
+      req.path.startsWith('/action/') ||
+      req.path.startsWith('/files/');
     if (isStremioRoute) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
@@ -143,6 +148,12 @@ export function createApp(config: AppConfig) {
       requestTimeoutMs: config.requestTimeoutMs,
       streamCacheMaxAge: config.streamCacheMaxAgeSec,
       streamStaleRevalidate: config.streamStaleRevalidateSec,
+      catalogPageSize: config.catalogPageSize,
+      catalogCacheTtlMs: config.catalogCacheTtlMs,
+      catalogCacheMaxAgeSec: config.catalogCacheMaxAgeSec,
+      catalogStaleRevalidateSec: config.catalogStaleRevalidateSec,
+      catalogStaleErrorSec: config.catalogStaleErrorSec,
+      tmdbNegativeCacheTtlMs: config.tmdbNegativeCacheTtlMs,
       radarr: {
         enabled: config.radarr.enabled,
         reachable: serviceHealth.radarr.reachable,

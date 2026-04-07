@@ -14,6 +14,12 @@ export function baseConfig(): AppConfig {
     serviceHealthCacheTtlMs: 2_000,
     streamCacheMaxAgeSec: 2,
     streamStaleRevalidateSec: 5,
+    catalogPageSize: 25,
+    catalogCacheTtlMs: 5_000,
+    catalogCacheMaxAgeSec: 15,
+    catalogStaleRevalidateSec: 60,
+    catalogStaleErrorSec: 120,
+    tmdbNegativeCacheTtlMs: 60_000,
     fileStreaming: {
       enabled: false,
       secret: '',

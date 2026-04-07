@@ -283,3 +283,26 @@ test('triggerMovieSearch returns unavailable reason when status lookup fails', a
   assert.equal(result.title, 'Radarr unavailable');
   assert.match(result.summary, /unreachable/);
 });
+
+test('listRecentMovieImports honors offset paging across pages', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/history?page=1&pageSize=50&sortKey=date&sortDirection=descending&eventType=downloadFolderImported') {
+        return { records: Array.from({ length: 50 }, (_, i) => ({ movieId: i + 1 })) } as T;
+      }
+      if (path === '/api/v3/history?page=2&pageSize=50&sortKey=date&sortDirection=descending&eventType=downloadFolderImported') {
+        return { records: Array.from({ length: 50 }, (_, i) => ({ movieId: i + 51 })) } as T;
+      }
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string): Promise<T> {
+      return {} as T;
+    }
+  };
+
+  const client = new RadarrClient(cfg, http as never);
+  const records = await client.listRecentMovieImports(5, 52);
+  assert.deepEqual(records.map((record) => record.movieId), [53, 54, 55, 56, 57]);
+});

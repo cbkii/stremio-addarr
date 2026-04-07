@@ -14,6 +14,18 @@ export interface AppConfig {
   serviceHealthCacheTtlMs: number;
   streamCacheMaxAgeSec: number;
   streamStaleRevalidateSec: number;
+  /** Number of catalog cards returned per page before Stremio asks for next skip. */
+  catalogPageSize: number;
+  /** Short local cache for merged catalog rows to reduce repeat Arr calls. */
+  catalogCacheTtlMs: number;
+  /** How long Stremio may cache catalog responses as fresh. */
+  catalogCacheMaxAgeSec: number;
+  /** How long Stremio may serve stale catalog while revalidating in background. */
+  catalogStaleRevalidateSec: number;
+  /** How long Stremio may serve stale catalog if revalidation errors. */
+  catalogStaleErrorSec: number;
+  /** Retry window for failed TMDB poster lookups (negative cache). */
+  tmdbNegativeCacheTtlMs: number;
   fileStreaming: {
     enabled: boolean;
     secret: string;
@@ -162,6 +174,12 @@ export function loadConfig(): AppConfig {
     'STREAM_STALE_REVALIDATE',
     readNumber('STREAM_STALE_REVALIDATE_SEC', 5)
   );
+  const catalogPageSize = readNumber('CATALOG_PAGE_SIZE', 25);
+  const catalogCacheTtlMs = readNumber('CATALOG_CACHE_TTL_MS', 5000);
+  const catalogCacheMaxAgeSec = readNumber('CATALOG_CACHE_MAX_AGE_SEC', 15);
+  const catalogStaleRevalidateSec = readNumber('CATALOG_STALE_REVALIDATE_SEC', 60);
+  const catalogStaleErrorSec = readNumber('CATALOG_STALE_ERROR_SEC', 120);
+  const tmdbNegativeCacheTtlMs = readNumber('TMDB_NEGATIVE_CACHE_TTL_MS', 60_000);
 
   if (requestTimeoutMs < 1000) throw new Error('REQUEST_TIMEOUT_MS must be at least 1000.');
   if (statusCacheTtlMs < 1000) throw new Error('STATUS_CACHE_TTL_MS must be at least 1000.');
@@ -171,6 +189,24 @@ export function loadConfig(): AppConfig {
   if (streamCacheMaxAgeSec < 0) throw new Error('STREAM_CACHE_MAX_AGE must be at least 0.');
   if (streamStaleRevalidateSec < 0) {
     throw new Error('STREAM_STALE_REVALIDATE must be at least 0.');
+  }
+  if (catalogPageSize <= 0) {
+    throw new Error('CATALOG_PAGE_SIZE must be greater than 0.');
+  }
+  if (catalogCacheTtlMs < 0) {
+    throw new Error('CATALOG_CACHE_TTL_MS must be at least 0.');
+  }
+  if (catalogCacheMaxAgeSec < 0) {
+    throw new Error('CATALOG_CACHE_MAX_AGE_SEC must be at least 0.');
+  }
+  if (catalogStaleRevalidateSec < 0) {
+    throw new Error('CATALOG_STALE_REVALIDATE_SEC must be at least 0.');
+  }
+  if (catalogStaleErrorSec < 0) {
+    throw new Error('CATALOG_STALE_ERROR_SEC must be at least 0.');
+  }
+  if (tmdbNegativeCacheTtlMs < 0) {
+    throw new Error('TMDB_NEGATIVE_CACHE_TTL_MS must be at least 0.');
   }
 
   const logLevelRaw = readString('LOG_LEVEL', 'info') as LogLevel;
@@ -200,6 +236,12 @@ export function loadConfig(): AppConfig {
     serviceHealthCacheTtlMs,
     streamCacheMaxAgeSec,
     streamStaleRevalidateSec,
+    catalogPageSize,
+    catalogCacheTtlMs,
+    catalogCacheMaxAgeSec,
+    catalogStaleRevalidateSec,
+    catalogStaleErrorSec,
+    tmdbNegativeCacheTtlMs,
     fileStreaming: {
       enabled: fileStreamingEnabled,
       secret: fileStreamingSecret,

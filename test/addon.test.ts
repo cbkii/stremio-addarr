@@ -19,9 +19,102 @@ test('manifest endpoint shape sanity', async () => {
       types: string[];
       idPrefixes: string[];
     };
-    assert.deepEqual(manifest.resources, ['stream']);
+    assert.deepEqual(manifest.resources, ['stream', 'catalog']);
     assert.deepEqual(manifest.types, ['movie', 'series']);
     assert.deepEqual(manifest.idPrefixes, ['tt']);
+  });
+});
+
+test('catalog handler returns rows for radarr-recent and sonarr-recent', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    const path = parsed.pathname + parsed.search;
+    if (parsed.hostname.includes('radarr')) {
+      if (path === '/api/v3/movie') return new Response('[{"id":1,"title":"Movie A","imdbId":"tt100","images":[{"coverType":"poster","remoteUrl":"https://img/m.jpg"}]}]', { status: 200 });
+      if (path.startsWith('/api/v3/queue/details')) return new Response('[]', { status: 200 });
+      if (path.startsWith('/api/v3/history')) return new Response('{"records":[{"movieId":1,"date":"2026-04-07T00:00:00Z"}]}', { status: 200 });
+    }
+    if (parsed.hostname.includes('sonarr')) {
+      if (path === '/api/v3/series') return new Response('[{"id":2,"title":"Show A","imdbId":"tt200","images":[{"coverType":"poster","remoteUrl":"https://img/s.jpg"}]}]', { status: 200 });
+      if (path.startsWith('/api/v3/queue/details')) return new Response('[]', { status: 200 });
+      if (path.startsWith('/api/v3/history')) return new Response('{"records":[{"seriesId":2,"date":"2026-04-07T00:00:00Z","episode":{"seasonNumber":2,"episodeNumber":4}}]}', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue')) return new Response('[]', { status: 200 });
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const movieRes = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    const movieBody = (await movieRes.json()) as { metas: Array<{ id: string }> };
+    assert.equal(movieRes.status, 200);
+    assert.equal(movieBody.metas[0]?.id, 'tt100');
+
+    const seriesRes = await ORIGINAL_FETCH(`${baseUrl}/catalog/series/sonarr-recent.json`);
+    const seriesBody = (await seriesRes.json()) as { metas: Array<{ id: string }> };
+    assert.equal(seriesRes.status, 200);
+    assert.equal(seriesBody.metas[0]?.id, 'tt200');
+  });
+});
+
+test('catalog cache hints are driven by config values', async () => {
+  const cfg = baseConfig();
+  cfg.catalogCacheMaxAgeSec = 9;
+  cfg.catalogStaleRevalidateSec = 33;
+  cfg.catalogStaleErrorSec = 77;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    const body = (await response.json()) as { cacheMaxAge: number; staleRevalidate: number; staleError: number };
+    assert.equal(response.status, 200);
+    assert.equal(body.cacheMaxAge, 9);
+    assert.equal(body.staleRevalidate, 33);
+    assert.equal(body.staleError, 77);
+  });
+});
+
+test('catalog handler returns empty metas when endpoint type does not match catalog type', async () => {
+  const app = createApp(baseConfig());
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/series/radarr-recent.json`);
+    const body = (await response.json()) as { metas: unknown[] };
+    assert.equal(response.status, 200);
+    assert.deepEqual(body.metas, []);
+  });
+});
+
+test('catalog route includes CORS headers', async () => {
+  const app = createApp(baseConfig());
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+  });
+});
+
+test('catalog handler degrades to empty metas when Arr services throw', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    if (parsed.hostname.includes('radarr')) {
+      throw new Error('radarr unreachable');
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    const body = (await response.json()) as { metas: unknown[] };
+    assert.equal(response.status, 200);
+    assert.deepEqual(body.metas, []);
   });
 });
 
