@@ -44,7 +44,7 @@ export interface AppConfig {
     rootFolderPath: string;
     qualityProfileId: number;
     minimumAvailability: string;
-    tags: string[];
+    tags: number[];
     searchOnAdd: boolean;
   };
   sonarr: {
@@ -54,8 +54,8 @@ export interface AppConfig {
     rootFolderPath: string;
     qualityProfileId: number;
     languageProfileId: number;
-    seriesMonitor: 'all' | 'none';
-    tags: string[];
+    seriesMonitor: 'all' | 'future' | 'missing' | 'existing' | 'pilot' | 'firstSeason' | 'latestSeason' | 'none';
+    tags: number[];
     searchOnAdd: boolean;
   };
   tmdbApiKey?: string;
@@ -64,7 +64,16 @@ export interface AppConfig {
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
-const SONARR_SERIES_MONITOR_VALUES = new Set<AppConfig['sonarr']['seriesMonitor']>(['all', 'none']);
+const SONARR_MONITOR_ALIASES: Record<string, AppConfig['sonarr']['seriesMonitor']> = {
+  all: 'all',
+  future: 'future',
+  missing: 'missing',
+  existing: 'existing',
+  pilot: 'pilot',
+  firstseason: 'firstSeason',
+  latestseason: 'latestSeason',
+  none: 'none'
+};
 
 function readNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -94,6 +103,20 @@ function readStringList(name: string): string[] {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function readNumberList(name: string): number[] {
+  return readString(name)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const n = Number(item);
+      if (!Number.isInteger(n)) {
+        throw new Error(`Environment variable ${name} must be a comma-separated list of integers.`);
+      }
+      return n;
+    });
 }
 
 function stripTrailingSlash(value: string): string {
@@ -144,11 +167,12 @@ function parseFileStreamingPlaybackMode(value: string): AppConfig['fileStreaming
 }
 
 function parseSonarrSeriesMonitor(value: string): AppConfig['sonarr']['seriesMonitor'] {
-  const normalized = value.trim().toLowerCase() as AppConfig['sonarr']['seriesMonitor'];
-  if (!SONARR_SERIES_MONITOR_VALUES.has(normalized)) {
-    throw new Error('SONARR_SERIES_MONITOR must be one of: all, none.');
+  const normalized = value.trim().toLowerCase();
+  const resolved = SONARR_MONITOR_ALIASES[normalized];
+  if (!resolved) {
+    throw new Error('SONARR_SERIES_MONITOR must be one of: all, future, missing, existing, pilot, firstSeason, latestSeason, none.');
   }
-  return normalized;
+  return resolved;
 }
 
 function isIpAddress(hostname: string): boolean {
@@ -277,7 +301,7 @@ export function loadConfig(): AppConfig {
       rootFolderPath: readString('RADARR_ROOT_FOLDER_PATH'),
       qualityProfileId: readNumber('RADARR_QUALITY_PROFILE_ID', 1),
       minimumAvailability: readString('RADARR_MINIMUM_AVAILABILITY', 'announced'),
-      tags: readStringList('RADARR_TAGS'),
+      tags: readNumberList('RADARR_TAGS'),
       searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true)
     },
     sonarr: (() => {
@@ -292,7 +316,7 @@ export function loadConfig(): AppConfig {
         seriesMonitor: sonarrEnabled
           ? parseSonarrSeriesMonitor(readString('SONARR_SERIES_MONITOR', 'all'))
           : 'all',
-        tags: readStringList('SONARR_TAGS'),
+        tags: readNumberList('SONARR_TAGS'),
         searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
       };
     })(),

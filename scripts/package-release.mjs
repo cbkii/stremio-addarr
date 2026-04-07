@@ -20,6 +20,8 @@ const REQUIRED_FILES = [
   'README_HOST.md',
   '.env.example',
   'Caddyfile.example',
+  'Caddyfile.duckdns.example',
+  'Caddyfile.desec.example',
   'docker-compose.example.yml',
   'deploy/stremio-addarr.service.example',
 ];
@@ -65,6 +67,8 @@ stage('README_HOST.md');
 // Config examples
 stage('.env.example');
 stage('Caddyfile.example');
+stage('Caddyfile.duckdns.example');
+stage('Caddyfile.desec.example');
 stage('docker-compose.example.yml');
 
 // Deploy helpers

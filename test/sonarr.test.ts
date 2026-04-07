@@ -293,3 +293,33 @@ test('listRecentSeriesImports honors offset paging across pages', async () => {
   const records = await client.listRecentSeriesImports(5, 52);
   assert.deepEqual(records.map((record) => record.seriesId), [53, 54, 55, 56, 57]);
 });
+
+test('addSeriesByImdbId sends addOptions.monitor in payload', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.seriesMonitor = 'future';
+  let capturedBody: Record<string, unknown> | undefined;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') return [] as T;
+      if (path.startsWith('/api/v3/series/lookup')) {
+        return [{ title: 'TestShow', imdbId: 'tt999', tvdbId: 999 }] as T;
+      }
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string, body?: unknown): Promise<T> {
+      capturedBody = body as Record<string, unknown>;
+      return {} as T;
+    }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  const result = await client.addSeriesByImdbId('tt999');
+  assert.equal(result.ok, true);
+  assert.ok(capturedBody, 'POST body should be captured');
+  const addOptions = capturedBody.addOptions as Record<string, unknown>;
+  assert.equal(addOptions.monitor, 'future', 'addOptions.monitor should match seriesMonitor config');
+  assert.equal(addOptions.searchForMissingEpisodes, true);
+  assert.ok(!('monitorNewItems' in capturedBody), 'monitorNewItems should NOT be in payload');
+});

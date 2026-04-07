@@ -156,9 +156,9 @@ export class SonarrClient {
       languageProfileId: this.config.sonarr.languageProfileId,
       rootFolderPath: this.config.sonarr.rootFolderPath,
       monitored: true,
-      monitorNewItems: this.config.sonarr.seriesMonitor,
       tags: this.config.sonarr.tags,
       addOptions: {
+        monitor: this.config.sonarr.seriesMonitor,
         searchForMissingEpisodes: this.config.sonarr.searchOnAdd,
         searchForCutoffUnmetEpisodes: false
       }
