@@ -4,6 +4,7 @@ declare module 'stremio-addon-sdk' {
     version: string;
     name: string;
     description: string;
+    logo?: string;
     catalogs: unknown[];
     resources: Array<'catalog' | 'meta' | 'stream' | 'subtitles' | string>;
     types: string[];
