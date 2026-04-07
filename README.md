@@ -124,7 +124,18 @@ SONARR_API_KEY=replace-with-sonarr-api-key
 SONARR_ROOT_FOLDER_PATH=/media/tv
 SONARR_QUALITY_PROFILE_ID=1
 SONARR_LANGUAGE_PROFILE_ID=1
+SONARR_SERIES_MONITOR=all
+
+CATALOG_PAGE_SIZE=25
+CATALOG_CACHE_TTL_MS=5000
+CATALOG_CACHE_MAX_AGE_SEC=15
+CATALOG_STALE_REVALIDATE_SEC=60
+CATALOG_STALE_ERROR_SEC=120
 ```
+
+Notes:
+- `SONARR_SERIES_MONITOR` maps directly to Sonarr's `monitorNewItems` field and currently accepts `all` or `none`.
+- Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
 
 ### Step 5 — Install systemd service
 

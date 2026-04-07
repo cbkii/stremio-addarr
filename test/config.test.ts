@@ -128,6 +128,16 @@ test('enabled Sonarr requires positive profile ids', () => {
   assert.throws(() => loadConfig(), /SONARR_QUALITY_PROFILE_ID/);
 });
 
+test('enabled Sonarr validates SONARR_SERIES_MONITOR enum', () => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_SERIES_MONITOR = 'future';
+  assert.throws(() => loadConfig(), /SONARR_SERIES_MONITOR/);
+});
+
 
 test('fails for low service health cache ttl', () => {
   process.env.SERVICE_HEALTH_CACHE_TTL_MS = '500';

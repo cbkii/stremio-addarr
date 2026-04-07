@@ -331,11 +331,34 @@ if (isEntryPoint) {
     logger.warn('Config issue', { issue });
   }
   const app = createApp(config);
-  app.listen(config.port, config.host, () => {
+  const server = app.listen(config.port, config.host, () => {
     logger.info('Server started', {
       host: config.host,
       port: config.port,
       manifest: `${config.publicBaseUrl}/manifest.json`
     });
   });
+
+  let isShuttingDown = false;
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    logger.info('Shutdown signal received', { signal });
+    server.close((error?: Error) => {
+      if (error) {
+        logger.error('Server shutdown failed', { signal, error: error.message });
+        process.exit(1);
+        return;
+      }
+      logger.info('Server shutdown complete', { signal });
+      process.exit(0);
+    });
+    setTimeout(() => {
+      logger.warn('Shutdown timeout reached, forcing exit', { signal });
+      process.exit(1);
+    }, 10_000).unref();
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }

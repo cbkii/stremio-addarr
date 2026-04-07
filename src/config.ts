@@ -62,6 +62,7 @@ export interface AppConfig {
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
+const SONARR_SERIES_MONITOR_VALUES = new Set(['all', 'none']);
 
 function readNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -299,6 +300,9 @@ export function loadConfig(): AppConfig {
     }
     if (config.sonarr.languageProfileId <= 0) {
       throw new Error('SONARR_LANGUAGE_PROFILE_ID must be greater than 0.');
+    }
+    if (!SONARR_SERIES_MONITOR_VALUES.has(config.sonarr.seriesMonitor)) {
+      throw new Error('SONARR_SERIES_MONITOR must be one of: all, none.');
     }
   }
 
