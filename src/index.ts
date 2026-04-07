@@ -56,6 +56,7 @@ export function createApp(config: AppConfig) {
   }
 
   const app = express();
+  app.set('trust proxy', 'loopback');
   app.disable('x-powered-by');
 
   app.use((req, res, next) => {
@@ -240,7 +241,7 @@ export function createApp(config: AppConfig) {
       return;
     }
 
-    const clientIp = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    const clientIp = (req.ips.length > 0 ? req.ips[0] : req.ip) ?? req.socket.remoteAddress ?? 'unknown';
     if (isFilesRateLimited(clientIp)) {
       res.status(429).end();
       return;

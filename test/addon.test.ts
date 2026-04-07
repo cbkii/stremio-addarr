@@ -178,7 +178,7 @@ test('downloaded tile has no url when file streaming is disabled', async () => {
   });
 });
 
-test('downloaded tile has no url when movieFile id is absent', async () => {
+test('downloaded tile has no url when movieFile id is absent and keeps Kodi fallback in direct mode', async () => {
   const cfg = baseConfig();
   cfg.fileStreaming.enabled = true;
   cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
@@ -198,8 +198,37 @@ test('downloaded tile has no url when movieFile id is absent', async () => {
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
-    const body = (await response.json()) as { streams: Array<{ url?: string }> };
+    const body = (await response.json()) as { streams: Array<{ url?: string; externalUris?: Array<{ uri: string }> }> };
     assert.equal(body.streams[0].url, undefined, 'no url without movieFile.id');
+    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
+  });
+});
+
+test('episode downloaded tile keeps Kodi fallback in direct mode when episodeFileId is absent', async () => {
+  const cfg = baseConfig();
+  cfg.fileStreaming.enabled = true;
+  cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
+  cfg.fileStreaming.playbackMode = 'direct';
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    const urlPath = parsed.pathname;
+    if (urlPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (urlPath === '/api/v3/series') return new Response('[{"id":10,"imdbId":"tt9876543","title":"Test Show"}]', { status: 200 });
+    if (urlPath === '/api/v3/episode' && parsed.search.includes('seriesId=10')) {
+      return new Response('[{"id":5,"seasonNumber":1,"episodeNumber":2,"hasFile":true,"monitored":true}]', { status: 200 });
+    }
+    if (urlPath.startsWith('/api/v3/queue')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('[]', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt9876543%3A1%3A2.json`);
+    const body = (await response.json()) as { streams: Array<{ url?: string; externalUris?: Array<{ uri: string }> }> };
+    assert.equal(body.streams[0].url, undefined, 'no url without episodeFileId');
+    assert.match(body.streams[0].externalUris?.[0].uri ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
   });
 });
 

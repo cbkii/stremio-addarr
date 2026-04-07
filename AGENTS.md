@@ -14,6 +14,7 @@ Maintain **Arr Status & Add** as a production-ready, self-hosted, LAN-first Stre
 - Keep Arr credentials server-side (`.env`) only.
 - Never expose API keys in URLs, labels, HTML pages, logs, or errors.
 - Never add scraping/piracy/mirror/bypass features.
+- First-party LAN file playback (your own Arr-managed files) is allowed when authenticated and path-restricted; do not add third-party scraping, bypass, or public mirror behavior.
 
 ## Engineering rules
 - TypeScript, Node 20+, Express, `stremio-addon-sdk`.

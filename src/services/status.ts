@@ -74,10 +74,10 @@ export class ArrStatusService {
     return this.config.fileStreaming.enabled && this.config.fileStreaming.playbackMode === 'direct';
   }
 
-  private canUseKodiFallback(): boolean {
+  private canUseKodiFallback(fileUrl?: string): boolean {
     if (!this.config.kodi.enabled) return false;
-    if (!this.config.fileStreaming.enabled) return true;
-    return this.config.fileStreaming.playbackMode === 'kodi';
+    // Keep downloaded tiles actionable whenever a direct file URL is unavailable.
+    return !fileUrl;
   }
 
   private buildKodiExternalUris(): Array<{ uri: string; name?: string }> {
@@ -98,7 +98,7 @@ export class ArrStatusService {
         const fileUrl = (this.canDirectStream() && status.movieFileId != null)
           ? this.buildFileStreamUrl('movie', status.movieFileId)
           : undefined;
-        const kodiUris = (fileUrl || !this.canUseKodiFallback()) ? [] : this.buildKodiExternalUris();
+        const kodiUris = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUris() : [];
         return [{
           name: '✅\nDone',
           description: desc(
@@ -157,7 +157,7 @@ export class ArrStatusService {
         const fileUrl = (this.canDirectStream() && status.episodeFileId != null)
           ? this.buildFileStreamUrl('series', status.episodeFileId)
           : undefined;
-        const kodiUris = (fileUrl || !this.canUseKodiFallback()) ? [] : this.buildKodiExternalUris();
+        const kodiUris = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUris() : [];
         return [{
           name: '✅\nDone',
           description: desc(
