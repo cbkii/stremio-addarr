@@ -1,22 +1,24 @@
 # Arr Status & Add (`stremio-addarr`)
 
-Self-hosted Stremio add-on that shows Sonarr/Radarr status tiles and provides one-click add actions.
+Self-hosted Stremio add-on that shows Sonarr/Radarr status tiles and provides one-click add/search actions.
 
 It also exposes two browseable personal catalogs in Stremio Discover/Board:
 - **Recent on Radarr** (movies)
 - **Recent on Sonarr** (series)
-These rows combine active downloads and recent imports from your local Arr services.
-Catalog cards intentionally use minimal metadata (IMDb id, name, description, releaseInfo) and rely on Stremio/Cinemeta for artwork.
 
+These catalogue rows combine **active downloads and recent imports** from your local Arr services.
+Cards intentionally use minimal metadata (IMDb id, name, description, releaseInfo) and rely on Stremio/Cinemeta for artwork.
 
 This README is the **canonical install and upgrade guide**.
+
+Designed for LAN-connected Raspberry Pi 5 (Debian Trixie) and Android 9 TV.
 
 ---
 
 ## 1) What you will set up
 
 - `stremio-addarr` runs locally on your host at `127.0.0.1:7010`.
-- Caddy serves a public HTTPS URL (required for stock Android TV Stremio).
+- Caddy serves a public HTTPS URL (required for non-root Android TV Stremio).
 - Stremio installs the add-on from:
 
 ```text
@@ -43,8 +45,8 @@ npm --version
 ```
 
 - Node must be **20+**.
-- Sonarr and/or Radarr must already be reachable from this host.
-- You need a service account and group that exist on your host.
+- Sonarr and/or Radarr must be reachable from this host.
+- You need a service account (user and group) that exist on your host.
 
 Set these once and reuse them in all commands:
 
@@ -245,8 +247,13 @@ sudo systemctl daemon-reload
 ```bash
 sudo systemctl restart stremio-addarr
 sudo systemctl is-active stremio-addarr
+source /opt/stremio-addarr/.env
 curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null
-curl -fI https://YOUR_HOSTNAME/manifest.json
+curl -fI "https://${PUBLIC_BASE_URL}/manifest.json"
+curl -f "https://${PUBLIC_BASE_URL}/manifest.json"
+cat /opt/stremio-addarr/package.json
+echo "[!] verify manifest returns 200"
+echo "[!] verify package and manifest versions match (updated)"
 ```
 
 Important for systemd operators:
@@ -263,7 +270,8 @@ If your hostname/TLS setup changed, re-run the hosting guide: [README_HOST.md](R
 ```bash
 sudo journalctl -u stremio-addarr -n 50 --no-pager
 curl -fsS http://127.0.0.1:7010/healthz
-curl -fsS https://YOUR_HOSTNAME/status.json
+source /opt/stremio-addarr/.env
+curl -fsS "https://$PUBLIC_BASE_URL/status.json"
 ```
 
 ---
