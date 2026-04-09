@@ -443,6 +443,48 @@ test('ep mode modifier is disabled when EP_COUNT <= 1', async () => {
   assert.deepEqual(puts[1], { path: '/api/v3/episode/monitor', body: { episodeIds: [9003], monitored: true } });
 });
 
+test('EP_COUNT_PAST limits the prior-episode window used by ep modifier', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.seriesMonitor = 'ep';
+  cfg.sonarr.epCount = 2;
+  cfg.sonarr.epCountPast = 2;
+  cfg.sonarr.epCountMod = 'epfuture';
+
+  const puts: Array<{ path: string; body: unknown }> = [];
+  let seriesCallCount = 0;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') {
+        seriesCallCount += 1;
+        return (seriesCallCount === 1 ? [] : [{ id: 70, imdbId: 'tt780', title: 'ShowWindow' }]) as T;
+      }
+      if (path.startsWith('/api/v3/series/lookup')) return [{ title: 'ShowWindow', imdbId: 'tt780', tvdbId: 780 }] as T;
+      if (path === '/api/v3/episode?seriesId=70') {
+        return [
+          { id: 10001, seasonNumber: 1, episodeNumber: 5, hasFile: true },  // outside EP_COUNT_PAST window
+          { id: 10002, seasonNumber: 1, episodeNumber: 6, hasFile: false },
+          { id: 10003, seasonNumber: 1, episodeNumber: 7, hasFile: true },
+          { id: 10004, seasonNumber: 1, episodeNumber: 8 }
+        ] as T;
+      }
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string): Promise<T> { return {} as T; },
+    async put<T>(path: string, body: unknown): Promise<T> {
+      puts.push({ path, body });
+      return {} as T;
+    }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  const result = await client.addSeriesByImdbId('tt780', { season: 1, episode: 8 });
+  assert.equal(result.ok, true);
+  // If EP_COUNT_PAST were ignored, this would upgrade to epfuture and include 10004 only.
+  assert.deepEqual(puts[1], { path: '/api/v3/episode/monitor', body: { episodeIds: [10004], monitored: true } });
+});
+
 test('episode downloading status takes precedence over missing', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;

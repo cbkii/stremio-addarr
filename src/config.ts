@@ -78,6 +78,7 @@ export interface AppConfig {
     episodeReadyTimeoutMs: number;
     episodeReadyPollMs: number;
     epCount: number;
+    epCountPast: number;
     epCountMod: 'epfuture' | 'epseason';
     tags: number[];
     searchOnAdd: boolean;
@@ -128,6 +129,15 @@ function parseEpCount(value: string): number {
     throw new Error('EP_COUNT must be a number.');
   }
   return Math.max(0, Math.floor(parsed));
+}
+
+function parseEpCountPast(value: string): number {
+  if (!value.trim()) return 8;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error('EP_COUNT_PAST must be a number.');
+  }
+  return Math.max(1, Math.floor(parsed));
 }
 
 function readNumber(name: string, fallback: number): number {
@@ -397,6 +407,7 @@ export function loadConfig(): AppConfig {
         episodeReadyTimeoutMs: Math.max(1000, Math.floor(readNumber('SONARR_EPISODE_READY_TIMEOUT_MS', 60000))),
         episodeReadyPollMs: Math.max(250, Math.floor(readNumber('SONARR_EPISODE_READY_POLL_MS', 1500))),
         epCount: parseEpCount(readString('EP_COUNT', '2')),
+        epCountPast: parseEpCountPast(readString('EP_COUNT_PAST', '8')),
         epCountMod: parseEpCountMod(readString('EP_COUNT_MOD', 'epfuture')),
         tags: readNumberList('SONARR_TAGS'),
         searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)

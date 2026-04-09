@@ -54,6 +54,7 @@ export function baseConfig(): AppConfig {
       episodeReadyTimeoutMs: 60_000,
       episodeReadyPollMs: 1_500,
       epCount: 2,
+      epCountPast: 8,
       epCountMod: 'epfuture',
       tags: [],
       searchOnAdd: true

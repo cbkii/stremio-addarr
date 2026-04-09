@@ -144,7 +144,8 @@ Notes:
   - `auto` (default): `epfuture=>all`, `ep/epseason=>none`, non-scoped default add uses `all`.
   - `all` / `none`: force one value regardless of scoped mode.
 - `EP_COUNT`/`EP_COUNT_MOD` tune `ep` auto-upgrade behavior:
-  - If `EP_COUNT > 1`, the addon checks up to the 8 prior episodes before the selected pivot.
+  - `EP_COUNT_PAST` controls how many prior normal episodes are examined (default `8`).
+  - If `EP_COUNT > 1`, the addon checks up to `EP_COUNT_PAST` prior episodes before the selected pivot.
   - If downloaded count in that window is `>= EP_COUNT`, `ep` is upgraded to `EP_COUNT_MOD` (`epfuture` or `epseason`).
   - `EP_COUNT <= 1` disables the auto-upgrade.
   - Because Stremio add-on requests are anonymous, this heuristic currently uses Sonarr-known downloaded episodes (not user watch-history from Stremio/Trakt).

@@ -368,7 +368,7 @@ export class SonarrClient {
     if (this.config.sonarr.epCount <= 1) return 'ep';
     const pivotIndex = ordered.findIndex((item) => item.id === pivot.id);
     if (pivotIndex <= 0) return 'ep';
-    const priorWindow = ordered.slice(Math.max(0, pivotIndex - 8), pivotIndex);
+    const priorWindow = ordered.slice(Math.max(0, pivotIndex - this.config.sonarr.epCountPast), pivotIndex);
     // Stremio addon requests do not include user watch-history credentials, so this
     // heuristic uses locally known library state (downloaded episodes) as the
     // available proxy signal for "already watched/downloaded".

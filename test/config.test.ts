@@ -234,6 +234,25 @@ test('blank EP_COUNT disables EP_COUNT logic', () => {
   assert.equal(config.sonarr.epCount, 0);
 });
 
+test('EP_COUNT_PAST can be overridden', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT_PAST = '5';
+  const config = loadConfig();
+  assert.equal(config.sonarr.epCountPast, 5);
+});
+
+test('EP_COUNT_PAST validation rejects non-numeric values', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT_PAST = 'abc';
+  assert.throws(() => loadConfig(), /EP_COUNT_PAST/);
+});
+
 test('enabled Sonarr accepts lastSeason as SONARR_SERIES_MONITOR', () => {
   process.env.SONARR_ENABLED = 'true';
   process.env.SONARR_BASE_URL = 'http://sonarr.local:8989';
