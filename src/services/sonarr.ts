@@ -39,6 +39,21 @@ export class SonarrClient {
     this.queueCache = new TtlCache<SonarrQueueRecord[]>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
   }
 
+  private async sleep(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+  }
+
+  private isEpisodeScopedMonitorMode(mode: AppConfig['sonarr']['seriesMonitor']): mode is 'ep' | 'epfuture' | 'epseason' {
+    return mode === 'ep' || mode === 'epfuture' || mode === 'epseason';
+  }
+
+  private resolveMonitorNewItems(mode: 'ep' | 'epfuture' | 'epseason'): 'all' | 'none' {
+    if (this.config.sonarr.monitorNewItems !== 'auto') {
+      return this.config.sonarr.monitorNewItems;
+    }
+    return mode === 'epfuture' ? 'all' : 'none';
+  }
+
   async getEpisodeStatus(imdbId: string, season?: number, episode?: number): Promise<ArrEpisodeStatus> {
     if (!this.config.sonarr.enabled) {
       return { state: 'unavailable', reason: 'Sonarr is disabled.' };
@@ -100,7 +115,10 @@ export class SonarrClient {
     }
   }
 
-  async addSeriesByImdbId(imdbId: string): Promise<AddActionResult> {
+  async addSeriesByImdbId(
+    imdbId: string,
+    opts?: { season?: number; episode?: number }
+  ): Promise<AddActionResult> {
     if (!this.config.sonarr.enabled) {
       return {
         ok: false,
@@ -148,6 +166,13 @@ export class SonarrClient {
       };
     }
 
+    const monitorMode = this.config.sonarr.seriesMonitor;
+    const useEpisodeScopedMonitor = this.isEpisodeScopedMonitorMode(monitorMode) && opts?.season != null && opts.episode != null;
+    const addMonitor = useEpisodeScopedMonitor
+      ? 'none'
+      : (this.isEpisodeScopedMonitorMode(monitorMode)
+        ? (monitorMode === 'epfuture' ? 'future' : 'none')
+        : monitorMode);
     const payload = {
       title: lookup.title,
       year: lookup.year,
@@ -157,9 +182,16 @@ export class SonarrClient {
       languageProfileId: this.config.sonarr.languageProfileId,
       rootFolderPath: this.config.sonarr.rootFolderPath,
       monitored: true,
+      ...(!useEpisodeScopedMonitor
+        ? {
+          monitorNewItems: this.config.sonarr.monitorNewItems === 'auto'
+            ? 'all'
+            : this.config.sonarr.monitorNewItems
+        }
+        : {}),
       tags: this.config.sonarr.tags,
       addOptions: {
-        monitor: this.config.sonarr.seriesMonitor,
+        monitor: addMonitor,
         searchForMissingEpisodes: this.config.sonarr.searchOnAdd,
         searchForCutoffUnmetEpisodes: false
       }
@@ -189,6 +221,18 @@ export class SonarrClient {
     this.seriesCache.clear();
     this.episodeCache.clear();
 
+    if (useEpisodeScopedMonitor) {
+      const applied = await this.applyEpisodeMonitoringFromReferencePoint(
+        imdbId,
+        opts!.season!,
+        opts!.episode!,
+        monitorMode
+      );
+      if (!applied.ok) {
+        return applied.result;
+      }
+    }
+
     this.logger.info('sonarr add success', { imdbId, title: lookup.title, searchOnAdd: this.config.sonarr.searchOnAdd });
     return {
       ok: true,
@@ -197,6 +241,147 @@ export class SonarrClient {
       summary: this.config.sonarr.searchOnAdd ? 'Series added and search triggered.' : 'Series added.',
       detail: lookup.title
     };
+  }
+
+  private async applyEpisodeMonitoringFromReferencePoint(
+    imdbId: string,
+    season: number,
+    episode: number,
+    mode: 'ep' | 'epfuture' | 'epseason'
+  ): Promise<{ ok: true } | { ok: false; result: AddActionResult }> {
+    const startedAt = Date.now();
+    let series: SonarrSeriesRecord | undefined;
+    while (!series && (Date.now() - startedAt) < this.config.sonarr.episodeReadyTimeoutMs) {
+      series = await this.findSeriesByImdbId(imdbId);
+      if (!series) {
+        await this.sleep(this.config.sonarr.episodeReadyPollMs);
+      }
+    }
+    if (!series?.id) {
+      this.logger.warn('sonarr episode monitor apply failed', { imdbId, reason: 'series_not_ready', mode });
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          service: 'sonarr',
+          title: 'Sonarr processing delayed',
+          summary: 'Series was added, but Sonarr metadata was not ready for episode monitor update in time.'
+        }
+      };
+    }
+
+    let episodes: SonarrEpisodeRecord[] = [];
+    const episodeWaitStartedAt = Date.now();
+    while ((Date.now() - episodeWaitStartedAt) < this.config.sonarr.episodeReadyTimeoutMs) {
+      episodes = await this.listEpisodes(series.id);
+      if (episodes.length > 0) break;
+      this.episodeCache.clear();
+      await this.sleep(this.config.sonarr.episodeReadyPollMs);
+    }
+    if (episodes.length === 0) {
+      this.logger.warn('sonarr episode monitor apply failed', { imdbId, reason: 'episode_list_empty', mode });
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          service: 'sonarr',
+          title: 'Sonarr processing delayed',
+          summary: 'Series was added, but Sonarr episode list was not ready for monitor update in time.'
+        }
+      };
+    }
+
+    const ordered = episodes
+      .filter((item) => item.seasonNumber > 0 && item.episodeNumber > 0 && item.id > 0)
+      .sort((a, b) => {
+        if (a.seasonNumber !== b.seasonNumber) return a.seasonNumber - b.seasonNumber;
+        return a.episodeNumber - b.episodeNumber;
+      });
+    const pivot = ordered.find((item) => item.seasonNumber === season && item.episodeNumber === episode);
+    if (!pivot) {
+      this.logger.warn('sonarr episode monitor apply failed', { imdbId, reason: 'pivot_episode_missing', mode, season, episode });
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          service: 'sonarr',
+          title: 'Episode not found',
+          summary: `Series was added, but S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')} is not in Sonarr episode metadata yet.`
+        }
+      };
+    }
+
+    const effectiveMode = this.resolveEffectiveEpisodeScopedMode(mode, ordered, pivot);
+    const targetIds = effectiveMode === 'ep'
+      ? [pivot.id]
+      : ordered
+        .filter((item) => {
+          if (effectiveMode === 'epseason') {
+            return item.seasonNumber === season && item.episodeNumber >= episode;
+          }
+          return item.seasonNumber > season || (item.seasonNumber === season && item.episodeNumber >= episode);
+        })
+        .map((item) => item.id);
+
+    if (targetIds.length === 0) {
+      this.logger.warn('sonarr episode monitor apply failed', { imdbId, reason: 'no_target_ids', mode, season, episode });
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          service: 'sonarr',
+          title: 'Monitor update failed',
+          summary: 'Series was added, but no Sonarr episode IDs were available for monitor update.'
+        }
+      };
+    }
+
+    const allIds = ordered.map((item) => item.id);
+    if (allIds.length > 0) {
+      await this.http.put('/api/v3/episode/monitor', { episodeIds: allIds, monitored: false });
+    }
+    await this.http.put('/api/v3/episode/monitor', { episodeIds: targetIds, monitored: true });
+    await this.http.put('/api/v3/series/editor', {
+      seriesIds: [series.id],
+      monitored: true,
+      monitorNewItems: this.resolveMonitorNewItems(effectiveMode)
+    });
+    this.episodeCache.clear();
+    this.seriesCache.clear();
+    this.logger.info('sonarr episode monitor applied', {
+      imdbId,
+      seriesId: series.id,
+      mode: effectiveMode,
+      season,
+      episode,
+      targetEpisodeCount: targetIds.length
+    });
+    return { ok: true };
+  }
+
+  private resolveEffectiveEpisodeScopedMode(
+    requestedMode: 'ep' | 'epfuture' | 'epseason',
+    ordered: SonarrEpisodeRecord[],
+    pivot: SonarrEpisodeRecord
+  ): 'ep' | 'epfuture' | 'epseason' {
+    if (requestedMode !== 'ep') return requestedMode;
+    if (this.config.sonarr.epCount <= 1) return 'ep';
+    const pivotIndex = ordered.findIndex((item) => item.id === pivot.id);
+    if (pivotIndex <= 0) return 'ep';
+    const priorWindow = ordered.slice(Math.max(0, pivotIndex - 8), pivotIndex);
+    // Stremio addon requests do not include user watch-history credentials, so this
+    // heuristic uses locally known library state (downloaded episodes) as the
+    // available proxy signal for "already watched/downloaded".
+    const priorDownloadedOrWatched = priorWindow.filter((item) => item.hasFile || (item.episodeFileId ?? 0) > 0).length;
+    if (priorDownloadedOrWatched >= this.config.sonarr.epCount) {
+      this.logger.info('sonarr ep mode upgraded by EP_COUNT', {
+        priorDownloadedOrWatched,
+        epCount: this.config.sonarr.epCount,
+        epCountMod: this.config.sonarr.epCountMod
+      });
+      return this.config.sonarr.epCountMod;
+    }
+    return 'ep';
   }
 
   async triggerEpisodeSearch(imdbId: string, season?: number, episode?: number): Promise<AddActionResult> {
@@ -231,7 +416,19 @@ export class SonarrClient {
       };
     }
 
-    if (status.episodeId) {
+    const monitorMode = this.config.sonarr.seriesMonitor;
+    const scopedMode = this.isEpisodeScopedMonitorMode(monitorMode) ? monitorMode : undefined;
+    if (scopedMode && season != null && episode != null && status.seriesId) {
+      const scoped = await this.applyEpisodeMonitoringFromReferencePoint(imdbId, season, episode, scopedMode);
+      if (!scoped.ok) {
+        return scoped.result;
+      }
+    } else if (status.seriesId) {
+      await this.http.put('/api/v3/series/editor', { seriesIds: [status.seriesId], monitored: true });
+      this.seriesCache.clear();
+    }
+
+    if (status.episodeId && !scopedMode) {
       const grabbed = await this.tryGrabTopRelease(status.seriesId, status.episodeId, season);
       if (!grabbed) {
         await this.http.post('/api/v3/command', {
@@ -251,21 +448,31 @@ export class SonarrClient {
     }
 
     if (status.seriesId) {
-      const grabbed = await this.tryGrabTopRelease(status.seriesId, undefined, season);
-      if (!grabbed) {
+      if (scopedMode === 'epseason' && season != null) {
         await this.http.post('/api/v3/command', {
-          name: 'MissingEpisodeSearch',
-          seriesId: status.seriesId
+          name: 'SeasonSearch',
+          seriesId: status.seriesId,
+          seasonNumber: season
         });
+      } else {
+        const grabbed = scopedMode ? false : await this.tryGrabTopRelease(status.seriesId, undefined, season);
+        if (!grabbed) {
+          await this.http.post('/api/v3/command', {
+            name: 'MissingEpisodeSearch',
+            seriesId: status.seriesId
+          });
+        }
       }
       this.seriesCache.clear();
       this.episodeCache.clear();
-      this.logger.info('sonarr search queued', { imdbId, seriesId: status.seriesId, type: 'missing_episode', method: grabbed ? 'release_grab' : 'command_search' });
+      this.logger.info('sonarr search queued', { imdbId, seriesId: status.seriesId, type: scopedMode === 'epseason' ? 'season_search' : 'missing_episode', scopedMode: scopedMode ?? null });
       return {
         ok: true,
         service: 'sonarr',
         title: 'Search triggered',
-        summary: grabbed ? 'Sonarr release grabbed for download.' : 'Sonarr missing-episode search queued.'
+        summary: scopedMode === 'epseason'
+          ? 'Sonarr season search queued.'
+          : 'Sonarr missing-episode search queued.'
       };
     }
 

@@ -50,6 +50,11 @@ export function baseConfig(): AppConfig {
       qualityProfileId: 1,
       languageProfileId: 1,
       seriesMonitor: 'all',
+      monitorNewItems: 'auto',
+      episodeReadyTimeoutMs: 60_000,
+      episodeReadyPollMs: 1_500,
+      epCount: 2,
+      epCountMod: 'epfuture',
       tags: [],
       searchOnAdd: true
     }

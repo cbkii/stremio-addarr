@@ -219,6 +219,10 @@ export class RadarrClient {
       };
     }
 
+    if (status.monitored === false) {
+      await this.http.put('/api/v3/movie/editor', { movieIds: [status.movieId], monitored: true });
+    }
+
     const grabbed = await this.tryGrabTopRelease(status.movieId);
     if (!grabbed) {
       await this.http.post('/api/v3/command', {

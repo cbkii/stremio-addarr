@@ -70,7 +70,15 @@ export interface AppConfig {
       | 'monitorSpecials'
       | 'unmonitorSpecials'
       | 'none'
-      | 'skip';
+      | 'skip'
+      | 'ep'
+      | 'epfuture'
+      | 'epseason';
+    monitorNewItems: 'auto' | 'all' | 'none';
+    episodeReadyTimeoutMs: number;
+    episodeReadyPollMs: number;
+    epCount: number;
+    epCountMod: 'epfuture' | 'epseason';
     tags: number[];
     searchOnAdd: boolean;
   };
@@ -79,6 +87,7 @@ export interface AppConfig {
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
+const SONARR_MONITOR_NEW_ITEMS = new Set<AppConfig['sonarr']['monitorNewItems']>(['auto', 'all', 'none']);
 const SONARR_MONITOR_ALIASES: Record<string, AppConfig['sonarr']['seriesMonitor']> = {
   all: 'all',
   future: 'future',
@@ -92,8 +101,34 @@ const SONARR_MONITOR_ALIASES: Record<string, AppConfig['sonarr']['seriesMonitor'
   monitorspecials: 'monitorSpecials',
   unmonitorspecials: 'unmonitorSpecials',
   none: 'none',
-  skip: 'skip'
+  skip: 'skip',
+  ep: 'ep',
+  epfuture: 'epfuture',
+  epseason: 'epseason'
 };
+
+function parseSonarrMonitorNewItems(value: string): AppConfig['sonarr']['monitorNewItems'] {
+  const normalized = value.trim().toLowerCase() as AppConfig['sonarr']['monitorNewItems'];
+  if (!SONARR_MONITOR_NEW_ITEMS.has(normalized)) {
+    throw new Error('SONARR_MONITOR_NEW_ITEMS must be one of: auto, all, none.');
+  }
+  return normalized;
+}
+
+function parseEpCountMod(value: string): AppConfig['sonarr']['epCountMod'] {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'epfuture' || normalized === 'epseason') return normalized;
+  throw new Error('EP_COUNT_MOD must be one of: epfuture, epseason.');
+}
+
+function parseEpCount(value: string): number {
+  if (!value.trim()) return 0;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error('EP_COUNT must be a number.');
+  }
+  return Math.max(0, Math.floor(parsed));
+}
 
 function readNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -190,7 +225,7 @@ function parseSonarrSeriesMonitor(value: string): AppConfig['sonarr']['seriesMon
   const normalized = value.trim().toLowerCase();
   const resolved = SONARR_MONITOR_ALIASES[normalized];
   if (!resolved) {
-    throw new Error('SONARR_SERIES_MONITOR must be one of: all, future, missing, existing, firstSeason, lastSeason, latestSeason, pilot, recent, monitorSpecials, unmonitorSpecials, none, skip.');
+    throw new Error('SONARR_SERIES_MONITOR must be one of: all, future, missing, existing, firstSeason, lastSeason, latestSeason, pilot, recent, monitorSpecials, unmonitorSpecials, none, skip, ep, epfuture, epseason.');
   }
   return resolved;
 }
@@ -358,6 +393,11 @@ export function loadConfig(): AppConfig {
         seriesMonitor: sonarrEnabled
           ? parseSonarrSeriesMonitor(readString('SONARR_SERIES_MONITOR', 'all'))
           : 'all',
+        monitorNewItems: parseSonarrMonitorNewItems(readString('SONARR_MONITOR_NEW_ITEMS', 'auto')),
+        episodeReadyTimeoutMs: Math.max(1000, Math.floor(readNumber('SONARR_EPISODE_READY_TIMEOUT_MS', 60000))),
+        episodeReadyPollMs: Math.max(250, Math.floor(readNumber('SONARR_EPISODE_READY_POLL_MS', 1500))),
+        epCount: parseEpCount(readString('EP_COUNT', '2')),
+        epCountMod: parseEpCountMod(readString('EP_COUNT_MOD', 'epfuture')),
         tags: readNumberList('SONARR_TAGS'),
         searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
       };
@@ -388,6 +428,9 @@ export function loadConfig(): AppConfig {
     }
     if (config.sonarr.languageProfileId <= 0) {
       throw new Error('SONARR_LANGUAGE_PROFILE_ID must be greater than 0.');
+    }
+    if (config.sonarr.episodeReadyPollMs > config.sonarr.episodeReadyTimeoutMs) {
+      throw new Error('SONARR_EPISODE_READY_POLL_MS must be less than or equal to SONARR_EPISODE_READY_TIMEOUT_MS.');
     }
   }
 

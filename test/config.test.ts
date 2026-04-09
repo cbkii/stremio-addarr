@@ -176,6 +176,64 @@ test('enabled Sonarr accepts future as SONARR_SERIES_MONITOR', () => {
   assert.equal(config.sonarr.seriesMonitor, 'future');
 });
 
+test('enabled Sonarr accepts episode-scoped values in SONARR_SERIES_MONITOR', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_SERIES_MONITOR = 'epfuture';
+  const config = loadConfig();
+  assert.equal(config.sonarr.seriesMonitor, 'epfuture');
+});
+
+test('enabled Sonarr validates SONARR_SERIES_MONITOR custom mode enum', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_SERIES_MONITOR = 'broken';
+  assert.throws(() => loadConfig(), /SONARR_SERIES_MONITOR/);
+});
+
+test('enabled Sonarr validates episode ready poll/timeout bounds', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_EPISODE_READY_TIMEOUT_MS = '1000';
+  process.env.SONARR_EPISODE_READY_POLL_MS = '5000';
+  assert.throws(() => loadConfig(), /SONARR_EPISODE_READY_POLL_MS/);
+});
+
+test('enabled Sonarr accepts SONARR_MONITOR_NEW_ITEMS override', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_MONITOR_NEW_ITEMS = 'none';
+  const config = loadConfig();
+  assert.equal(config.sonarr.monitorNewItems, 'none');
+});
+
+test('enabled Sonarr validates EP_COUNT_MOD', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT_MOD = 'bad';
+  assert.throws(() => loadConfig(), /EP_COUNT_MOD/);
+});
+
+test('blank EP_COUNT disables EP_COUNT logic', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT = '';
+  const config = loadConfig();
+  assert.equal(config.sonarr.epCount, 0);
+});
+
 test('enabled Sonarr accepts lastSeason as SONARR_SERIES_MONITOR', () => {
   process.env.SONARR_ENABLED = 'true';
   process.env.SONARR_BASE_URL = 'http://sonarr.local:8989';

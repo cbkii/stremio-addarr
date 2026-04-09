@@ -9,6 +9,7 @@ class FakeHttp {
     private readonly handlers: {
       get: Record<string, unknown>;
       post?: Record<string, unknown>;
+      put?: Record<string, unknown>;
     },
     private readonly postError?: Error
   ) {}
@@ -22,6 +23,11 @@ class FakeHttp {
     if (this.postError) throw this.postError;
     if (!this.handlers.post || !(path in this.handlers.post)) throw new Error(`Missing POST ${path}`);
     return this.handlers.post[path] as T;
+  }
+
+  async put<T>(path: string, _body?: unknown): Promise<T> {
+    if (!this.handlers.put || !(path in this.handlers.put)) throw new Error(`Missing PUT ${path}`);
+    return this.handlers.put[path] as T;
   }
 }
 
@@ -71,7 +77,8 @@ test('getMovieFilePath returns path from Arr API', async () => {
       if (reqPath === '/api/v3/moviefile/42') return { path: '/movies/test.mkv' } as T;
       throw new Error(`Unexpected GET ${reqPath}`);
     },
-    async post<T>(_reqPath: string): Promise<T> { return {} as T; }
+    async post<T>(_reqPath: string): Promise<T> { return {} as T; },
+    async put<T>(_reqPath: string): Promise<T> { return {} as T; }
   };
 
   const client = new RadarrClient(cfg, http as never);
@@ -85,7 +92,8 @@ test('getMovieFilePath returns null when Arr API fails', async () => {
 
   const http = {
     async get<T>(_reqPath: string): Promise<T> { throw new Error('network error'); },
-    async post<T>(_reqPath: string): Promise<T> { return {} as T; }
+    async post<T>(_reqPath: string): Promise<T> { return {} as T; },
+    async put<T>(_reqPath: string): Promise<T> { return {} as T; }
   };
 
   const client = new RadarrClient(cfg, http as never);
@@ -203,6 +211,9 @@ test('triggerMovieSearch posts MoviesSearch command for existing movie', async (
     async post<T>(_path: string, body: unknown): Promise<T> {
       posts.push(body);
       return {} as T;
+    },
+    async put<T>(_path: string): Promise<T> {
+      return {} as T;
     }
   };
   const client = new RadarrClient(cfg, http as never);
@@ -226,6 +237,9 @@ test('triggerMovieSearch grabs top approved release before command search', asyn
     },
     async post<T>(path: string, body: unknown): Promise<T> {
       calls.push({ path, body });
+      return {} as T;
+    },
+    async put<T>(_path: string): Promise<T> {
       return {} as T;
     }
   };
@@ -257,6 +271,9 @@ test('triggerMovieSearch prefers download-allowed release with highest weight an
     async post<T>(path: string, body: unknown): Promise<T> {
       calls.push({ path, body });
       return {} as T;
+    },
+    async put<T>(_path: string): Promise<T> {
+      return {} as T;
     }
   };
   const client = new RadarrClient(cfg, http as never);
@@ -267,6 +284,35 @@ test('triggerMovieSearch prefers download-allowed release with highest weight an
     path: '/api/v3/release',
     body: { guid: 'best', indexerId: 7, movieId: 5, downloadClientId: 44 }
   });
+});
+
+test('triggerMovieSearch enables movie monitored before searching', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const calls: Array<{ path: string; body?: unknown }> = [];
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/movie') return [{ id: 6, imdbId: 'tt89', monitored: false }] as T;
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async put<T>(path: string, body: unknown): Promise<T> {
+      calls.push({ path, body });
+      return {} as T;
+    },
+    async post<T>(path: string, body: unknown): Promise<T> {
+      calls.push({ path, body });
+      return {} as T;
+    }
+  };
+
+  const client = new RadarrClient(cfg, http as never);
+  const result = await client.triggerMovieSearch('tt89');
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [
+    { path: '/api/v3/movie/editor', body: { movieIds: [6], monitored: true } },
+    { path: '/api/v3/command', body: { name: 'MoviesSearch', movieIds: [6] } }
+  ]);
 });
 
 test('queue failure does not downgrade movie status to unavailable', async () => {

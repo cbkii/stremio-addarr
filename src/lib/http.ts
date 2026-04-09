@@ -54,6 +54,14 @@ export class JsonHttpClient {
     });
   }
 
+  async put<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  }
+
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);

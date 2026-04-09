@@ -264,7 +264,7 @@ export class ArrStatusService {
     if (parsed.kind === 'movie') {
       return this.radarr.addMovieByImdbId(parsed.imdbId);
     }
-    return this.sonarr.addSeriesByImdbId(parsed.imdbId);
+    return this.sonarr.addSeriesByImdbId(parsed.imdbId, { season: parsed.season, episode: parsed.episode });
   }
 
   async triggerSearch(parsed: ParsedStremioId): Promise<AddActionResult> {
