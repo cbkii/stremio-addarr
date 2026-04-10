@@ -56,7 +56,7 @@ function cardEndpointLine(raw: string): string {
  * Join non-empty lines into a newline-separated description.
  */
 function desc(...lines: string[]): string {
-  return ['📂 Pi  ══════════════════', ...lines.filter(Boolean)].join('\n');
+  return ['════════════════════', ...lines.filter(Boolean)].join('\n');
 }
 
 export class ArrStatusService {
@@ -96,10 +96,6 @@ export class ArrStatusService {
     return `intent://launch#Intent;package=${encodeURIComponent(this.config.kodi.packageName)};action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end`;
   }
 
-  private supportLine(): string {
-    return 'ℹ️ "failed to play" = 📨👍';
-  }
-
   private radarrCardLine(): string {
     return cardEndpointLine(this.config.radarr.cardUrl || this.config.radarr.baseUrl);
   }
@@ -119,8 +115,8 @@ export class ArrStatusService {
           name: '✅\nFile\nReady',
           description: desc(
             movieLine(status.title, status.year),
-            '✅ File ready',
-            fileUrl ? '▶️ Play local Pi stream ►' : (kodiExternalUrl ? '▶️ Open in Kodi ►' : '✅ Ready')
+            '✅ File is downloaded',
+            fileUrl ? '🗯️ ▶️  PLAY FROM PI ►' : (kodiExternalUrl ? '🗯️ ▶️  OPEN IN KODI ►' : '🗯️ ▶️  PLAY FROM PI ►')
           ),
           url: fileUrl,
           behaviorHints: fileUrl ? {
@@ -133,36 +129,36 @@ export class ArrStatusService {
       }
       case 'downloading':
         return [{
-          name: '⏱️\nLoad',
-          description: desc(movieLine(status.title, status.year), '⏱ Downloading now', this.radarrCardLine())
+          name: '⏱️📥...\nDLing',
+          description: desc(movieLine(status.title, status.year), '🗯️ ⏱  DOWNLOADING IN RADARR…', this.radarrCardLine())
         }];
       case 'missing':
         return [{
-          name: '🔍\nSearch\nRadarr',
-          description: desc(movieLine(status.title, status.year), '⭕ Monitored, missing', '🔍 Tap to search', this.supportLine(), this.radarrCardLine()),
+          name: '🔍🦜\nSearch\n+ DL',
+          description: desc(movieLine(status.title, status.year), '⭕ Monitored — file missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'added':
         return [{
-          name: '🔍\nSearch\nRadarr',
-          description: desc(movieLine(status.title, status.year), '⭕ Added, unmonitored', '🔍 Tap to search', this.supportLine(), this.radarrCardLine()),
+          name: '🔍🦜\nSearch\n+ DL',
+          description: desc(movieLine(status.title, status.year), '⭕ In Radarr — not monitored', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'not_added':
         return [{
-          name: '➕\nAdd\nRadarr',
-          description: desc('📽 Not in Radarr', '➕ Tap to add+search', this.supportLine(), this.radarrCardLine()),
+          name: '➕ Add\nto *Arr\n+ DL',
+          description: desc('📽  Not in Radarr', '🗯️ ➕  ADD + SEARCH ►', this.radarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'unavailable':
       default:
-        return [{ name: '🛑\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config', this.radarrCardLine()) }];
+        return [{ name: '🛑❌\nRadarr DOWN', description: desc('🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()) }];
     }
   }
 
@@ -178,8 +174,8 @@ export class ArrStatusService {
           name: '✅\nFile\nReady',
           description: desc(
             seriesLine(status.title),
-            ep ? `✅ ${ep} ready` : '✅ File ready',
-            fileUrl ? '▶️ Play local Pi stream ►' : (kodiExternalUrl ? '▶️ Open in Kodi ►' : '✅ Ready')
+            ep ? `✅ ${ep} is downloaded` : '✅ File is downloaded',
+            fileUrl ? '🗯️ ▶️  PLAY FROM PI ►' : (kodiExternalUrl ? '🗯️ ▶️  OPEN IN KODI ►' : '🗯️ ▶️  PLAY FROM PI ►')
           ),
           url: fileUrl,
           behaviorHints: fileUrl ? {
@@ -192,13 +188,13 @@ export class ArrStatusService {
       }
       case 'episode_downloading':
         return [{
-          name: '⏱️\nLoad',
-          description: desc(seriesLine(status.title), ep ? `⏱ ${ep} downloading` : '⏱ Downloading now', this.sonarrCardLine())
+          name: '⏱️📥...\nDLing',
+          description: desc(seriesLine(status.title), ep ? `🗯️ ⏱  ${ep} DOWNLOADING…` : '🗯️ ⏱  DOWNLOADING…', this.sonarrCardLine())
         }];
       case 'episode_missing':
         return [{
-          name: '🔍\nSearch\nSonarr',
-          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🔍 Tap to search', this.supportLine(), this.sonarrCardLine()),
+          name: '🔍🦜\nSearch\n+ DL',
+          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -206,23 +202,23 @@ export class ArrStatusService {
       case 'series_added':
       case 'episode_monitored':
         return [{
-          name: '🔍\nSearch\nSonarr',
-          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🔍 Tap to search', this.supportLine(), this.sonarrCardLine()),
+          name: '🔍🦜\nSearch\n+ DL',
+          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'series_not_added':
         return [{
-          name: '➕\nAdd\nSonarr',
-          description: desc('📺 Not in Sonarr', '➕ Tap to add+search', this.supportLine(), this.sonarrCardLine()),
+          name: '➕ Add\nto *Arr\n+ DL',
+          description: desc('📺  Not in Sonarr', '🗯️ ➕  ADD SERIES + SEARCH ►', this.sonarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'unavailable':
       default:
-        return [{ name: '🛑\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config', this.sonarrCardLine()) }];
+        return [{ name: '🛑❌\nSonarr DOWN', description: desc('🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];
     }
   }
 
@@ -241,7 +237,7 @@ export class ArrStatusService {
       }
       const health = await this.getServiceHealth();
       if (!health.radarr.reachable) {
-        return [{ name: '🛑\nDown', description: desc('🛑 Radarr unreachable', '🔧 Check config', this.radarrCardLine()) }];
+        return [{ name: '🛑❌\nRadarr DOWN', description: desc('🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()) }];
       }
       const status = await this.radarr.getMovieStatus(parsed.imdbId);
       return this.buildMovieTiles(status, parsed);
@@ -253,7 +249,7 @@ export class ArrStatusService {
 
     const health = await this.getServiceHealth();
     if (!health.sonarr.reachable) {
-      return [{ name: '🛑\nDown', description: desc('🛑 Sonarr unreachable', '🔧 Check config', this.sonarrCardLine()) }];
+      return [{ name: '🛑❌\nSonarr DOWN', description: desc('🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];
     }
 
     const status = await this.sonarr.getEpisodeStatus(parsed.imdbId, parsed.season, parsed.episode);
@@ -264,7 +260,7 @@ export class ArrStatusService {
     if (parsed.kind === 'movie') {
       return this.radarr.addMovieByImdbId(parsed.imdbId);
     }
-    return this.sonarr.addSeriesByImdbId(parsed.imdbId);
+    return this.sonarr.addSeriesByImdbId(parsed.imdbId, { season: parsed.season, episode: parsed.episode });
   }
 
   async triggerSearch(parsed: ParsedStremioId): Promise<AddActionResult> {

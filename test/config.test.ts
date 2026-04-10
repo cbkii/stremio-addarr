@@ -27,6 +27,26 @@ test('loads valid config', () => {
   assert.equal(config.radarr.enabled, true);
   assert.equal(config.radarr.baseUrl, 'http://127.0.0.1:7878');
   assert.equal(config.radarr.cardUrl, 'http://127.0.0.1:7878');
+  assert.equal(config.manifestLogoUrl, 'https://raw.githubusercontent.com/cbkii/stremio-addarr/main/assets/logo.png');
+});
+
+test('manifest logo url accepts explicit https override', () => {
+  process.env.MANIFEST_LOGO_URL = 'https://example.com/stremio/logo.png';
+  const config = loadConfig();
+  assert.equal(config.manifestLogoUrl, 'https://example.com/stremio/logo.png');
+});
+
+test('manifest logo url supports local fallback keyword', () => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
+  process.env.MANIFEST_LOGO_URL = 'local';
+  const config = loadConfig();
+  assert.equal(config.manifestLogoUrl, 'https://stremio-addarr.example.com/assets/logo.png');
+});
+
+test('manifest logo url supports explicit none keyword', () => {
+  process.env.MANIFEST_LOGO_URL = 'none';
+  const config = loadConfig();
+  assert.equal(config.manifestLogoUrl, '');
 });
 
 test('card urls allow display override without changing API base url', () => {
@@ -174,6 +194,83 @@ test('enabled Sonarr accepts future as SONARR_SERIES_MONITOR', () => {
   process.env.SONARR_SERIES_MONITOR = 'future';
   const config = loadConfig();
   assert.equal(config.sonarr.seriesMonitor, 'future');
+});
+
+test('enabled Sonarr accepts episode-scoped values in SONARR_SERIES_MONITOR', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_SERIES_MONITOR = 'epfuture';
+  const config = loadConfig();
+  assert.equal(config.sonarr.seriesMonitor, 'epfuture');
+});
+
+test('enabled Sonarr validates SONARR_SERIES_MONITOR custom mode enum', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_SERIES_MONITOR = 'broken';
+  assert.throws(() => loadConfig(), /SONARR_SERIES_MONITOR/);
+});
+
+test('enabled Sonarr validates episode ready poll/timeout bounds', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_EPISODE_READY_TIMEOUT_MS = '1000';
+  process.env.SONARR_EPISODE_READY_POLL_MS = '5000';
+  assert.throws(() => loadConfig(), /SONARR_EPISODE_READY_POLL_MS/);
+});
+
+test('enabled Sonarr accepts SONARR_MONITOR_NEW_ITEMS override', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_MONITOR_NEW_ITEMS = 'none';
+  const config = loadConfig();
+  assert.equal(config.sonarr.monitorNewItems, 'none');
+});
+
+test('enabled Sonarr validates EP_COUNT_MOD', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT_MOD = 'bad';
+  assert.throws(() => loadConfig(), /EP_COUNT_MOD/);
+});
+
+test('blank EP_COUNT disables EP_COUNT logic', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT = '';
+  const config = loadConfig();
+  assert.equal(config.sonarr.epCount, 0);
+});
+
+test('EP_COUNT_PAST can be overridden', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT_PAST = '5';
+  const config = loadConfig();
+  assert.equal(config.sonarr.epCountPast, 5);
+});
+
+test('EP_COUNT_PAST validation rejects non-numeric values', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT_PAST = 'abc';
+  assert.throws(() => loadConfig(), /EP_COUNT_PAST/);
 });
 
 test('enabled Sonarr accepts lastSeason as SONARR_SERIES_MONITOR', () => {

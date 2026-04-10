@@ -10,6 +10,7 @@ import { createAddonInterface } from './addon.js';
 import { parseStremioId } from './lib/stremio-ids.js';
 import { verifyFileToken } from './lib/file-tokens.js';
 import type { ParsedStremioId } from './types.js';
+import { ActionOrchestrator } from './services/action-orchestrator.js';
 
 // Minimal valid HLS end-of-stream playlist. Stremio's player resolves this as a
 // zero-duration stream that completes immediately — no browser is opened.
@@ -59,6 +60,7 @@ export function createApp(config: AppConfig) {
   const getRouter = (sdk as { getRouter: (addonInterface: unknown) => import('express').RequestHandler }).getRouter;
   const logger = createLogger(config.logLevel);
   const { addonInterface, statusService } = createAddonInterface(config, logger);
+  const actionOrchestrator = new ActionOrchestrator(statusService, logger);
 
   // Simple in-memory token-bucket rate limiter for the /files route.
   // Limits each IP to at most 120 file requests per minute to deter brute-force
@@ -240,36 +242,7 @@ export function createApp(config: AppConfig) {
     // connection, the add/search operations still complete on the server.
     res.send(EMPTY_HLS);
 
-    const trigger = action === 'add-search'
-      ? statusService.triggerAddAndSearch(parsed)
-      : statusService.triggerSearch(parsed);
-
-    trigger.then((result) => {
-      if (result.ok) {
-        logger.info('Action completed', { reqId, background: true, action, kind, encodedId, title: result.title });
-      } else {
-        logger.warn('Action rejected by Arr service', {
-          reqId,
-          background: true,
-          action,
-          kind,
-          encodedId,
-          title: result.title,
-          summary: result.summary
-        });
-      }
-    }).catch((error: unknown) => {
-      // Log the failure; Stremio has already received the HLS response and will
-      // not open an external browser regardless of what happens here.
-      logger.error('Action execution failed', {
-        reqId,
-        background: true,
-        error: error instanceof Error ? error.message : String(error),
-        action,
-        kind,
-        encodedId
-      });
-    });
+    actionOrchestrator.enqueue(action, parsed, reqId);
   });
 
   app.get('/files/:kind/:fileId', async (req, res) => {

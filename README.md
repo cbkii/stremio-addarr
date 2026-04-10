@@ -134,8 +134,22 @@ CATALOG_STALE_ERROR_SEC=120
 ```
 
 Notes:
-- `SONARR_SERIES_MONITOR` maps directly to Sonarr's `addOptions.monitor` field and accepts: `all`, `future`, `missing`, `existing`, `firstSeason`, `lastSeason`, `latestSeason`, `pilot`, `recent`, `monitorSpecials`, `unmonitorSpecials`, `none`, or `skip`.
+- `SONARR_SERIES_MONITOR` maps directly to Sonarr's `addOptions.monitor` field and accepts: `all`, `future`, `missing`, `existing`, `firstSeason`, `lastSeason`, `latestSeason`, `pilot`, `recent`, `monitorSpecials`, `unmonitorSpecials`, `none`, `skip`, `ep`, `epfuture`, or `epseason`.
 - `SONARR_SERIES_MONITOR` is parsed case-insensitively (`ALL`, `All`, `none` all work).
+- Episode-scoped custom values in `SONARR_SERIES_MONITOR`:
+  - `ep`: after add/search, monitor only the selected episode and set Sonarr `monitorNewItems=none`.
+  - `epfuture`: after add/search, monitor selected episode and all later episodes, then set Sonarr `monitorNewItems=all` (future episodes).
+  - `epseason`: after add/search, monitor selected episode through season end, then set Sonarr `monitorNewItems=none`.
+- `SONARR_MONITOR_NEW_ITEMS` controls `monitorNewItems` updates:
+  - `auto` (default): `epfuture=>all`, `ep/epseason=>none`, non-scoped default add uses `all`.
+  - `all` / `none`: force one value regardless of scoped mode.
+- `EP_COUNT`/`EP_COUNT_MOD` tune `ep` auto-upgrade behavior:
+  - `EP_COUNT_PAST` controls how many prior normal episodes are examined (default `8`).
+  - If `EP_COUNT > 1`, the addon checks up to `EP_COUNT_PAST` prior episodes before the selected pivot.
+  - If downloaded count in that window is `>= EP_COUNT`, `ep` is upgraded to `EP_COUNT_MOD` (`epfuture` or `epseason`).
+  - `EP_COUNT <= 1` disables the auto-upgrade.
+  - Because Stremio add-on requests are anonymous, this heuristic currently uses Sonarr-known downloaded episodes (not user watch-history from Stremio/Trakt).
+- `SONARR_EPISODE_READY_TIMEOUT_MS` and `SONARR_EPISODE_READY_POLL_MS` tune how long the addon waits for Sonarr episode metadata to become ready after series add.
 - `RADARR_TAGS` and `SONARR_TAGS` accept comma-separated integer tag IDs (e.g. `1,3`). Find IDs via Arr → Settings → Tags.
 - Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
 - `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
@@ -479,7 +493,7 @@ sudo journalctl -u stremio-addarr -n 100 --no-pager -o cat \
   | jq 'select(.message == "Action completed" or .message == "Action execution failed")'
 ```
 
-The route returns a tiny HLS response immediately and executes Arr add/search in the background. Validate both:
+The route returns a tiny HLS response immediately and enqueues Arr add/search work for async background processing on the Pi host. Validate both:
 - HTTP request log line for `/action/...` with `status: 200`
 - follow-up `"Action completed"` or `"Action rejected by Arr service"` entry in logs
 

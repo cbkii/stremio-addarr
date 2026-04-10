@@ -23,7 +23,19 @@ test('manifest endpoint shape sanity', async () => {
     assert.deepEqual(manifest.resources, ['stream', 'catalog']);
     assert.deepEqual(manifest.types, ['movie', 'series']);
     assert.deepEqual(manifest.idPrefixes, ['tt']);
-    assert.equal(manifest.logo, 'http://127.0.0.1:7010/assets/logo.png');
+    assert.equal(manifest.logo, 'https://raw.githubusercontent.com/cbkii/stremio-addarr/main/assets/logo.png');
+  });
+});
+
+test('manifest omits logo when manifestLogoUrl is blank', async () => {
+  const cfg = baseConfig();
+  cfg.manifestLogoUrl = '';
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/manifest.json`);
+    assert.equal(response.status, 200);
+    const manifest = (await response.json()) as { logo?: string };
+    assert.equal(manifest.logo, undefined);
   });
 });
 
@@ -136,7 +148,7 @@ test('downloaded tile launches Kodi via externalUrl when enabled', async () => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; externalUrl?: string }> };
     assert.equal(body.streams[0].name, '✅\nFile\nReady');
-    assert.ok(body.streams[0].description?.startsWith('📂 Pi  ══════════════════'));
+    assert.ok(body.streams[0].description?.startsWith('════════════════════'));
     assert.ok(body.streams[0].description?.includes('Mock Movie'), 'description should include matched title');
     assert.ok(body.streams[0].description?.includes('2020'), 'description should include matched year');
     assert.match(body.streams[0].externalUrl ?? '', /package=org.xbmc.kodi/);
@@ -181,9 +193,8 @@ test('missing movie tile triggers search action URL and does not expose secrets'
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string; behaviorHints?: { notWebReady?: boolean } }> };
-    assert.equal(body.streams[0].name, '🔍\nSearch\nRadarr');
-    assert.ok(body.streams[0].description?.startsWith('📂 Pi  ══════════════════'));
-    assert.ok(body.streams[0].description?.includes('ℹ️ "failed to play" = 📨👍'));
+    assert.equal(body.streams[0].name, '🔍🦜\nSearch\n+ DL');
+    assert.ok(body.streams[0].description?.startsWith('════════════════════'));
     assert.ok(body.streams[0].description?.includes('📲 🔗  192.168.1.50:7878'));
     assert.equal(body.streams[0].url, 'https://stremio-addarr.lan/action/search/movie/tt1234567');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true, 'Action tiles must set notWebReady to prevent watched tracking');
@@ -217,8 +228,7 @@ test('missing episode tile generates encoded Sonarr search action URL', async ()
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt7654321%3A2%3A5.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string; behaviorHints?: { notWebReady?: boolean } }> };
-    assert.equal(body.streams[0].name, '🔍\nSearch\nSonarr');
-    assert.ok(body.streams[0].description?.includes('ℹ️ "failed to play" = 📨👍'));
+    assert.equal(body.streams[0].name, '🔍🦜\nSearch\n+ DL');
     assert.ok(body.streams[0].description?.includes('📲 🔗  192.168.1.50:8989'));
     assert.equal(body.streams[0].url, 'https://stremio-addarr.lan/action/search/series/tt7654321%3A2%3A5');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
@@ -273,7 +283,7 @@ test('downloaded tile includes playback url and omits Kodi fallback when file st
       }>;
     };
     assert.equal(body.streams[0].name, '✅\nFile\nReady');
-    assert.ok(body.streams[0].description?.startsWith('📂 Pi  ══════════════════'));
+    assert.ok(body.streams[0].description?.startsWith('════════════════════'));
     assert.ok(body.streams[0].url?.startsWith('https://pi.example.com/files/movie/77?t='), 'should have a file streaming url');
     assert.equal(body.streams[0].externalUrl ? 1 : 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
@@ -304,7 +314,7 @@ test('downloaded tile has no url when file streaming is disabled', async () => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string }> };
     assert.equal(body.streams[0].name, '✅\nFile\nReady');
-    assert.ok(body.streams[0].description?.startsWith('📂 Pi  ══════════════════'));
+    assert.ok(body.streams[0].description?.startsWith('════════════════════'));
     assert.equal(body.streams[0].url, undefined, 'no url when file streaming disabled');
   });
 });

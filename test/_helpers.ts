@@ -7,6 +7,7 @@ export function baseConfig(): AppConfig {
     host: '127.0.0.1',
     port: 0,
     publicBaseUrl: 'http://127.0.0.1:7010',
+    manifestLogoUrl: 'https://raw.githubusercontent.com/cbkii/stremio-addarr/main/assets/logo.png',
     targetClient: 'android-tv',
     logLevel: 'error',
     requestTimeoutMs: 2000,
@@ -50,6 +51,12 @@ export function baseConfig(): AppConfig {
       qualityProfileId: 1,
       languageProfileId: 1,
       seriesMonitor: 'all',
+      monitorNewItems: 'auto',
+      episodeReadyTimeoutMs: 60_000,
+      episodeReadyPollMs: 1_500,
+      epCount: 2,
+      epCountPast: 8,
+      epCountMod: 'epfuture',
       tags: [],
       searchOnAdd: true
     }
