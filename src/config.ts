@@ -10,6 +10,7 @@ export interface AppConfig {
   host: string;
   port: number;
   publicBaseUrl: string;
+  manifestLogoUrl: string;
   targetClient: 'android-tv' | 'generic';
   logLevel: LogLevel;
   requestTimeoutMs: number;
@@ -287,6 +288,15 @@ export function loadConfig(): AppConfig {
   const host = readString('HOST', '127.0.0.1');
   const port = readNumber('PORT', 7010);
   const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
+  const manifestLogoEnv = readString('MANIFEST_LOGO_URL');
+  const normalizedManifestLogo = manifestLogoEnv.toLowerCase();
+  const manifestLogoUrl = normalizedManifestLogo === 'none'
+    ? ''
+    : normalizedManifestLogo === 'local'
+      ? `${publicBaseUrl}/assets/logo.png`
+      : (manifestLogoEnv
+        ? ensureHttpUrl('MANIFEST_LOGO_URL', manifestLogoEnv)
+        : 'https://raw.githubusercontent.com/cbkii/stremio-addarr/main/assets/logo.png');
   const targetClient = parseTargetClient(readString('TARGET_CLIENT', 'android-tv'));
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);
   const gracefulShutdownTimeoutMs = readNumber('GRACEFUL_SHUTDOWN_TIMEOUT_MS', 10_000);
@@ -356,6 +366,7 @@ export function loadConfig(): AppConfig {
     host,
     port,
     publicBaseUrl,
+    manifestLogoUrl,
     targetClient,
     logLevel: logLevelRaw,
     requestTimeoutMs,

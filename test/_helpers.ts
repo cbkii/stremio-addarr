@@ -7,6 +7,7 @@ export function baseConfig(): AppConfig {
     host: '127.0.0.1',
     port: 0,
     publicBaseUrl: 'http://127.0.0.1:7010',
+    manifestLogoUrl: 'https://raw.githubusercontent.com/cbkii/stremio-addarr/main/assets/logo.png',
     targetClient: 'android-tv',
     logLevel: 'error',
     requestTimeoutMs: 2000,
