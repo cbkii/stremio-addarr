@@ -29,7 +29,7 @@ export function baseConfig(): AppConfig {
       playbackMode: 'kodi'
     },
     kodi: {
-      enabled: true,
+      enabled: false,
       packageName: 'org.xbmc.kodi'
     },
     radarr: {
@@ -50,7 +50,7 @@ export function baseConfig(): AppConfig {
       apiKey: 'sonarr-key',
       rootFolderPath: '/tv',
       qualityProfileId: 1,
-      languageProfileId: 1,
+      languageProfileId: null,
       seriesMonitor: 'all',
       monitorNewItems: 'auto',
       episodeReadyTimeoutMs: 60_000,

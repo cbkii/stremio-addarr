@@ -8,6 +8,7 @@ import type { WatchedLookup, WatchedLookupDiagnostics } from './watched.js';
 interface TraktTokenResponse {
   access_token?: string;
   refresh_token?: string;
+  expires_in?: number;
 }
 
 interface PersistedTraktState {
@@ -168,7 +169,7 @@ export class TraktWatchedLookup implements WatchedLookup {
     }
     this.accessToken = response.access_token;
     this.refreshToken = response.refresh_token;
-    this.tokenExpiresAt = Date.now() + TRAKT_TOKEN_TTL_MS;
+    this.tokenExpiresAt = Date.now() + (response.expires_in ?? TRAKT_TOKEN_TTL_MS / 1000) * 1000;
     await this.persistState();
   }
 

@@ -58,7 +58,7 @@ export interface AppConfig {
     apiKey: string;
     rootFolderPath: string;
     qualityProfileId: number;
-    languageProfileId: number;
+    languageProfileId: number | null;
     seriesMonitor:
       | 'all'
       | 'future'
@@ -315,14 +315,8 @@ export function loadConfig(): AppConfig {
   const forcedShutdownExitCodeRaw = readNumber('FORCED_SHUTDOWN_EXIT_CODE', 0);
   const statusCacheTtlMs = readNumber('STATUS_CACHE_TTL_MS', 30000);
   const serviceHealthCacheTtlMs = readNumber('SERVICE_HEALTH_CACHE_TTL_MS', 10000);
-  const streamCacheMaxAgeSec = readNumber(
-    'STREAM_CACHE_MAX_AGE',
-    readNumber('STREAM_CACHE_MAX_AGE_SEC', 2)
-  );
-  const streamStaleRevalidateSec = readNumber(
-    'STREAM_STALE_REVALIDATE',
-    readNumber('STREAM_STALE_REVALIDATE_SEC', 5)
-  );
+  const streamCacheMaxAgeSec = readNumber('STREAM_CACHE_MAX_AGE', 2);
+  const streamStaleRevalidateSec = readNumber('STREAM_STALE_REVALIDATE', 5);
   const catalogPageSize = readNumber('CATALOG_PAGE_SIZE', 25);
   const catalogCacheTtlMs = readNumber('CATALOG_CACHE_TTL_MS', 5000);
   const catalogCacheMaxAgeSec = readNumber('CATALOG_CACHE_MAX_AGE_SEC', 15);
@@ -410,7 +404,7 @@ export function loadConfig(): AppConfig {
       playbackMode: fileStreamingPlaybackMode
     },
     kodi: {
-      enabled: readBoolean('KODI_ENABLED', true),
+      enabled: readBoolean('KODI_ENABLED', false),
       packageName: readString('KODI_PACKAGE', 'org.xbmc.kodi')
     },
     radarr: {
@@ -433,7 +427,10 @@ export function loadConfig(): AppConfig {
         apiKey: readString('SONARR_API_KEY'),
         rootFolderPath: readString('SONARR_ROOT_FOLDER_PATH'),
         qualityProfileId: readNumber('SONARR_QUALITY_PROFILE_ID', 1),
-        languageProfileId: readNumber('SONARR_LANGUAGE_PROFILE_ID', 1),
+        languageProfileId: (() => {
+          const raw = readNumber('SONARR_LANGUAGE_PROFILE_ID', 0);
+          return raw > 0 ? raw : null;
+        })(),
         seriesMonitor: sonarrEnabled
           ? parseSonarrSeriesMonitor(readString('SONARR_SERIES_MONITOR', 'all'))
           : 'all',
@@ -480,9 +477,6 @@ export function loadConfig(): AppConfig {
     readRequiredString('SONARR_ROOT_FOLDER_PATH');
     if (config.sonarr.qualityProfileId <= 0) {
       throw new Error('SONARR_QUALITY_PROFILE_ID must be greater than 0.');
-    }
-    if (config.sonarr.languageProfileId <= 0) {
-      throw new Error('SONARR_LANGUAGE_PROFILE_ID must be greater than 0.');
     }
     if (config.sonarr.episodeReadyPollMs > config.sonarr.episodeReadyTimeoutMs) {
       throw new Error('SONARR_EPISODE_READY_POLL_MS must be less than or equal to SONARR_EPISODE_READY_TIMEOUT_MS.');

@@ -135,6 +135,7 @@ test('catalog handler degrades to empty metas when Arr services throw', async ()
 test('downloaded tile launches Kodi via externalUrl when enabled', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
+  cfg.kodi.enabled = true;
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const path = new URL(String(input)).pathname + new URL(String(input)).search;
@@ -373,6 +374,7 @@ test('downloaded tile has no url when movieFile id is absent and keeps Kodi fall
   cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
   cfg.fileStreaming.playbackMode = 'direct';
   cfg.radarr.enabled = true;
+  cfg.kodi.enabled = true;
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const urlPath = new URL(String(input)).pathname;
@@ -399,6 +401,7 @@ test('episode downloaded tile keeps Kodi fallback in direct mode when episodeFil
   cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
   cfg.fileStreaming.playbackMode = 'direct';
   cfg.sonarr.enabled = true;
+  cfg.kodi.enabled = true;
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const parsed = new URL(String(input));
@@ -472,6 +475,7 @@ test('downloaded tile uses Kodi only when playback mode is set to kodi', async (
   cfg.fileStreaming.secret = 'test-secret-32-chars-long-enough!!';
   cfg.fileStreaming.playbackMode = 'kodi';
   cfg.radarr.enabled = true;
+  cfg.kodi.enabled = true;
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const urlPath = new URL(String(input)).pathname;

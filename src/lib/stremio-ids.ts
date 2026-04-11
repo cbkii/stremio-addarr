@@ -53,11 +53,4 @@ export function parseStremioId(type: 'movie' | 'series', id: string): ParsedStre
   };
 }
 
-export function toStremioDetailLink(parsed: ParsedStremioId): string {
-  if (parsed.kind === 'movie') {
-    return `stremio:///detail/movie/${parsed.imdbId}/${parsed.imdbId}`;
-  }
 
-  const videoId = parsed.videoId ?? parsed.imdbId;
-  return `stremio:///detail/series/${parsed.imdbId}/${videoId}`;
-}

@@ -205,7 +205,7 @@ export class SonarrClient {
       imdbId: lookup.imdbId,
       tvdbId: lookup.tvdbId,
       qualityProfileId: this.config.sonarr.qualityProfileId,
-      languageProfileId: this.config.sonarr.languageProfileId,
+      ...(this.config.sonarr.languageProfileId != null ? { languageProfileId: this.config.sonarr.languageProfileId } : {}),
       rootFolderPath: this.config.sonarr.rootFolderPath,
       monitored: true,
       ...(!useEpisodeScopedMonitor
@@ -526,9 +526,9 @@ export class SonarrClient {
     }
   }
 
-  private async isEpisodeQueued(episodeId: number, seriesId: number): Promise<boolean> {
+  private async isEpisodeQueued(episodeId: number, _seriesId: number): Promise<boolean> {
     const records = await this.listQueueRecords();
-    return records.some((item) => item.episodeId === episodeId || (item.seriesId === seriesId && item.episodeId == null));
+    return records.some((item) => item.episodeId === episodeId);
   }
 
   private async listQueueRecords(): Promise<SonarrQueueRecord[]> {
@@ -643,8 +643,10 @@ export class SonarrClient {
     if (lookup.tvdbId != null) {
       return series.find((item) => item.tvdbId === lookup.tvdbId);
     }
-    if (lookup.title) {
-      return series.find((item) => item.title.toLowerCase() === lookup.title.toLowerCase());
+    if (lookup.title && lookup.year != null) {
+      return series.find(
+        (item) => item.title.toLowerCase() === lookup.title.toLowerCase() && item.year === lookup.year
+      );
     }
     return undefined;
   }
