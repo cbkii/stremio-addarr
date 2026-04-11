@@ -214,6 +214,96 @@ test('falls back to legacy border line when Trakt is failing', async () => {
   assert.equal(firstLine, '════════════════════');
 });
 
+test('not_added movie shows Trakt release date in description', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') return new Response('[]', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup('2021-03-15', undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('movie', 'tt9999999'));
+  const desc = tiles[0]?.description ?? '';
+  assert.ok(desc.includes('Not in Radarr'));
+  assert.ok(desc.includes('(15 Mar 21)'));
+});
+
+test('not_added movie shows 📽 Not in Radarr without date when Trakt returns nothing', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') return new Response('[]', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('movie', 'tt9999999'));
+  const desc = tiles[0]?.description ?? '';
+  // Shows plain "Not in Radarr" — no ?📅 noise for not-yet-added items.
+  assert.ok(desc.includes('Not in Radarr'));
+  assert.ok(!desc.includes('(?📅)'));
+});
+
+test('series_not_added shows episode+date from Trakt in description', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/series') return new Response('[]', { status: 200 });
+    if (path.startsWith('/api/v3/series/lookup')) return new Response('[]', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, '2024-03-22')
+  });
+  const tiles = await service.buildTiles(parseStremioId('series', 'tt8888888:3:7'));
+  const desc = tiles[0]?.description ?? '';
+  assert.ok(desc.includes('Not in Sonarr'));
+  assert.ok(desc.includes('S03E07 (22 Mar 24)'));
+  assert.ok(desc.split('\n').length <= 5);
+});
+
+test('series_not_added shows episode identifier even when no date available', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/series') return new Response('[]', { status: 200 });
+    if (path.startsWith('/api/v3/series/lookup')) return new Response('[]', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('series', 'tt8888888:3:7'));
+  const desc = tiles[0]?.description ?? '';
+  assert.ok(desc.includes('Not in Sonarr'));
+  // Episode identifier always shown even without a date.
+  assert.ok(desc.includes('S03E07'));
+  assert.ok(desc.split('\n').length <= 5);
+});
+
 test('formats datetime release in configured TZ when possible', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;

@@ -134,12 +134,11 @@ export class SonarrClient {
   }
 
   private pickEpisodeReleaseDate(airDateUtc?: string, airDate?: string): string | undefined {
-    const parsed = [airDateUtc, airDate]
-      .filter((value): value is string => Boolean(value))
-      .map((value) => ({ value, ms: Date.parse(value) }))
-      .filter((value) => Number.isFinite(value.ms))
-      .sort((a, b) => a.ms - b.ms);
-    return parsed[0]?.value;
+    // Prefer the broadcast date (date-only, TZ-neutral) so display is not shifted
+    // by the viewer's timezone relative to the UTC air timestamp.
+    if (airDate && Number.isFinite(Date.parse(airDate))) return airDate;
+    if (airDateUtc && Number.isFinite(Date.parse(airDateUtc))) return airDateUtc;
+    return undefined;
   }
 
   async addSeriesByImdbId(
