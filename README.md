@@ -47,15 +47,23 @@ npm --version
 - Node must be **20+**.
 - Sonarr and/or Radarr must be reachable from this host.
 - You need a service account (user and group) that exist on your host.
+- `quick.sh` requires: `gh`, `sudo`, `systemctl`, `curl`, `tar`, `sha256sum`, `file`, `diff`, and `nano`.
 
-Set these once and reuse them in all commands:
+Service account behavior with `quick.sh`:
+- By default, `quick.sh` uses your current shell account:
+  - user: `$(whoami)`
+  - group: `$(id -gn)`
+- If you run `stremio-addarr` as a dedicated service account, pass it explicitly:
 
 ```bash
-export SVC_USER="$(whoami)"
-export SVC_GROUP="$(id -gn)"
+bash quick.sh install --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
 ```
 
-If you run the service as a dedicated account, set `SVC_USER`/`SVC_GROUP` to that account instead.
+The same override works for upgrades:
+
+```bash
+bash quick.sh upgrade --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
+```
 
 ---
 
