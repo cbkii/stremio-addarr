@@ -9,9 +9,9 @@ It also exposes two browseable personal catalogs in Stremio Discover/Board:
 These catalogue rows combine **active downloads and recent imports** from your local Arr services.
 Cards intentionally use minimal metadata (IMDb id, name, description, releaseInfo) and rely on Stremio/Cinemeta for artwork.
 
-This README is the **canonical install and upgrade guide**.
+> Designed and tested on LAN-connected Raspberry Pi 5 [Debian Trixie] and Android 9 TV
 
-Designed for LAN-connected Raspberry Pi 5 (Debian Trixie) and Android 9 TV.
+This README is the **canonical install and upgrade guide**.
 
 ---
 
@@ -69,13 +69,13 @@ bash quick.sh upgrade --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
 
 ## 3) Table of contents / choose your path
 
-- **Quick install (recommended)** → go to [4) Quick install](#4-quick-install-recommended)
-- **Quick upgrade (recommended)** → go to [5) Quick upgrade](#5-quick-upgrade-recommended)
-- **Runtime checks** → go to [6) Runtime checks](#6-runtime-checks)
-- **Logs and diagnostics** → go to [7) Logs and diagnostics](#7-logs-and-diagnostics)
-- **Android TV + Stremio troubleshooting** → go to [8) Android TV + Stremio troubleshooting](#8-android-tv--stremio-troubleshooting)
-- **Troubleshooting playbook** → go to [9) Troubleshooting playbook](#9-troubleshooting-playbook)
-- **Release and hosting docs** → go to [10) Release and hosting docs](#10-release-and-hosting-docs)
+- **[4) Quick install](#4-quick-install-recommended)**
+- **[5) Quick upgrade](#5-quick-upgrade-recommended)**
+- **[6) Runtime checks](#6-runtime-checks)**
+- **[7) Logs and diagnostics](#7-logs-and-diagnostics)**
+- **[8) Android TV + Stremio troubleshooting](#8-android-tv--stremio-troubleshooting)**
+- **[9) Troubleshooting playbook](#9-troubleshooting-playbook)**
+- **[10) Release and hosting docs](#10-release-and-hosting-docs)**
 - **Docker (optional alternative)**: `Dockerfile` and `docker-compose.example.yml` are provided for containerized deployment; the systemd path in this README remains the canonical/default setup.
 
 ---
