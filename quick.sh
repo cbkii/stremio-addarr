@@ -151,6 +151,66 @@ normalize_tag() {
   fi
 }
 
+# Helper: verify the downloaded archive checksum.
+# Primary path: checksum file in TMP_DIR.
+# Fallback path: GitHub release asset digest metadata (sha256) when checksum
+# validation fails for any reason.
+verify_download_checksum() {
+  say "Verify checksum integrity"
+  local log="$TMP_DIR/cmd.log"
+  local check_cmd=(sha256sum -c "$CHECKSUM_NAME")
+
+  if (cd "$TMP_DIR" && "${check_cmd[@]}") >"$log" 2>&1; then
+    ok "Verify checksum integrity"
+    return 0
+  fi
+
+  warn "Checksum file verification failed; attempting GitHub asset digest fallback."
+  echo -e "${C_YELLOW}${C_BOLD}----- CHECKSUM COMMAND OUTPUT BEGIN -----${C_RESET}"
+  cat "$log"
+  echo -e "${C_YELLOW}${C_BOLD}----- CHECKSUM COMMAND OUTPUT END -----${C_RESET}"
+
+  local jq_expr=".assets[] | select(.name == \"$ASSET_NAME\") | .digest"
+  local gh_args=(release view --repo "$REPO" --json assets --jq "$jq_expr")
+  if [[ -n "$TAG" ]]; then
+    gh_args=(release view "$TAG" --repo "$REPO" --json assets --jq "$jq_expr")
+  fi
+
+  local digest_raw=""
+  if ! digest_raw="$(gh "${gh_args[@]}" 2>"$log")"; then
+    fail "Unable to query GitHub release asset digest metadata."
+    echo -e "${C_RED}${C_BOLD}----- COMMAND OUTPUT BEGIN -----${C_RESET}"
+    cat "$log"
+    echo -e "${C_RED}${C_BOLD}----- COMMAND OUTPUT END -----${C_RESET}"
+    exit 1
+  fi
+
+  local expected_digest
+  expected_digest="$(echo "$digest_raw" | tr -d '\r' | head -n 1)"
+  if [[ "$expected_digest" == sha256:* ]]; then
+    expected_digest="${expected_digest#sha256:}"
+  fi
+
+  if [[ ! "$expected_digest" =~ ^[a-fA-F0-9]{64}$ ]]; then
+    fail "GitHub release asset digest metadata is missing or invalid for $ASSET_NAME."
+    echo "Received digest value: ${expected_digest:-<empty>}"
+    exit 1
+  fi
+
+  local actual_digest
+  actual_digest="$(sha256sum "$TMP_DIR/$ASSET_NAME" | awk '{print $1}')"
+
+  if [[ "$actual_digest" == "$expected_digest" ]]; then
+    ok "Checksum verified via GitHub release asset digest metadata."
+    return 0
+  fi
+
+  fail "Checksum mismatch after fallback verification."
+  echo "Expected (metadata): $expected_digest"
+  echo "Actual   (download): $actual_digest"
+  exit 1
+}
+
 if [[ -n "$TAG" ]]; then
   TAG="$(normalize_tag "$TAG")"
 fi
@@ -183,7 +243,7 @@ if [[ -n "$TAG" ]]; then
 fi
 run_step "Download tarball + checksum from GitHub release" gh "${DL_ARGS[@]}"
 
-run_step "Verify checksum integrity" sha256sum -c "$TMP_DIR/$CHECKSUM_NAME"
+verify_download_checksum
 run_step "Validate archive mime type" bash -lc "file '$TMP_DIR/$ASSET_NAME' | grep -q 'gzip'"
 
 ###############################################################################
