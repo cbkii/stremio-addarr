@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ArrStatusService } from '../src/services/status.js';
 import type { WatchedLookup } from '../src/services/watched.js';
+import type { TmdbLookup } from '../src/services/tmdb.js';
 import type { TraktLookup } from '../src/services/trakt.js';
 import { parseStremioId } from '../src/lib/stremio-ids.js';
 import { baseConfig } from './_helpers.js';
@@ -30,6 +31,21 @@ class FailingTraktWatchedLookup extends StaticWatchedLookup {
 }
 
 class StaticTraktLookup implements TraktLookup {
+  constructor(
+    private readonly movieDate?: string,
+    private readonly episodeDate?: string
+  ) {}
+
+  async getMovieReleaseDate(_imdbId: string): Promise<string | undefined> {
+    return this.movieDate;
+  }
+
+  async getEpisodeReleaseDate(_imdbId: string, _season?: number, _episode?: number): Promise<string | undefined> {
+    return this.episodeDate;
+  }
+}
+
+class StaticTmdbLookup implements TmdbLookup {
   constructor(
     private readonly movieDate?: string,
     private readonly episodeDate?: string
@@ -191,6 +207,30 @@ test('uses Trakt as final fallback when Arr episode date is missing', async () =
   assert.ok((tiles[0]?.description ?? '').includes('S02E05 (09 Jan 24)'));
 });
 
+test('uses TMDB fallback when Arr and Trakt do not provide an episode date', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/series') return new Response('[{"id":10,"imdbId":"tt7654321","title":"Mock Show"}]', { status: 200 });
+    if (path.startsWith('/api/v3/episode?seriesId=10')) {
+      return new Response('[{"id":42,"seasonNumber":2,"episodeNumber":5,"monitored":true,"hasFile":false}]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, undefined),
+    tmdbLookup: new StaticTmdbLookup(undefined, '2024-01-10')
+  });
+  const tiles = await service.buildTiles(parseStremioId('series', 'tt7654321:2:5'));
+  assert.ok((tiles[0]?.description ?? '').includes('S02E05 (10 Jan 24)'));
+});
+
 test('falls back to legacy border line when Trakt is failing', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
@@ -255,6 +295,26 @@ test('not_added movie shows 📽 Not in Radarr without date when Trakt returns n
   // Shows plain "Not in Radarr" — no ?📅 noise for not-yet-added items.
   assert.ok(desc.includes('Not in Radarr'));
   assert.ok(!desc.includes('(?📅)'));
+});
+
+test('uses TMDB movie date fallback when Arr and Trakt dates are unavailable', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') return new Response('[]', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup('1900-01-01', undefined),
+    tmdbLookup: new StaticTmdbLookup('2024-06-01', undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('movie', 'tt9999999'));
+  assert.ok((tiles[0]?.description ?? '').includes('(01 Jun 24)'));
 });
 
 test('series_not_added shows episode+date from Trakt in description', async () => {

@@ -4,6 +4,7 @@ import { buildFileToken } from '../lib/file-tokens.js';
 import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
+import { TmdbApiLookup, type TmdbLookup } from './tmdb.js';
 import { TraktHtmlLookup, TraktApiLookup, type TraktLookup } from './trakt.js';
 import { NoopWatchedLookup, type WatchedLookup } from './watched.js';
 
@@ -118,26 +119,58 @@ export class ArrStatusService {
   private readonly healthCache: TtlCache<{ radarr: ServiceHealth; sonarr: ServiceHealth }>;
   private readonly watchedLookup: WatchedLookup;
   private readonly traktLookup: TraktLookup;
+  private readonly tmdbLookup?: TmdbLookup;
 
-  constructor(private readonly config: AppConfig, deps?: { watchedLookup?: WatchedLookup; traktLookup?: TraktLookup }) {
+  constructor(private readonly config: AppConfig, deps?: { watchedLookup?: WatchedLookup; traktLookup?: TraktLookup; tmdbLookup?: TmdbLookup }) {
     this.radarr = new RadarrClient(config);
     this.sonarr = new SonarrClient(config);
     this.healthCache = new TtlCache(config.serviceHealthCacheTtlMs);
     this.watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
     this.traktLookup = deps?.traktLookup ?? (config.traktSync.clientId ? new TraktApiLookup(config.traktSync.clientId) : new TraktHtmlLookup());
+    this.tmdbLookup = deps?.tmdbLookup ?? (config.tmdb.authToken ? new TmdbApiLookup(config.tmdb.authToken, config.tmdb.apiBaseUrl, config.tmdb.region) : undefined);
+  }
+
+  private normalizeDateCandidate(value?: string): string | undefined {
+    if (!value) return undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const parsed = Date.parse(`${value}T00:00:00Z`);
+      if (!Number.isFinite(parsed)) return undefined;
+      const year = Number(value.slice(0, 4));
+      if (!Number.isFinite(year) || year <= 1901) return undefined;
+      return value;
+    }
+    const parsed = Date.parse(value);
+    if (!Number.isFinite(parsed)) return undefined;
+    const year = new Date(parsed).getUTCFullYear();
+    if (!Number.isFinite(year) || year <= 1901) return undefined;
+    return value;
   }
 
   private async resolveMovieReleaseDate(imdbId: string, arrReleaseDate?: string): Promise<string> {
-    if (formatReleaseDate(arrReleaseDate, this.config.timeZone)) return arrReleaseDate!;
+    const arr = this.normalizeDateCandidate(arrReleaseDate);
+    if (arr) return arr;
     const trakt = await this.traktLookup.getMovieReleaseDate(imdbId);
-    if (formatReleaseDate(trakt, this.config.timeZone)) return trakt!;
+    const traktDate = this.normalizeDateCandidate(trakt);
+    if (traktDate) return traktDate;
+    if (this.tmdbLookup) {
+      const tmdb = await this.tmdbLookup.getMovieReleaseDate(imdbId);
+      const tmdbDate = this.normalizeDateCandidate(tmdb);
+      if (tmdbDate) return tmdbDate;
+    }
     return '?📅';
   }
 
   private async resolveEpisodeReleaseDate(imdbId: string, season?: number, episode?: number, arrReleaseDate?: string): Promise<string> {
-    if (formatReleaseDate(arrReleaseDate, this.config.timeZone)) return arrReleaseDate!;
+    const arr = this.normalizeDateCandidate(arrReleaseDate);
+    if (arr) return arr;
     const trakt = await this.traktLookup.getEpisodeReleaseDate(imdbId, season, episode);
-    if (formatReleaseDate(trakt, this.config.timeZone)) return trakt!;
+    const traktDate = this.normalizeDateCandidate(trakt);
+    if (traktDate) return traktDate;
+    if (this.tmdbLookup) {
+      const tmdb = await this.tmdbLookup.getEpisodeReleaseDate(imdbId, season, episode);
+      const tmdbDate = this.normalizeDateCandidate(tmdb);
+      if (tmdbDate) return tmdbDate;
+    }
     return '?📅';
   }
 
