@@ -288,10 +288,19 @@ jobs:
             || { echo "::error::Primary archive missing"; exit 1; }
           test -f dist/stremio-addarr-install.tar.gz.sha256 \
             || { echo "::error::Checksum file missing"; exit 1; }
+          cp quick.sh dist/quick.sh
+          chmod +x dist/quick.sh
+          (cd dist && sha256sum quick.sh > quick.sh.sha256)
+          test -f dist/quick.sh \
+            || { echo "::error::quick.sh asset missing"; exit 1; }
+          test -f dist/quick.sh.sha256 \
+            || { echo "::error::quick.sh checksum missing"; exit 1; }
           echo "Archive contents:"
           tar -tzf dist/stremio-addarr-install.tar.gz | sort
           echo "Checksum:"
           cat dist/stremio-addarr-install.tar.gz.sha256
+          echo "quick.sh checksum:"
+          cat dist/quick.sh.sha256
 
       # ── Dry-run: stop here ────────────────────────────────────────────
       - name: Dry-run summary
@@ -410,6 +419,8 @@ jobs:
           gh release create "${TAG}" \
             dist/stremio-addarr-install.tar.gz \
             dist/stremio-addarr-install.tar.gz.sha256 \
+            dist/quick.sh \
+            dist/quick.sh.sha256 \
             --title "${TAG}" \
             --notes-file /tmp/release-body.md \
             --latest
@@ -429,6 +440,10 @@ jobs:
             || { echo "::error::Missing asset: stremio-addarr-install.tar.gz"; exit 1; }
           echo "$ASSETS" | grep -qx 'stremio-addarr-install.tar.gz.sha256' \
             || { echo "::error::Missing asset: stremio-addarr-install.tar.gz.sha256"; exit 1; }
+          echo "$ASSETS" | grep -qx 'quick.sh' \
+            || { echo "::error::Missing asset: quick.sh"; exit 1; }
+          echo "$ASSETS" | grep -qx 'quick.sh.sha256' \
+            || { echo "::error::Missing asset: quick.sh.sha256"; exit 1; }
           echo "### ✅ Verified published assets" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "$ASSETS" >> "$GITHUB_STEP_SUMMARY"
