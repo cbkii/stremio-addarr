@@ -108,6 +108,7 @@ test('movie missing description mentions UNWATCHED and includes a search action'
   const tiles = await service.buildTiles(parseStremioId('movie', 'tt1234567'));
   const lines = (tiles[0]?.description ?? '').split('\n');
   assert.ok(lines.some(l => l.includes('UNWATCHED')), 'description should mention UNWATCHED');
+  assert.ok(lines.some(l => l.includes('SEARCH')), 'description should include a search action prompt');
   assert.ok(lines.length <= 5);
 });
 
@@ -157,6 +158,7 @@ test('episode missing description mentions UNWATCHED and includes a search actio
   const tiles = await service.buildTiles(parseStremioId('series', 'tt7654321:2:5'));
   const lines = (tiles[0]?.description ?? '').split('\n');
   assert.ok(lines.some(l => l.includes('UNWATCHED')), 'description should mention UNWATCHED');
+  assert.ok(lines.some(l => l.includes('SEARCH')), 'description should include a search action prompt');
   assert.ok(lines.length <= 5);
 });
 
