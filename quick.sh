@@ -19,7 +19,10 @@ if [[ -z "$MODE" || "$MODE" == "-h" || "$MODE" == "--help" ]]; then
   cat <<'EOF'
 Usage:
   bash quick.sh install [--repo owner/name] [--tag vX.Y.Z] [--svc-user USER] [--svc-group GROUP]
-  bash quick.sh upgrade [--repo owner/name] [--tag vX.Y.Z] [--svc-user USER] [--svc-group GROUP]
+  bash quick.sh upgrade [--repo owner/name] [--tag vX.Y.Z] [--svc-user USER] [--svc-group GROUP] [--no-trakt]
+
+Flags:
+  --no-trakt  Skip the Trakt OAuth setup prompt (useful on repeated upgrade runs)
 
 Defaults:
   --repo cbkii/stremio-addarr
@@ -40,6 +43,7 @@ INSTALL_DIR="/opt/stremio-addarr"
 SERVICE_PATH="/etc/systemd/system/stremio-addarr.service"
 ASSET_NAME="stremio-addarr-install.tar.gz"
 CHECKSUM_NAME="${ASSET_NAME}.sha256"
+SKIP_TRAKT=false
 
 # Parse optional flags (repo/tag/service account overrides).
 while [[ $# -gt 0 ]]; do
@@ -48,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --tag) TAG="$2"; shift 2 ;;
     --svc-user) SVC_USER="$2"; shift 2 ;;
     --svc-group) SVC_GROUP="$2"; shift 2 ;;
+    --no-trakt) SKIP_TRAKT=true; shift ;;
     *)
       echo "Unknown argument: $1"
       exit 1
@@ -72,9 +77,12 @@ ok() { echo -e "${C_GREEN}${C_BOLD}[OK]${C_RESET} $*"; }
 warn() { echo -e "${C_YELLOW}${C_BOLD}[WARN]${C_RESET} $*"; }
 fail() { echo -e "${C_RED}${C_BOLD}[FAIL]${C_RESET} $*"; }
 cmd() { echo -e "${C_CYAN}${C_BOLD}[»]${C_RESET} $*"; }
+ask() { echo -e "${C_YELLOW}${C_BOLD}[?]${C_RESET} $*"; }
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+_cleanup() { rm -rf "$TMP_DIR"; }
+trap '_cleanup' EXIT
+trap '_cleanup; echo; warn "Aborted by signal. .env and service state may be inconsistent — review before re-running."; exit 130' INT TERM
 
 # Helper: run one named step, capture output, and show a clear failure block.
 run_step() {
@@ -124,7 +132,8 @@ prompt_confirm() {
   local question="$1"
   local ans=""
   while true; do
-    read -r -p "$question [y/N]: " ans
+    ask "$question"
+    read -r -p "${C_YELLOW}${C_BOLD}[y/N]: ${C_RESET}" ans
     case "${ans,,}" in
       y|yes) return 0 ;;
       n|no|"") return 1 ;;
@@ -224,8 +233,8 @@ prompt_gate() {
   local editor="${EDITOR:-nano}"
   while true; do
     echo
-    echo -e "${C_BOLD}${title}${C_RESET}"
-    read -r -p "Approve and continue? [y] yes / [n] stop and edit with ${editor}: " ans
+    ask "${C_BOLD}${title}${C_RESET}"
+    read -r -p "${C_YELLOW}${C_BOLD}Approve and continue? [y] yes / [n] stop and edit with ${editor}: ${C_RESET}" ans
     case "${ans,,}" in
       y|yes)
         ok "Approved by operator."
@@ -264,7 +273,9 @@ print_status_line() {
 load_env_file() {
   if [[ -f "$INSTALL_DIR/.env" ]]; then
     set +u
-    # shellcheck disable=SC1090
+    # WARNING: .env is sourced directly. It must be operator-controlled and
+    # must not contain untrusted shell code.
+    # shellcheck disable=SC1090,SC1091
     source "$INSTALL_DIR/.env"
     set -u
   fi
@@ -275,8 +286,13 @@ upsert_env_key() {
   local value="$2"
   local env_file="$INSTALL_DIR/.env"
   if grep -Eq "^[[:space:]]*${key}=" "$env_file"; then
+    # Active (uncommented) assignment exists — update it in place
     sed -i -E "s|^[[:space:]]*${key}=.*$|${key}=${value}|" "$env_file"
+  elif grep -Eq "^[[:space:]]*#[[:space:]]*${key}=" "$env_file"; then
+    # Only a commented-out version exists — replace the first comment with the live assignment
+    sed -i -E "0,/^[[:space:]]*#[[:space:]]*${key}=.*$/{s|^[[:space:]]*#[[:space:]]*${key}=.*$|${key}=${value}|}" "$env_file"
   else
+    # Key is absent entirely — append
     printf '\n%s=%s\n' "$key" "$value" >> "$env_file"
   fi
 }
@@ -303,17 +319,28 @@ configure_trakt_oauth() {
   local short_access=""
 
   if [[ -z "$trakt_client_id" ]]; then
-    read -r -p "Enter TRAKT_CLIENT_ID: " trakt_client_id
+    ask "Enter TRAKT_CLIENT_ID:"
+    read -r -p "${C_YELLOW}${C_BOLD}TRAKT_CLIENT_ID: ${C_RESET}" trakt_client_id
     upsert_env_key "TRAKT_CLIENT_ID" "$trakt_client_id"
   fi
   if [[ -z "$trakt_client_secret" ]]; then
-    read -r -p "Enter TRAKT_CLIENT_SECRET: " trakt_client_secret
+    ask "Enter TRAKT_CLIENT_SECRET:"
+    read -r -p "${C_YELLOW}${C_BOLD}TRAKT_CLIENT_SECRET: ${C_RESET}" trakt_client_secret
     upsert_env_key "TRAKT_CLIENT_SECRET" "$trakt_client_secret"
+  fi
+
+  # Validate credentials are present before building the auth URL
+  if [[ -z "$trakt_client_id" || -z "$trakt_client_secret" ]]; then
+    fail "TRAKT_CLIENT_ID and TRAKT_CLIENT_SECRET are required for OAuth. Skipping."
+    return 0
   fi
 
   upsert_env_key "TRAKT_API_BASE_URL" "$trakt_api_base_url"
   upsert_env_key "TRAKT_REDIRECT_URI" "$trakt_redirect_uri"
 
+  # Intentionally minimal URL-encode: only handles the characters present in the
+  # known OOB redirect URI (urn:ietf:wg:oauth:2.0:oob). If TRAKT_REDIRECT_URI is
+  # ever changed to a different value, this encoding logic must be revisited.
   local encoded_redirect_uri
   encoded_redirect_uri="$(printf '%s' "$trakt_redirect_uri" | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's/\//%2F/g')"
   local auth_url="https://trakt.tv/oauth/authorize?response_type=code&client_id=${trakt_client_id}&redirect_uri=${encoded_redirect_uri}"
@@ -321,7 +348,17 @@ configure_trakt_oauth() {
   echo "1) Open this URL in any browser and approve access:"
   echo "   $auth_url"
   echo "2) Copy the authorization code shown by Trakt."
-  read -r -p "Paste authorization code: " code
+  ask "Paste authorization code:"
+  read -r -p "${C_YELLOW}${C_BOLD}Authorization code: ${C_RESET}" code
+
+  # Trim leading/trailing whitespace from pasted code
+  code="${code#"${code%%[![:space:]]*}"}"
+  code="${code%"${code##*[![:space:]]}"}"
+
+  if [[ -z "$code" ]]; then
+    fail "Authorization code was empty. Skipping Trakt OAuth."
+    return 0
+  fi
 
   say "Exchange authorization code for refresh token"
   cmd "curl -sS -X POST ${trakt_api_base_url}/oauth/token -H Content-Type: application/json ..."
@@ -349,18 +386,51 @@ configure_trakt_oauth() {
   fi
 
   upsert_env_key "TRAKT_REFRESH_TOKEN" "$refresh_token"
+  upsert_env_key "TRAKT_ACCESS_TOKEN" "${access_token:-}"
   upsert_env_key "TRAKT_SYNC_ENABLED" "true"
-  if ! grep -Eq '^[[:space:]]*TRAKT_SYNC_MINS=' "$INSTALL_DIR/.env"; then
+  # Only set TRAKT_SYNC_MINS if it does not already have a valid numeric value;
+  # an existing blank value is treated as absent to prevent the service from
+  # crashing with "must be a number".
+  if ! grep -Eq '^[[:space:]]*TRAKT_SYNC_MINS=[[:space:]]*[0-9]+' "$INSTALL_DIR/.env"; then
     upsert_env_key "TRAKT_SYNC_MINS" "360"
   fi
 
   short_refresh="${refresh_token:0:6}...${refresh_token: -4}"
   short_access="${access_token:0:6}...${access_token: -4}"
   ok "Stored Trakt OAuth tokens in .env (refresh=${short_refresh}, access=${short_access})."
-  warn "Restart service to pick up updated TRAKT_* values."
+
+  # Restart the service so TRAKT_* values (including TRAKT_SYNC_MINS) are picked up.
+  # systemd does not hot-reload EnvironmentFile, so a restart is required.
+  if systemctl is-active --quiet stremio-addarr 2>/dev/null; then
+    run_step "Restart stremio-addarr to apply Trakt OAuth config" sudo systemctl restart stremio-addarr
+    wait_for_service stremio-addarr || true
+  else
+    warn "Service was not active; skipping restart. Start it manually after reviewing .env."
+  fi
 }
 
 VERIFICATION_FAILURES=0
+
+# Helper: poll until service becomes active or timeout expires.
+# Does not exit the script on timeout — verification section will catch it.
+wait_for_service() {
+  local svc="$1"
+  local timeout="${2:-10}"
+  local i=0
+  while (( i < timeout )); do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      ok "Service $svc is active."
+      return 0
+    fi
+    sleep 1
+    (( i++ )) || true
+  done
+  warn "Service $svc did not become active within ${timeout}s."
+  warn "Recent logs:"
+  sudo journalctl -u "$svc" -n 20 --no-pager || true
+  return 1
+}
+
 run_verification() {
   local desc="$1"; shift
   local log="$TMP_DIR/verify.log"
@@ -461,10 +531,19 @@ echo "Service account target: ${SVC_USER}:${SVC_GROUP}"
 echo "Install directory: $INSTALL_DIR"
 
 say "Preflight checks"
-for c in gh sha256sum tar npm node curl sudo file diff icdiff systemctl; do
+for c in gh sha256sum tar npm node curl sudo file diff systemctl; do
   check_cmd "$c"
 done
 check_cmd "${EDITOR:-nano}"
+
+# icdiff is optional — used for colored upgrade diffs but not critical.
+HAVE_ICDIFF=false
+if command -v icdiff >/dev/null 2>&1; then
+  HAVE_ICDIFF=true
+  ok "Found optional dependency: icdiff"
+else
+  warn "icdiff not found — upgrade diffs will use plain diff. Install via your package manager (e.g. sudo apt install icdiff or pip install icdiff)."
+fi
 run_step "Verify GitHub CLI authentication status" gh auth status
 
 ###############################################################################
@@ -529,6 +608,7 @@ if [[ "$MODE" == "install" ]]; then
 
   run_step "Reload systemd" sudo systemctl daemon-reload
   run_step "Enable and start stremio-addarr" sudo systemctl enable --now stremio-addarr
+  wait_for_service stremio-addarr || true
 else
   #############################################################################
   # UPGRADE MODE SECTION
@@ -539,13 +619,21 @@ else
   #############################################################################
   say "Upgrade mode review gates"
   if [[ -f "$INSTALL_DIR/.env" ]]; then
-    show_step_output "Show icdiff .env vs .env.example" bash -lc "cd '$INSTALL_DIR' && icdiff .env .env.example"
+    if [[ "$HAVE_ICDIFF" == "true" ]]; then
+      show_step_output "Show icdiff .env vs .env.example" bash -lc "cd '$INSTALL_DIR' && icdiff .env .env.example"
+    else
+      show_step_output "Show diff .env vs .env.example" bash -lc "cd '$INSTALL_DIR' && diff -u .env .env.example || true"
+    fi
     if prompt_confirm "Merge existing .env values into the new .env.example template and replace .env?"; then
       merge_tmp_path="$TMP_DIR/.env.merged"
       run_step "Back up existing .env to .env.backup-before-merge" cp "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.backup-before-merge"
       run_step "Build merged .env from template + existing values" merge_env_with_template "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.example" "$merge_tmp_path"
       run_step "Replace .env with merged template result" cp "$merge_tmp_path" "$INSTALL_DIR/.env"
-      show_step_output "Show merged .env vs .env.example (post-merge icdiff)" bash -lc "cd '$INSTALL_DIR' && icdiff .env .env.example"
+      if [[ "$HAVE_ICDIFF" == "true" ]]; then
+        show_step_output "Show merged .env vs .env.example (post-merge icdiff)" bash -lc "cd '$INSTALL_DIR' && icdiff .env .env.example"
+      else
+        show_step_output "Show merged .env vs .env.example (post-merge diff)" bash -lc "cd '$INSTALL_DIR' && diff -u .env .env.example || true"
+      fi
     else
       warn "Skipped .env merge step at operator request."
     fi
@@ -566,9 +654,12 @@ else
 
   run_step "Reload systemd" sudo systemctl daemon-reload
   run_step "Restart stremio-addarr" sudo systemctl restart stremio-addarr
+  wait_for_service stremio-addarr || true
 fi
 
-configure_trakt_oauth
+if [[ "$SKIP_TRAKT" == "false" ]]; then
+  configure_trakt_oauth
+fi
 load_env_file
 
 ###############################################################################
@@ -594,9 +685,6 @@ else
   run_verification "Public health endpoint responds." curl -fsS "${PUBLIC_BASE_URL}/healthz"
   run_verification "Public HTTPS manifest endpoint responds." curl -fI "${PUBLIC_BASE_URL}/manifest.json"
   run_verification "Public status.json endpoint responds." curl -fsS "${PUBLIC_BASE_URL}/status.json"
-  echo
-  echo -e "${C_GREEN}${C_BOLD}Install URL:${C_RESET} ${PUBLIC_BASE_URL}/manifest.json"
-  echo "Paste this exact URL into Stremio: ${PUBLIC_BASE_URL}/manifest.json"
 fi
 
 run_verification "Local health endpoint responds." curl -fsS http://127.0.0.1:7010/healthz
@@ -610,6 +698,14 @@ else
   warn "Quick $MODE flow completed with ${VERIFICATION_FAILURES} verification failure(s)."
 fi
 warn "If hosting/TLS changed, re-run README_HOST.md and then re-run: bash quick.sh $MODE"
+
+# Always print the install URL at the end if PUBLIC_BASE_URL is configured,
+# even when verification steps failed, so it is easy to copy.
+if [[ -n "${PUBLIC_BASE_URL:-}" ]]; then
+  echo
+  echo -e "${C_GREEN}${C_BOLD}Install URL:${C_RESET} ${PUBLIC_BASE_URL}/manifest.json"
+  echo "Paste this exact URL into Stremio: ${PUBLIC_BASE_URL}/manifest.json"
+fi
 
 ###############################################################################
 # END OF SCRIPT
