@@ -28,6 +28,7 @@ export interface ArrMovieStatus {
   hasFile?: boolean;
   title?: string;
   year?: number;
+  releaseDate?: string;
   fileName?: string;
   fileSizeBytes?: number;
   reason?: string;
@@ -48,6 +49,7 @@ export interface ArrEpisodeStatus {
   monitored?: boolean;
   hasFile?: boolean;
   title?: string;
+  episodeReleaseDate?: string;
   fileName?: string;
   fileSizeBytes?: number;
   reason?: string;
@@ -77,6 +79,9 @@ export interface RadarrMovieRecord {
   hasFile?: boolean;
   movieFile?: { id: number; relativePath?: string; size?: number; path?: string } | null;
   year?: number;
+  digitalRelease?: string;
+  physicalRelease?: string;
+  inCinemas?: string;
   added?: string;
   images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
 }
@@ -148,6 +153,8 @@ export interface SonarrEpisodeRecord {
   monitored?: boolean;
   hasFile?: boolean;
   episodeFileId?: number;
+  airDate?: string;
+  airDateUtc?: string;
   episodeFile?: { relativePath?: string; size?: number; path?: string };
 }
 

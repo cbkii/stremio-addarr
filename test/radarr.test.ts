@@ -68,6 +68,31 @@ test('downloaded status includes movieFileId when movieFile is present', async (
   assert.equal(status.movieFileId, 99);
 });
 
+test('movie release date prefers earliest of physical/digital, then inCinemas fallback', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const client = new RadarrClient(
+    cfg,
+    new FakeHttp({
+      get: {
+        '/api/v3/movie': [{
+          id: 5,
+          imdbId: 'tt5',
+          monitored: true,
+          physicalRelease: '2020-05-10',
+          digitalRelease: '2020-04-20',
+          inCinemas: '2020-01-01'
+        }],
+        '/api/v3/queue?page=1&pageSize=250&includeUnknownMovieItems=true': { records: [] }
+      }
+    }) as never
+  );
+
+  const status = await client.getMovieStatus('tt5');
+  assert.equal(status.releaseDate, '2020-04-20');
+});
+
 test('getMovieFilePath returns path from Arr API', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;

@@ -9,6 +9,7 @@ export function baseConfig(): AppConfig {
     publicBaseUrl: 'http://127.0.0.1:7010',
     manifestLogoUrl: 'https://raw.githubusercontent.com/cbkii/stremio-addarr/main/assets/logo.png',
     targetClient: 'android-tv',
+    timeZone: 'UTC',
     logLevel: 'error',
     requestTimeoutMs: 2000,
     gracefulShutdownTimeoutMs: 10_000,
@@ -59,6 +60,16 @@ export function baseConfig(): AppConfig {
       epCountMod: 'epfuture',
       tags: [],
       searchOnAdd: true
+    },
+    traktSync: {
+      enabled: false,
+      syncMins: 360,
+      apiBaseUrl: 'https://api.trakt.tv',
+      clientId: '',
+      clientSecret: '',
+      refreshToken: '',
+      redirectUri: 'urn:ietf:wg:oauth:2.0:oob',
+      stateFilePath: '/tmp/stremio-addarr-test-trakt-sync.json'
     }
   };
 }

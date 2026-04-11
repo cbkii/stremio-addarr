@@ -139,7 +139,7 @@ test('downloaded tile launches Kodi via externalUrl when enabled', async () => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const path = new URL(String(input)).pathname + new URL(String(input)).search;
     if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
-    if (path === '/api/v3/movie') return new Response('[{"id":9,"imdbId":"tt1234567","title":"Mock Movie","year":2020,"hasFile":true,"monitored":true}]', { status: 200 });
+    if (path === '/api/v3/movie') return new Response('[{"id":9,"imdbId":"tt1234567","title":"Mock Movie","year":2020,"digitalRelease":"2020-02-03T00:00:00Z","hasFile":true,"monitored":true}]', { status: 200 });
     return new Response('{}', { status: 200 });
   }) as typeof fetch;
 
@@ -148,9 +148,9 @@ test('downloaded tile launches Kodi via externalUrl when enabled', async () => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; externalUrl?: string }> };
     assert.equal(body.streams[0].name, '✅\nFile\nReady');
-    assert.ok(body.streams[0].description?.startsWith('════════════════════'));
+    assert.ok(body.streams[0].description?.startsWith('🆕  UNWATCHED'));
     assert.ok(body.streams[0].description?.includes('Mock Movie'), 'description should include matched title');
-    assert.ok(body.streams[0].description?.includes('2020'), 'description should include matched year');
+    assert.match(body.streams[0].description ?? '', /\(03 Feb 20\)/, 'description should include formatted release date');
     assert.match(body.streams[0].externalUrl ?? '', /package=org.xbmc.kodi/);
   });
 });
@@ -184,7 +184,7 @@ test('missing movie tile triggers search action URL and does not expose secrets'
     const parsed = new URL(String(input));
     const path = parsed.pathname + parsed.search;
     if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
-    if (path === '/api/v3/movie') return new Response('[{"id":9,"imdbId":"tt1234567","title":"Mock Movie","year":2020,"hasFile":false,"monitored":true}]', { status: 200 });
+    if (path === '/api/v3/movie') return new Response('[{"id":9,"imdbId":"tt1234567","title":"Mock Movie","year":2020,"physicalRelease":"2020-03-07","hasFile":false,"monitored":true}]', { status: 200 });
     if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
     return new Response('{}', { status: 200 });
   }) as typeof fetch;
@@ -194,12 +194,12 @@ test('missing movie tile triggers search action URL and does not expose secrets'
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string; behaviorHints?: { notWebReady?: boolean } }> };
     assert.equal(body.streams[0].name, '🔍🦜\nSearch\n+ DL');
-    assert.ok(body.streams[0].description?.startsWith('════════════════════'));
+    assert.ok(body.streams[0].description?.startsWith('🆕  UNWATCHED'));
     assert.ok(body.streams[0].description?.includes('📲 🔗  192.168.1.50:7878'));
     assert.equal(body.streams[0].url, 'https://stremio-addarr.lan/action/search/movie/tt1234567');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true, 'Action tiles must set notWebReady to prevent watched tracking');
     assert.ok(body.streams[0].description?.includes('Mock Movie'), 'description should include matched title');
-    assert.ok(body.streams[0].description?.includes('2020'), 'description should include matched year');
+    assert.match(body.streams[0].description ?? '', /\(07 Mar 20\)/, 'description should include formatted release date');
 
     const serialized = JSON.stringify(body);
     assert.ok(!serialized.includes('radarr-key'));
@@ -232,6 +232,54 @@ test('missing episode tile generates encoded Sonarr search action URL', async ()
     assert.ok(body.streams[0].description?.includes('📲 🔗  192.168.1.50:8989'));
     assert.equal(body.streams[0].url, 'https://stremio-addarr.lan/action/search/series/tt7654321%3A2%3A5');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
+    assert.ok(body.streams[0].description?.includes('S02E05'), 'description should include episode label');
+  });
+});
+
+test('movie line uses in-cinemas date only when release dates are unavailable', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    const path = parsed.pathname + parsed.search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') {
+      return new Response('[{"id":9,"imdbId":"tt1234567","title":"Fallback Movie","inCinemas":"2021-09-11T00:00:00Z","hasFile":false,"monitored":true}]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const body = (await response.json()) as { streams: Array<{ description?: string }> };
+    assert.match(body.streams[0].description ?? '', /\(11 Sep[a-z]* 21\)/i, 'expected in-cinemas fallback formatted date');
+  });
+});
+
+test('episode labels include release date when Sonarr airDateUtc exists', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const parsed = new URL(String(input));
+    const path = parsed.pathname + parsed.search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/series') return new Response('[{"id":10,"imdbId":"tt7654321","title":"Mock Show"}]', { status: 200 });
+    if (path.startsWith('/api/v3/episode?seriesId=10')) {
+      return new Response('[{"id":42,"seasonNumber":2,"episodeNumber":5,"airDateUtc":"2024-01-09T00:00:00Z","monitored":true,"hasFile":false}]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const app = createApp(cfg);
+  await withServer(app, async (baseUrl) => {
+    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt7654321%3A2%3A5.json`);
+    const body = (await response.json()) as { streams: Array<{ description?: string }> };
+    assert.ok(body.streams[0].description?.includes('S02E05 (09 Jan 24)'), 'description should include episode release date');
   });
 });
 
@@ -283,7 +331,7 @@ test('downloaded tile includes playback url and omits Kodi fallback when file st
       }>;
     };
     assert.equal(body.streams[0].name, '✅\nFile\nReady');
-    assert.ok(body.streams[0].description?.startsWith('════════════════════'));
+    assert.ok(body.streams[0].description?.startsWith('🆕  UNWATCHED'));
     assert.ok(body.streams[0].url?.startsWith('https://pi.example.com/files/movie/77?t='), 'should have a file streaming url');
     assert.equal(body.streams[0].externalUrl ? 1 : 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
@@ -314,7 +362,7 @@ test('downloaded tile has no url when file streaming is disabled', async () => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string }> };
     assert.equal(body.streams[0].name, '✅\nFile\nReady');
-    assert.ok(body.streams[0].description?.startsWith('════════════════════'));
+    assert.ok(body.streams[0].description?.startsWith('🆕  UNWATCHED'));
     assert.equal(body.streams[0].url, undefined, 'no url when file streaming disabled');
   });
 });

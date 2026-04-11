@@ -377,3 +377,40 @@ test('file streaming fails when enabled without a secret', () => {
   process.env.FILE_STREAMING_SECRET = '';
   assert.throws(() => loadConfig(), /FILE_STREAMING_SECRET/);
 });
+
+test('trakt sync defaults to disabled', () => {
+  const config = loadConfig();
+  assert.equal(config.traktSync.enabled, false);
+  assert.equal(config.traktSync.syncMins, 360);
+});
+
+test('trakt sync requires credentials when enabled', () => {
+  process.env.TRAKT_SYNC_ENABLED = 'true';
+  process.env.TRAKT_CLIENT_ID = '';
+  process.env.TRAKT_CLIENT_SECRET = '';
+  process.env.TRAKT_REFRESH_TOKEN = '';
+  assert.throws(() => loadConfig(), /TRAKT_CLIENT_ID/);
+});
+
+test('trakt sync accepts explicit configuration', () => {
+  process.env.TRAKT_SYNC_ENABLED = 'true';
+  process.env.TRAKT_SYNC_MINS = '120';
+  process.env.TRAKT_CLIENT_ID = 'client-id';
+  process.env.TRAKT_CLIENT_SECRET = 'client-secret';
+  process.env.TRAKT_REFRESH_TOKEN = 'refresh-token';
+  process.env.TRAKT_API_BASE_URL = 'https://api.trakt.tv';
+  const config = loadConfig();
+  assert.equal(config.traktSync.enabled, true);
+  assert.equal(config.traktSync.syncMins, 120);
+  assert.equal(config.traktSync.clientId, 'client-id');
+});
+
+test('trakt sync mins is clamped to 40 when env is <=40', () => {
+  process.env.TRAKT_SYNC_ENABLED = 'true';
+  process.env.TRAKT_SYNC_MINS = '1';
+  process.env.TRAKT_CLIENT_ID = 'client-id';
+  process.env.TRAKT_CLIENT_SECRET = 'client-secret';
+  process.env.TRAKT_REFRESH_TOKEN = 'refresh-token';
+  const config = loadConfig();
+  assert.equal(config.traktSync.syncMins, 40);
+});

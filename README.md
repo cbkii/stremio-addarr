@@ -546,7 +546,31 @@ Checklist:
 
 ---
 
-## 10) Release and hosting docs
+## 10) Trakt watched sync (optional)
+
+This add-on cannot read native Stremio account sessions directly inside stream handlers, so watched sync is implemented as **addon-managed Trakt OAuth**.
+
+1. Create a Trakt API app and obtain:
+   - `TRAKT_CLIENT_ID`
+   - `TRAKT_CLIENT_SECRET`
+   - `TRAKT_REFRESH_TOKEN`
+2. Set:
+   - `TRAKT_SYNC_ENABLED=true`
+   - `TRAKT_SYNC_MINS=360` (enforced to `>=40`; values `<=40` become `40`)
+   - `TZ=Etc/UTC` (or your Pi timezone, e.g. `Europe/Sofia`) for local date rendering
+3. Restart the service.
+
+Notes:
+- Sync is interval-gated and persisted to `TRAKT_SYNC_STATE_FILE` so restarts do not force immediate re-sync.
+- Refresh-token rotation is persisted to `TRAKT_SYNC_STATE_FILE` for long-running stability.
+- Errors fail soft to `UNWATCHED`.
+- If Trakt auth/sync is failing, tile line 1 temporarily falls back to the legacy border line.
+- `POST /trakt/sync` can be used for local manual sync trigger (loopback/local requests only).
+- `GET /status.json` and `GET /health` include watched sync diagnostics (`enabled`, `lastSyncAt`, `nextSyncAt`, `lastSyncError`).
+
+---
+
+## 11) Release and hosting docs
 
 - Hosting/TLS (canonical): [README_HOST.md](README_HOST.md)
 - Example env variables: [.env.example](.env.example)

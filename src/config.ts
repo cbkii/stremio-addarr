@@ -12,6 +12,7 @@ export interface AppConfig {
   publicBaseUrl: string;
   manifestLogoUrl: string;
   targetClient: 'android-tv' | 'generic';
+  timeZone: string;
   logLevel: LogLevel;
   requestTimeoutMs: number;
   gracefulShutdownTimeoutMs: number;
@@ -83,6 +84,16 @@ export interface AppConfig {
     epCountMod: 'epfuture' | 'epseason';
     tags: number[];
     searchOnAdd: boolean;
+  };
+  traktSync: {
+    enabled: boolean;
+    syncMins: number;
+    apiBaseUrl: string;
+    clientId: string;
+    clientSecret: string;
+    refreshToken: string;
+    redirectUri: string;
+    stateFilePath: string;
   };
 }
 
@@ -298,6 +309,7 @@ export function loadConfig(): AppConfig {
         ? ensureHttpUrl('MANIFEST_LOGO_URL', manifestLogoEnv)
         : 'https://raw.githubusercontent.com/cbkii/stremio-addarr/main/assets/logo.png');
   const targetClient = parseTargetClient(readString('TARGET_CLIENT', 'android-tv'));
+  const timeZone = readString('TZ', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);
   const gracefulShutdownTimeoutMs = readNumber('GRACEFUL_SHUTDOWN_TIMEOUT_MS', 10_000);
   const forcedShutdownExitCodeRaw = readNumber('FORCED_SHUTDOWN_EXIT_CODE', 0);
@@ -360,6 +372,16 @@ export function loadConfig(): AppConfig {
     throw new Error('FILE_STREAMING_SECRET is required when FILE_STREAMING_ENABLED=true.');
   }
 
+  const traktSyncEnabled = readBoolean('TRAKT_SYNC_ENABLED', false);
+  const traktSyncMinsRaw = Math.floor(readNumber('TRAKT_SYNC_MINS', 360));
+  const traktSyncMins = traktSyncMinsRaw <= 40 ? 40 : traktSyncMinsRaw;
+  const traktApiBaseUrl = ensureHttpUrl('TRAKT_API_BASE_URL', readString('TRAKT_API_BASE_URL', 'https://api.trakt.tv'));
+  const traktClientId = readString('TRAKT_CLIENT_ID');
+  const traktClientSecret = readString('TRAKT_CLIENT_SECRET');
+  const traktRefreshToken = readString('TRAKT_REFRESH_TOKEN');
+  const traktRedirectUri = readString('TRAKT_REDIRECT_URI', 'urn:ietf:wg:oauth:2.0:oob');
+  const traktStateFilePath = readString('TRAKT_SYNC_STATE_FILE', path.resolve(process.cwd(), 'data/trakt-sync-state.json'));
+
   const config: AppConfig = {
     appName: 'stremio-addarr',
     version: packageVersion,
@@ -368,6 +390,7 @@ export function loadConfig(): AppConfig {
     publicBaseUrl,
     manifestLogoUrl,
     targetClient,
+    timeZone,
     logLevel: logLevelRaw,
     requestTimeoutMs,
     gracefulShutdownTimeoutMs,
@@ -423,7 +446,17 @@ export function loadConfig(): AppConfig {
         tags: readNumberList('SONARR_TAGS'),
         searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
       };
-    })()
+    })(),
+    traktSync: {
+      enabled: traktSyncEnabled,
+      syncMins: traktSyncMins,
+      apiBaseUrl: traktApiBaseUrl,
+      clientId: traktClientId,
+      clientSecret: traktClientSecret,
+      refreshToken: traktRefreshToken,
+      redirectUri: traktRedirectUri,
+      stateFilePath: traktStateFilePath
+    }
   };
 
   if (config.radarr.enabled && (!config.radarr.baseUrl || !config.radarr.apiKey)) {
@@ -458,6 +491,13 @@ export function loadConfig(): AppConfig {
 
   if (config.kodi.enabled && !config.kodi.packageName) {
     throw new Error('KODI_PACKAGE must not be empty.');
+  }
+
+  if (config.traktSync.enabled) {
+    readRequiredString('TRAKT_CLIENT_ID');
+    readRequiredString('TRAKT_CLIENT_SECRET');
+    readRequiredString('TRAKT_REFRESH_TOKEN');
+    if (config.traktSync.syncMins < 40) throw new Error('TRAKT_SYNC_MINS must be at least 40.');
   }
 
   if (config.radarr.enabled) {
