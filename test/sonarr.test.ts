@@ -64,6 +64,31 @@ test('episode downloaded status includes episodeFileId', async () => {
   assert.equal(status.episodeFileId, 55);
 });
 
+test('episode release date prefers earliest Sonarr air date variant', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  const client = new SonarrClient(
+    cfg,
+    new FakeHttp({
+      get: {
+        '/api/v3/series': [{ id: 22, imdbId: 'tt9', title: 'Show' }],
+        '/api/v3/episode?seriesId=22': [{
+          id: 7,
+          seasonNumber: 1,
+          episodeNumber: 2,
+          monitored: true,
+          airDateUtc: '2024-01-10T00:00:00Z',
+          airDate: '2024-01-08'
+        }],
+        '/api/v3/queue?page=1&pageSize=250&includeUnknownSeriesItems=true': { records: [] }
+      }
+    }) as never
+  );
+
+  const status = await client.getEpisodeStatus('tt9', 1, 2);
+  assert.equal(status.episodeReleaseDate, '2024-01-08');
+});
+
 test('getEpisodeFilePath returns path from Arr API', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;

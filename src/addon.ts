@@ -5,6 +5,8 @@ import { parseStremioId } from './lib/stremio-ids.js';
 import type { StatusTile } from './types.js';
 import { CatalogService } from './services/catalog.js';
 import { ArrStatusService } from './services/status.js';
+import { NoopWatchedLookup } from './services/watched.js';
+import type { WatchedLookup } from './services/watched.js';
 
 function streamFromTile(tile: StatusTile) {
   return {
@@ -16,7 +18,7 @@ function streamFromTile(tile: StatusTile) {
   };
 }
 
-export function createAddonInterface(config: AppConfig, logger?: Logger) {
+export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: { watchedLookup?: WatchedLookup }) {
   const catalogHardMax = 50;
   const catalogPageSize = Math.max(1, Math.min(config.catalogPageSize, catalogHardMax));
   const builder = new addonBuilder({
@@ -38,7 +40,7 @@ export function createAddonInterface(config: AppConfig, logger?: Logger) {
     ...(config.manifestLogoUrl ? { logo: config.manifestLogoUrl } : {})
   });
 
-  const statusService = new ArrStatusService(config);
+  const statusService = new ArrStatusService(config, { watchedLookup: deps?.watchedLookup ?? new NoopWatchedLookup() });
   const catalogService = new CatalogService(config);
 
   builder.defineStreamHandler(async ({ type, id }: { type: string; id: string }) => {
