@@ -62,7 +62,7 @@ function movieLine(title: string | undefined, releaseDate: string | undefined, t
     const formattedDate = formatReleaseDate(releaseDate, timeZone);
     return formattedDate ? `📽 Not in Radarr (${formattedDate})` : '📽 Not in Radarr';
   }
-  const release = formatReleaseDate(releaseDate, timeZone) ?? '?📅';
+  const release = formatReleaseDate(releaseDate, timeZone) ?? ' ?📅 ';
   const suffix = ` (${release})`;
   // Use codepoint length to keep arithmetic consistent with truncate().
   const maxTitle = 32 - 3 - Array.from(suffix).length; // 3 = '📽 ' (one emoji codepoint + space)
@@ -98,12 +98,12 @@ function episodeLineLabel(season: number | undefined, episode: number | undefine
 function cardEndpointLine(raw: string): string {
   const value = raw.trim().replace(/\/+$/, '');
   const display = value.replace(/^https?:\/\//i, '');
-  return `📲 🔗  ${display}`;
+  return `└─── 📲  ${display}`;
 }
 
 function watchedLine(watched: boolean, borderFallback: boolean): string {
   if (borderFallback) return '════════════════════';
-  return watched ? '👁️  WATCHED' : '🆕  UNWATCHED';
+  return watched ? '══ 👁️ WATCHED ════════' : '══ 🆕 UNWATCHED ══════';
 }
 
 /**
@@ -157,7 +157,7 @@ export class ArrStatusService {
       const tmdbDate = this.normalizeDateCandidate(tmdb);
       if (tmdbDate) return tmdbDate;
     }
-    return '?📅';
+    return ' ?📅 ';
   }
 
   private async resolveEpisodeReleaseDate(imdbId: string, season?: number, episode?: number, arrReleaseDate?: string): Promise<string> {
@@ -171,7 +171,7 @@ export class ArrStatusService {
       const tmdbDate = this.normalizeDateCandidate(tmdb);
       if (tmdbDate) return tmdbDate;
     }
-    return '?📅';
+    return ' ?📅 ';
   }
 
   private useBorderFallbackLine(): boolean {
@@ -221,7 +221,7 @@ export class ArrStatusService {
           : undefined;
         const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
-          name: '✅\nFile\nReady',
+          name: '✅🟢\nFile\nReady',
           description: desc(
             watchedLine(watched, borderFallback),
             movieLine(status.title, status.releaseDate, this.config.timeZone),
@@ -240,11 +240,11 @@ export class ArrStatusService {
       case 'downloading':
         return [{
           name: '⏱️📥...\nDLing',
-          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️ ⏱  DOWNLOADING IN RADARR…', this.radarrCardLine())
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️⏱️ DOWNLOAD IN PROGRESS…', this.radarrCardLine())
         }];
       case 'missing':
         return [{
-          name: '🔍🦜\nSearch\n+ DL',
+          name: '🔍🦜\nSearch\nDownload',
           description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ Monitored — file missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
@@ -252,15 +252,15 @@ export class ArrStatusService {
         }];
       case 'added':
         return [{
-          name: '🔍🦜\nSearch\n+ DL',
-          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ In Radarr — not monitored', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
+          name: '🔍🦜\nSearch\nDownload',
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ In Library — not monitored', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'not_added':
         return [{
-          name: '➕ Add\nto *Arr\n+ DL',
+          name: '➕ Add +\nDownload',
           description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️ ➕  ADD + SEARCH ►', this.radarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
@@ -281,7 +281,7 @@ export class ArrStatusService {
           : undefined;
         const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
-          name: '✅\nFile\nReady',
+          name: '✅🟢\nFile\nReady',
           description: desc(
             watchedLine(watched, borderFallback),
             seriesLine(status.title),
@@ -300,11 +300,11 @@ export class ArrStatusService {
       case 'episode_downloading':
         return [{
           name: '⏱️📥...\nDLing',
-          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `🗯️ ⏱  ${ep} DOWNLOADING…` : '🗯️ ⏱  DOWNLOADING…', this.sonarrCardLine())
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `🗯️ ⏱  ${ep} DOWNLOADING…` : '🗯️⏱️ DOWNLOAD IN PROGRESS…', this.sonarrCardLine())
         }];
       case 'episode_missing':
         return [{
-          name: '🔍🦜\nSearch\n+ DL',
+          name: '🔍🦜\nSearch\nDownload',
           description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
@@ -313,7 +313,7 @@ export class ArrStatusService {
       case 'series_added':
       case 'episode_monitored':
         return [{
-          name: '🔍🦜\nSearch\n+ DL',
+          name: '🔍🦜\nSearch\nDownload',
           description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
@@ -321,7 +321,7 @@ export class ArrStatusService {
         }];
       case 'series_not_added':
         return [{
-          name: '➕ Add\nto *Arr\n+ DL',
+          name: '➕ Add +\nDownload',
           description: desc(watchedLine(watched, borderFallback), '📺  Not in Sonarr', ep, '🗯️ ➕  ADD SERIES + SEARCH ►', this.sonarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
