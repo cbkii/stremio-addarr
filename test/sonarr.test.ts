@@ -867,3 +867,129 @@ test('addSeriesByImdbId sends addOptions.monitor in payload', async () => {
   assert.equal(addOptions.searchForMissingEpisodes, true);
   assert.equal(capturedBody!.monitorNewItems, 'all');
 });
+
+test('addSeriesByImdbId omits languageProfileId when null (Sonarr v4)', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.languageProfileId = null;
+  let capturedBody: Record<string, unknown> | undefined;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') return [] as T;
+      if (path.startsWith('/api/v3/series/lookup')) {
+        return [{ title: 'ShowV4', imdbId: 'tt2000', tvdbId: 2000 }] as T;
+      }
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string, body?: unknown): Promise<T> {
+      capturedBody = body as Record<string, unknown>;
+      return {} as T;
+    }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  const result = await client.addSeriesByImdbId('tt2000');
+  assert.equal(result.ok, true);
+  assert.ok(capturedBody, 'POST body should be captured');
+  assert.equal(capturedBody!.languageProfileId, undefined, 'languageProfileId should not be sent for Sonarr v4');
+});
+
+test('addSeriesByImdbId includes languageProfileId when set (Sonarr v3)', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.languageProfileId = 3;
+  let capturedBody: Record<string, unknown> | undefined;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') return [] as T;
+      if (path.startsWith('/api/v3/series/lookup')) {
+        return [{ title: 'ShowV3', imdbId: 'tt3000', tvdbId: 3000 }] as T;
+      }
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(_path: string, body?: unknown): Promise<T> {
+      capturedBody = body as Record<string, unknown>;
+      return {} as T;
+    }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  const result = await client.addSeriesByImdbId('tt3000');
+  assert.equal(result.ok, true);
+  assert.ok(capturedBody, 'POST body should be captured');
+  assert.equal(capturedBody!.languageProfileId, 3, 'languageProfileId should be sent for Sonarr v3');
+});
+
+test('isEpisodeQueued only matches by episodeId — does not false-positive on other episodes from same series', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') return [{ id: 5, title: 'Show', imdbId: 'tt4000' }] as T;
+      if (path.startsWith('/api/v3/episode')) {
+        return [{ id: 77, seasonNumber: 1, episodeNumber: 2, monitored: true, hasFile: false }] as T;
+      }
+      // Queue has a record for the same series but a different episode (no episodeId set)
+      if (path.startsWith('/api/v3/queue?')) {
+        return { records: [{ seriesId: 5, episodeId: null }], totalRecords: 1 } as T;
+      }
+      throw new Error(`Unexpected GET ${path}`);
+    }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  const status = await client.getEpisodeStatus('tt4000', 1, 2);
+  // Should be episode_missing (not episode_downloading), because the queue record has a
+  // different episode (episodeId null means it's a full-series grab, not this specific episode)
+  assert.equal(status.state, 'episode_missing', 'series-level queue item should not mark a specific episode as downloading');
+});
+
+test('findSeriesByImdbId title+year fallback rejects same title different year', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') {
+        // Library has a show with same title but different year
+        return [{ id: 1, title: 'Duplicate Show', imdbId: 'tt9001', tvdbId: 9001, year: 2015 }] as T;
+      }
+      if (path.startsWith('/api/v3/series/lookup')) {
+        // Lookup returns no tvdbId match — relies on title+year fallback
+        return [{ title: 'Duplicate Show', imdbId: 'tt9002', year: 2022 }] as T;
+      }
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      throw new Error(`Unexpected GET ${path}`);
+    }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  // tt9002 has lookup year=2022, library has year=2015 — should NOT match
+  const status = await client.getEpisodeStatus('tt9002', 1, 1);
+  assert.equal(status.state, 'series_not_added', 'different year should prevent title-only false-positive match');
+});
+
+test('findSeriesByImdbId title+year fallback matches when both match', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') {
+        return [{ id: 2, title: 'Real Show', imdbId: 'tt0000', tvdbId: undefined, year: 2010, monitored: true }] as T;
+      }
+      if (path.startsWith('/api/v3/series/lookup')) {
+        // No tvdbId — only title+year available for fallback
+        return [{ title: 'Real Show', imdbId: 'tt9003', year: 2010 }] as T;
+      }
+      if (path.startsWith('/api/v3/episode')) return [] as T;
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      throw new Error(`Unexpected GET ${path}`);
+    }
+  };
+
+  const client = new SonarrClient(cfg, http as never);
+  // tt9003 has lookup year=2010, library has year=2010 — should match
+  const status = await client.getEpisodeStatus('tt9003', 1, 1);
+  assert.notEqual(status.state, 'series_not_added', 'matching title and year should find the series in library');
+});
