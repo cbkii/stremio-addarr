@@ -11,6 +11,8 @@ import { parseStremioId } from './lib/stremio-ids.js';
 import { verifyFileToken } from './lib/file-tokens.js';
 import type { ParsedStremioId } from './types.js';
 import { ActionOrchestrator } from './services/action-orchestrator.js';
+import { NoopWatchedLookup } from './services/watched.js';
+import { TraktWatchedLookup } from './services/trakt-watched.js';
 
 // Minimal valid HLS end-of-stream playlist. Stremio's player resolves this as a
 // zero-duration stream that completes immediately — no browser is opened.
@@ -59,7 +61,13 @@ function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
 export function createApp(config: AppConfig) {
   const getRouter = (sdk as { getRouter: (addonInterface: unknown) => import('express').RequestHandler }).getRouter;
   const logger = createLogger(config.logLevel);
-  const { addonInterface, statusService } = createAddonInterface(config, logger);
+  const watchedLookup = config.traktSync.enabled
+    ? new TraktWatchedLookup(config, logger)
+    : new NoopWatchedLookup();
+  if (watchedLookup instanceof TraktWatchedLookup) {
+    void watchedLookup.init();
+  }
+  const { addonInterface, statusService } = createAddonInterface(config, logger, { watchedLookup });
   const actionOrchestrator = new ActionOrchestrator(statusService, logger);
 
   // Simple in-memory token-bucket rate limiter for the /files route.
@@ -132,7 +140,8 @@ export function createApp(config: AppConfig) {
       name: config.appName,
       version: config.version,
       manifest: `${config.publicBaseUrl}/manifest.json`,
-      services: serviceHealth
+      services: serviceHealth,
+      watched: watchedLookup.getDiagnostics?.()
     });
   });
 
@@ -165,6 +174,7 @@ export function createApp(config: AppConfig) {
       port: config.port,
       bind: `${config.host}:${config.port}`,
       targetClient: validation.targetClient,
+      timeZone: config.timeZone,
       publicBaseUrl: config.publicBaseUrl,
       publicBaseUrlIsHttps: validation.isHttps,
       publicBaseUrlHostnameIsIp: validation.isHostnameIp,
@@ -197,7 +207,20 @@ export function createApp(config: AppConfig) {
         baseUrl: config.sonarr.enabled ? redactUrl(config.sonarr.baseUrl) : null
       },
       configIssues
+      ,
+      watched: watchedLookup.getDiagnostics?.()
     });
+  });
+
+  app.post('/trakt/sync', async (req, res) => {
+    const remote = req.ip ?? req.socket.remoteAddress ?? '';
+    const local = remote === '127.0.0.1' || remote === '::1' || remote.endsWith('127.0.0.1');
+    if (!local || !(watchedLookup instanceof TraktWatchedLookup)) {
+      res.status(404).end();
+      return;
+    }
+    await watchedLookup.triggerSync();
+    res.status(202).json({ ok: true, watched: watchedLookup.getDiagnostics?.() });
   });
 
   app.get('/action/:action/:kind/:encodedId', (req, res) => {

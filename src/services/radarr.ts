@@ -47,6 +47,7 @@ export class RadarrClient {
       if (!existing) {
         return { state: 'not_added' };
       }
+      const releaseDate = this.pickMovieReleaseDate(existing.physicalRelease, existing.digitalRelease, existing.inCinemas);
       if (existing.hasFile || existing.movieFile) {
         const rawFileName = existing.movieFile?.relativePath ?? existing.movieFile?.path;
         const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
@@ -58,6 +59,7 @@ export class RadarrClient {
           hasFile: true,
           title: existing.title,
           year: existing.year,
+          releaseDate,
           fileName,
           fileSizeBytes: existing.movieFile?.size
         };
@@ -70,18 +72,32 @@ export class RadarrClient {
         isDownloading = false;
       }
       if (isDownloading) {
-        return { state: 'downloading', movieId: existing.id, monitored: existing.monitored, hasFile: false, title: existing.title, year: existing.year };
+        return { state: 'downloading', movieId: existing.id, monitored: existing.monitored, hasFile: false, title: existing.title, year: existing.year, releaseDate };
       }
       if (existing.monitored) {
-        return { state: 'missing', movieId: existing.id, monitored: true, hasFile: false, title: existing.title, year: existing.year };
+        return { state: 'missing', movieId: existing.id, monitored: true, hasFile: false, title: existing.title, year: existing.year, releaseDate };
       }
-      return { state: 'added', movieId: existing.id, monitored: false, hasFile: false, title: existing.title, year: existing.year };
+      return { state: 'added', movieId: existing.id, monitored: false, hasFile: false, title: existing.title, year: existing.year, releaseDate };
     } catch (error) {
       return {
         state: 'unavailable',
         reason: error instanceof Error ? error.message : 'Unknown Radarr error.'
       };
     }
+  }
+
+  private pickMovieReleaseDate(physicalRelease?: string, digitalRelease?: string, inCinemas?: string): string | undefined {
+    const release = this.pickEarliestDate(physicalRelease, digitalRelease);
+    return release ?? this.pickEarliestDate(inCinemas);
+  }
+
+  private pickEarliestDate(...values: Array<string | undefined>): string | undefined {
+    const parsed = values
+      .filter((value): value is string => Boolean(value))
+      .map((value) => ({ value, ms: Date.parse(value) }))
+      .filter((value) => Number.isFinite(value.ms))
+      .sort((a, b) => a.ms - b.ms);
+    return parsed[0]?.value;
   }
 
   async addMovieByImdbId(imdbId: string): Promise<AddActionResult> {

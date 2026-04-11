@@ -73,6 +73,7 @@ export class SonarrClient {
       const match = episodes.find(
         (item) => item.seasonNumber === season && item.episodeNumber === episode
       );
+      const episodeReleaseDate = this.pickEpisodeReleaseDate(match?.airDateUtc, match?.airDate);
 
       if (!match) {
         return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, reason: 'Episode not found in Sonarr yet.', title: series.title };
@@ -89,6 +90,7 @@ export class SonarrClient {
           monitored: match.monitored,
           hasFile: true,
           title: series.title,
+          episodeReleaseDate,
           fileName,
           fileSizeBytes: match.episodeFile?.size
         };
@@ -101,10 +103,26 @@ export class SonarrClient {
         isDownloading = false;
       }
       if (isDownloading) {
-        return { state: 'episode_downloading', seriesId: series.id, episodeId: match.id, monitored: match.monitored, hasFile: false, title: series.title };
+        return {
+          state: 'episode_downloading',
+          seriesId: series.id,
+          episodeId: match.id,
+          monitored: match.monitored,
+          hasFile: false,
+          title: series.title,
+          episodeReleaseDate
+        };
       }
       if (match.monitored) {
-        return { state: 'episode_missing', seriesId: series.id, episodeId: match.id, monitored: true, hasFile: false, title: series.title };
+        return {
+          state: 'episode_missing',
+          seriesId: series.id,
+          episodeId: match.id,
+          monitored: true,
+          hasFile: false,
+          title: series.title,
+          episodeReleaseDate
+        };
       }
       return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, hasFile: false, title: series.title };
     } catch (error) {
@@ -113,6 +131,15 @@ export class SonarrClient {
         reason: error instanceof Error ? error.message : 'Unknown Sonarr error.'
       };
     }
+  }
+
+  private pickEpisodeReleaseDate(airDateUtc?: string, airDate?: string): string | undefined {
+    const parsed = [airDateUtc, airDate]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => ({ value, ms: Date.parse(value) }))
+      .filter((value) => Number.isFinite(value.ms))
+      .sort((a, b) => a.ms - b.ms);
+    return parsed[0]?.value;
   }
 
   async addSeriesByImdbId(

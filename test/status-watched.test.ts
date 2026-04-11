@@ -1,0 +1,237 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { ArrStatusService } from '../src/services/status.js';
+import type { WatchedLookup } from '../src/services/watched.js';
+import type { TraktLookup } from '../src/services/trakt.js';
+import { parseStremioId } from '../src/lib/stremio-ids.js';
+import { baseConfig } from './_helpers.js';
+
+const ORIGINAL_FETCH = globalThis.fetch;
+
+class StaticWatchedLookup implements WatchedLookup {
+  constructor(
+    private readonly movieWatched: boolean,
+    private readonly episodeWatched: boolean
+  ) {}
+
+  async isMovieWatched(_imdbId: string): Promise<boolean> {
+    return this.movieWatched;
+  }
+
+  async isEpisodeWatched(_imdbId: string, _season?: number, _episode?: number): Promise<boolean> {
+    return this.episodeWatched;
+  }
+}
+
+class FailingTraktWatchedLookup extends StaticWatchedLookup {
+  getDiagnostics() {
+    return { enabled: true, provider: 'trakt' as const, lastSyncError: 'http_500' };
+  }
+}
+
+class StaticTraktLookup implements TraktLookup {
+  constructor(
+    private readonly movieDate?: string,
+    private readonly episodeDate?: string
+  ) {}
+
+  async getMovieReleaseDate(_imdbId: string): Promise<string | undefined> {
+    return this.movieDate;
+  }
+
+  async getEpisodeReleaseDate(_imdbId: string, _season?: number, _episode?: number): Promise<string | undefined> {
+    return this.episodeDate;
+  }
+}
+
+test.afterEach(() => {
+  globalThis.fetch = ORIGINAL_FETCH;
+});
+
+test('movie downloaded description starts with WATCHED and stays within 5 lines', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') {
+      return new Response('[{"id":9,"imdbId":"tt1234567","title":"Mock Movie","digitalRelease":"2020-02-03T00:00:00Z","hasFile":true,"monitored":true}]', { status: 200 });
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(true, false),
+    traktLookup: new StaticTraktLookup(undefined, undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('movie', 'tt1234567'));
+  const lines = (tiles[0]?.description ?? '').split('\n');
+  assert.equal(lines[0], '👁️  WATCHED');
+  assert.ok(lines.length <= 5);
+});
+
+test('movie missing description starts with UNWATCHED and uses exact search action text', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') {
+      return new Response('[{"id":9,"imdbId":"tt1234567","title":"Mock Movie","physicalRelease":"2020-03-07","hasFile":false,"monitored":true}]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('movie', 'tt1234567'));
+  const lines = (tiles[0]?.description ?? '').split('\n');
+  assert.equal(lines[0], '🆕  UNWATCHED');
+  assert.ok(lines.includes('🗯️ 🔍  SEARCH FOR DL 📥📀'));
+  assert.ok(lines.length <= 5);
+});
+
+test('episode downloaded description starts with WATCHED and stays within 5 lines', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/series') return new Response('[{"id":10,"imdbId":"tt7654321","title":"Mock Show"}]', { status: 200 });
+    if (path.startsWith('/api/v3/episode?seriesId=10')) {
+      return new Response('[{"id":42,"seasonNumber":2,"episodeNumber":5,"airDateUtc":"2024-01-09T00:00:00Z","monitored":true,"hasFile":true}]', { status: 200 });
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, true),
+    traktLookup: new StaticTraktLookup(undefined, undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('series', 'tt7654321:2:5'));
+  const lines = (tiles[0]?.description ?? '').split('\n');
+  assert.equal(lines[0], '👁️  WATCHED');
+  assert.ok(lines.length <= 5);
+});
+
+test('episode missing description starts with UNWATCHED and uses exact search action text', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/series') return new Response('[{"id":10,"imdbId":"tt7654321","title":"Mock Show"}]', { status: 200 });
+    if (path.startsWith('/api/v3/episode?seriesId=10')) {
+      return new Response('[{"id":42,"seasonNumber":2,"episodeNumber":5,"airDateUtc":"2024-01-09T00:00:00Z","monitored":true,"hasFile":false}]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('series', 'tt7654321:2:5'));
+  const lines = (tiles[0]?.description ?? '').split('\n');
+  assert.equal(lines[0], '🆕  UNWATCHED');
+  assert.ok(lines.includes('🗯️ 🔍  SEARCH FOR DL 📥📀'));
+  assert.ok(lines.length <= 5);
+});
+
+test('shows ?📅 when neither Arr nor Trakt has a valid movie date', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') {
+      return new Response('[{"id":9,"imdbId":"tt1234567","title":"No Date Movie","hasFile":false,"monitored":true}]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('movie', 'tt1234567'));
+  assert.ok((tiles[0]?.description ?? '').includes('(?📅)'));
+});
+
+test('uses Trakt as final fallback when Arr episode date is missing', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/series') return new Response('[{"id":10,"imdbId":"tt7654321","title":"Mock Show"}]', { status: 200 });
+    if (path.startsWith('/api/v3/episode?seriesId=10')) {
+      return new Response('[{"id":42,"seasonNumber":2,"episodeNumber":5,"monitored":true,"hasFile":false}]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, '2024-01-09')
+  });
+  const tiles = await service.buildTiles(parseStremioId('series', 'tt7654321:2:5'));
+  assert.ok((tiles[0]?.description ?? '').includes('S02E05 (09 Jan 24)'));
+});
+
+test('falls back to legacy border line when Trakt is failing', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') {
+      return new Response('[{"id":9,"imdbId":"tt1234567","title":"Movie","physicalRelease":"2020-03-07","hasFile":false,"monitored":true}]', { status: 200 });
+    }
+    if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new FailingTraktWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('movie', 'tt1234567'));
+  const firstLine = (tiles[0]?.description ?? '').split('\n')[0];
+  assert.equal(firstLine, '════════════════════');
+});
+
+test('formats datetime release in configured TZ when possible', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.timeZone = 'America/Los_Angeles';
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+    if (path === '/api/v3/movie') {
+      return new Response('[{"id":9,"imdbId":"tt1234567","title":"TZ Movie","digitalRelease":"2020-01-01T01:00:00Z","hasFile":true,"monitored":true}]', { status: 200 });
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  const service = new ArrStatusService(cfg, {
+    watchedLookup: new StaticWatchedLookup(false, false),
+    traktLookup: new StaticTraktLookup(undefined, undefined)
+  });
+  const tiles = await service.buildTiles(parseStremioId('movie', 'tt1234567'));
+  assert.ok((tiles[0]?.description ?? '').includes('(31 Dec 19)'));
+});

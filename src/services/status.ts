@@ -4,6 +4,8 @@ import { buildFileToken } from '../lib/file-tokens.js';
 import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
+import { TraktHtmlLookup, type TraktLookup } from './trakt.js';
+import { NoopWatchedLookup, type WatchedLookup } from './watched.js';
 
 // --- Tile formatting helpers ---
 
@@ -17,14 +19,47 @@ function truncate(s: string, maxLen: number): string {
   return cps.slice(0, maxLen - 1).join('') + '…';
 }
 
+function formatReleaseDate(value: string | undefined, timeZone: string): string | undefined {
+  if (!value) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, , day] = value.split('-');
+    const month = new Intl.DateTimeFormat('en-GB', { month: 'short', timeZone: 'UTC' })
+      .format(new Date(`${value}T00:00:00Z`));
+    return `${day} ${month} ${year.slice(-2)}`;
+  }
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: '2-digit',
+      timeZone
+    }).formatToParts(new Date(parsed));
+  } catch {
+    parts = new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: '2-digit'
+    }).formatToParts(new Date(parsed));
+  }
+  const day = parts.find((part) => part.type === 'day')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const year = parts.find((part) => part.type === 'year')?.value;
+  if (!day || !month || !year) return undefined;
+  return `${day} ${month} ${year}`;
+}
+
 /**
- * First line of a movie tile description: emoji + title + year, ≤32 chars.
+ * First line of a movie tile description: emoji + title + release date, ≤32 chars.
  */
-function movieLine(title?: string, year?: number): string {
+function movieLine(title: string | undefined, releaseDate: string | undefined, timeZone: string): string {
   if (!title) return '📽 Not in Radarr';
-  const yearStr = year ? ` (${year})` : '';
-  const maxTitle = 32 - 3 - yearStr.length; // 3 = '📽 '.length (emoji is 2 UTF-16 units + space)
-  return `📽 ${truncate(title, maxTitle)}${yearStr}`;
+  const release = formatReleaseDate(releaseDate, timeZone) ?? '?📅';
+  const suffix = ` (${release})`;
+  const maxTitle = 32 - 3 - suffix.length; // 3 = '📽 '.length (emoji is 2 UTF-16 units + space)
+  return `📽 ${truncate(title, maxTitle)}${suffix}`;
 }
 
 /**
@@ -43,6 +78,13 @@ function epLabel(season?: number, episode?: number): string {
   return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 }
 
+function episodeLineLabel(season: number | undefined, episode: number | undefined, releaseDate: string | undefined, timeZone: string): string {
+  const episodeTag = epLabel(season, episode);
+  if (!episodeTag) return '';
+  const release = formatReleaseDate(releaseDate, timeZone) ?? '?📅';
+  return `${episodeTag} (${release})`;
+}
+
 /**
  * Normalize a URL-ish text for compact card display.
  */
@@ -52,22 +94,50 @@ function cardEndpointLine(raw: string): string {
   return `📲 🔗  ${display}`;
 }
 
+function watchedLine(watched: boolean, borderFallback: boolean): string {
+  if (borderFallback) return '════════════════════';
+  return watched ? '👁️  WATCHED' : '🆕  UNWATCHED';
+}
+
 /**
  * Join non-empty lines into a newline-separated description.
  */
 function desc(...lines: string[]): string {
-  return ['════════════════════', ...lines.filter(Boolean)].join('\n');
+  return lines.filter(Boolean).join('\n');
 }
 
 export class ArrStatusService {
   private readonly radarr: RadarrClient;
   private readonly sonarr: SonarrClient;
   private readonly healthCache: TtlCache<{ radarr: ServiceHealth; sonarr: ServiceHealth }>;
+  private readonly watchedLookup: WatchedLookup;
+  private readonly traktLookup: TraktLookup;
 
-  constructor(private readonly config: AppConfig) {
+  constructor(private readonly config: AppConfig, deps?: { watchedLookup?: WatchedLookup; traktLookup?: TraktLookup }) {
     this.radarr = new RadarrClient(config);
     this.sonarr = new SonarrClient(config);
     this.healthCache = new TtlCache(config.serviceHealthCacheTtlMs);
+    this.watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
+    this.traktLookup = deps?.traktLookup ?? new TraktHtmlLookup();
+  }
+
+  private async resolveMovieReleaseDate(imdbId: string, arrReleaseDate?: string): Promise<string> {
+    if (formatReleaseDate(arrReleaseDate, this.config.timeZone)) return arrReleaseDate!;
+    const trakt = await this.traktLookup.getMovieReleaseDate(imdbId);
+    if (formatReleaseDate(trakt, this.config.timeZone)) return trakt!;
+    return '?📅';
+  }
+
+  private async resolveEpisodeReleaseDate(imdbId: string, season?: number, episode?: number, arrReleaseDate?: string): Promise<string> {
+    if (formatReleaseDate(arrReleaseDate, this.config.timeZone)) return arrReleaseDate!;
+    const trakt = await this.traktLookup.getEpisodeReleaseDate(imdbId, season, episode);
+    if (formatReleaseDate(trakt, this.config.timeZone)) return trakt!;
+    return '?📅';
+  }
+
+  private useBorderFallbackLine(): boolean {
+    const diagnostics = this.watchedLookup.getDiagnostics?.();
+    return diagnostics?.provider === 'trakt' && Boolean(diagnostics.lastSyncError);
   }
 
   buildActionLink(action: 'search' | 'add-search', parsed: ParsedStremioId): string {
@@ -104,7 +174,7 @@ export class ArrStatusService {
     return cardEndpointLine(this.config.sonarr.cardUrl || this.config.sonarr.baseUrl);
   }
 
-  private buildMovieTiles(status: ArrMovieStatus, parsed: ParsedStremioId): StatusTile[] {
+  private buildMovieTiles(status: ArrMovieStatus, parsed: ParsedStremioId, watched: boolean, borderFallback: boolean): StatusTile[] {
     switch (status.state) {
       case 'downloaded': {
         const fileUrl = (this.canDirectStream() && status.movieFileId != null)
@@ -114,7 +184,8 @@ export class ArrStatusService {
         return [{
           name: '✅\nFile\nReady',
           description: desc(
-            movieLine(status.title, status.year),
+            watchedLine(watched, borderFallback),
+            movieLine(status.title, status.releaseDate, this.config.timeZone),
             '✅ File is downloaded',
             fileUrl ? '🗯️ ▶️  PLAY FROM PI ►' : (kodiExternalUrl ? '🗯️ ▶️  OPEN IN KODI ►' : '🗯️ ▶️  PLAY FROM PI ►')
           ),
@@ -130,12 +201,12 @@ export class ArrStatusService {
       case 'downloading':
         return [{
           name: '⏱️📥...\nDLing',
-          description: desc(movieLine(status.title, status.year), '🗯️ ⏱  DOWNLOADING IN RADARR…', this.radarrCardLine())
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️ ⏱  DOWNLOADING IN RADARR…', this.radarrCardLine())
         }];
       case 'missing':
         return [{
           name: '🔍🦜\nSearch\n+ DL',
-          description: desc(movieLine(status.title, status.year), '⭕ Monitored — file missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ Monitored — file missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -143,7 +214,7 @@ export class ArrStatusService {
       case 'added':
         return [{
           name: '🔍🦜\nSearch\n+ DL',
-          description: desc(movieLine(status.title, status.year), '⭕ In Radarr — not monitored', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ In Radarr — not monitored', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -151,19 +222,19 @@ export class ArrStatusService {
       case 'not_added':
         return [{
           name: '➕ Add\nto *Arr\n+ DL',
-          description: desc('📽  Not in Radarr', '🗯️ ➕  ADD + SEARCH ►', this.radarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), '📽  Not in Radarr', '🗯️ ➕  ADD + SEARCH ►', this.radarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'unavailable':
       default:
-        return [{ name: '🛑❌\nRadarr DOWN', description: desc('🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()) }];
+        return [{ name: '🛑❌\nRadarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()) }];
     }
   }
 
-  private buildSeriesTiles(status: ArrEpisodeStatus, parsed: ParsedStremioId): StatusTile[] {
-    const ep = epLabel(parsed.season, parsed.episode);
+  private buildSeriesTiles(status: ArrEpisodeStatus, parsed: ParsedStremioId, watched: boolean, borderFallback: boolean): StatusTile[] {
+    const ep = episodeLineLabel(parsed.season, parsed.episode, status.episodeReleaseDate, this.config.timeZone);
     switch (status.state) {
       case 'episode_downloaded': {
         const fileUrl = (this.canDirectStream() && status.episodeFileId != null)
@@ -173,6 +244,7 @@ export class ArrStatusService {
         return [{
           name: '✅\nFile\nReady',
           description: desc(
+            watchedLine(watched, borderFallback),
             seriesLine(status.title),
             ep ? `✅ ${ep} is downloaded` : '✅ File is downloaded',
             fileUrl ? '🗯️ ▶️  PLAY FROM PI ►' : (kodiExternalUrl ? '🗯️ ▶️  OPEN IN KODI ►' : '🗯️ ▶️  PLAY FROM PI ►')
@@ -189,12 +261,12 @@ export class ArrStatusService {
       case 'episode_downloading':
         return [{
           name: '⏱️📥...\nDLing',
-          description: desc(seriesLine(status.title), ep ? `🗯️ ⏱  ${ep} DOWNLOADING…` : '🗯️ ⏱  DOWNLOADING…', this.sonarrCardLine())
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `🗯️ ⏱  ${ep} DOWNLOADING…` : '🗯️ ⏱  DOWNLOADING…', this.sonarrCardLine())
         }];
       case 'episode_missing':
         return [{
           name: '🔍🦜\nSearch\n+ DL',
-          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -203,7 +275,7 @@ export class ArrStatusService {
       case 'episode_monitored':
         return [{
           name: '🔍🦜\nSearch\n+ DL',
-          description: desc(seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -211,14 +283,14 @@ export class ArrStatusService {
       case 'series_not_added':
         return [{
           name: '➕ Add\nto *Arr\n+ DL',
-          description: desc('📺  Not in Sonarr', '🗯️ ➕  ADD SERIES + SEARCH ►', this.sonarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), '📺  Not in Sonarr', '🗯️ ➕  ADD SERIES + SEARCH ►', this.sonarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'unavailable':
       default:
-        return [{ name: '🛑❌\nSonarr DOWN', description: desc('🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];
+        return [{ name: '🛑❌\nSonarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];
     }
   }
 
@@ -235,25 +307,31 @@ export class ArrStatusService {
       if (!this.config.radarr.enabled) {
         return [];
       }
+      const watched = await this.watchedLookup.isMovieWatched(parsed.imdbId);
+      const borderFallback = this.useBorderFallbackLine();
       const health = await this.getServiceHealth();
       if (!health.radarr.reachable) {
-        return [{ name: '🛑❌\nRadarr DOWN', description: desc('🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()) }];
+        return [{ name: '🛑❌\nRadarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()) }];
       }
       const status = await this.radarr.getMovieStatus(parsed.imdbId);
-      return this.buildMovieTiles(status, parsed);
+      const releaseDate = await this.resolveMovieReleaseDate(parsed.imdbId, status.releaseDate);
+      return this.buildMovieTiles({ ...status, releaseDate }, parsed, watched, borderFallback);
     }
 
     if (!this.config.sonarr.enabled) {
       return [];
     }
 
+    const watched = await this.watchedLookup.isEpisodeWatched(parsed.imdbId, parsed.season, parsed.episode);
+    const borderFallback = this.useBorderFallbackLine();
     const health = await this.getServiceHealth();
     if (!health.sonarr.reachable) {
-      return [{ name: '🛑❌\nSonarr DOWN', description: desc('🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];
+      return [{ name: '🛑❌\nSonarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];
     }
 
     const status = await this.sonarr.getEpisodeStatus(parsed.imdbId, parsed.season, parsed.episode);
-    return this.buildSeriesTiles(status, parsed);
+    const episodeReleaseDate = await this.resolveEpisodeReleaseDate(parsed.imdbId, parsed.season, parsed.episode, status.episodeReleaseDate);
+    return this.buildSeriesTiles({ ...status, episodeReleaseDate }, parsed, watched, borderFallback);
   }
 
   async triggerAdd(parsed: ParsedStremioId): Promise<AddActionResult> {
