@@ -301,13 +301,14 @@ export function loadConfig(): AppConfig {
   const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
   const manifestLogoEnv = readString('MANIFEST_LOGO_URL');
   const normalizedManifestLogo = manifestLogoEnv.toLowerCase();
+  const localManifestLogoUrl = `${publicBaseUrl}/assets/logo.png?v=${encodeURIComponent(packageVersion)}`;
   const manifestLogoUrl = normalizedManifestLogo === 'none'
     ? ''
     : normalizedManifestLogo === 'local'
-      ? `${publicBaseUrl}/assets/logo.png`
+      ? localManifestLogoUrl
       : (manifestLogoEnv
         ? ensureHttpUrl('MANIFEST_LOGO_URL', manifestLogoEnv)
-        : 'https://raw.githubusercontent.com/cbkii/stremio-addarr/main/assets/logo.png');
+        : localManifestLogoUrl);
   const targetClient = parseTargetClient(readString('TARGET_CLIENT', 'android-tv'));
   const timeZone = readString('TZ', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);
