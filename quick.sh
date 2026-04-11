@@ -62,15 +62,16 @@ fi
 
 # Configure ANSI colors when output is a terminal; otherwise use plain text.
 if [[ -t 1 ]]; then
-  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_BLUE=$'\033[34m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'
+  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_BLUE=$'\033[34m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_CYAN=$'\033[36m'
 else
-  C_RESET=""; C_BOLD=""; C_BLUE=""; C_GREEN=""; C_YELLOW=""; C_RED=""
+  C_RESET=""; C_BOLD=""; C_BLUE=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_CYAN=""
 fi
 
 say() { echo -e "${C_BLUE}${C_BOLD}==>${C_RESET} $*"; }
 ok() { echo -e "${C_GREEN}${C_BOLD}[OK]${C_RESET} $*"; }
 warn() { echo -e "${C_YELLOW}${C_BOLD}[WARN]${C_RESET} $*"; }
 fail() { echo -e "${C_RED}${C_BOLD}[FAIL]${C_RESET} $*"; }
+cmd() { echo -e "${C_CYAN}${C_BOLD}[»]${C_RESET} $*"; }
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -80,7 +81,7 @@ run_step() {
   local desc="$1"; shift
   local log="$TMP_DIR/cmd.log"
   say "$desc"
-  echo "Command: $*"
+  cmd "$*"
   if "$@" >"$log" 2>&1; then
     ok "$desc"
   else
@@ -96,7 +97,7 @@ run_step() {
 run_step_live() {
   local desc="$1"; shift
   say "$desc"
-  echo "Command: $*"
+  cmd "$*"
   if "$@"; then
     ok "$desc"
   else
@@ -110,7 +111,7 @@ run_step_live() {
 show_step_output() {
   local desc="$1"; shift
   say "$desc"
-  echo "Command: $*"
+  cmd "$*"
   if "$@"; then
     ok "$desc"
   else
@@ -260,6 +261,122 @@ print_status_line() {
   esac
 }
 
+load_env_file() {
+  if [[ -f "$INSTALL_DIR/.env" ]]; then
+    set +u
+    # shellcheck disable=SC1090
+    source "$INSTALL_DIR/.env"
+    set -u
+  fi
+}
+
+upsert_env_key() {
+  local key="$1"
+  local value="$2"
+  local env_file="$INSTALL_DIR/.env"
+  if grep -Eq "^[[:space:]]*${key}=" "$env_file"; then
+    sed -i -E "s|^[[:space:]]*${key}=.*$|${key}=${value}|" "$env_file"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$env_file"
+  fi
+}
+
+configure_trakt_oauth() {
+  say "Optional Trakt OAuth setup"
+  if ! prompt_confirm "Configure Trakt watched-sync OAuth in this quick run?"; then
+    warn "Skipping Trakt OAuth setup."
+    return 0
+  fi
+
+  load_env_file
+
+  local trakt_client_id="${TRAKT_CLIENT_ID:-}"
+  local trakt_client_secret="${TRAKT_CLIENT_SECRET:-}"
+  local trakt_api_base_url="${TRAKT_API_BASE_URL:-https://api.trakt.tv}"
+  local trakt_redirect_uri="${TRAKT_REDIRECT_URI:-urn:ietf:wg:oauth:2.0:oob}"
+  local code=""
+  local response_file="$TMP_DIR/trakt-token.json"
+  local token_http_code=""
+  local refresh_token=""
+  local access_token=""
+  local short_refresh=""
+  local short_access=""
+
+  if [[ -z "$trakt_client_id" ]]; then
+    read -r -p "Enter TRAKT_CLIENT_ID: " trakt_client_id
+    upsert_env_key "TRAKT_CLIENT_ID" "$trakt_client_id"
+  fi
+  if [[ -z "$trakt_client_secret" ]]; then
+    read -r -p "Enter TRAKT_CLIENT_SECRET: " trakt_client_secret
+    upsert_env_key "TRAKT_CLIENT_SECRET" "$trakt_client_secret"
+  fi
+
+  upsert_env_key "TRAKT_API_BASE_URL" "$trakt_api_base_url"
+  upsert_env_key "TRAKT_REDIRECT_URI" "$trakt_redirect_uri"
+
+  local encoded_redirect_uri
+  encoded_redirect_uri="$(printf '%s' "$trakt_redirect_uri" | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's/\//%2F/g')"
+  local auth_url="https://trakt.tv/oauth/authorize?response_type=code&client_id=${trakt_client_id}&redirect_uri=${encoded_redirect_uri}"
+  say "Complete Trakt authorization"
+  echo "1) Open this URL in any browser and approve access:"
+  echo "   $auth_url"
+  echo "2) Copy the authorization code shown by Trakt."
+  read -r -p "Paste authorization code: " code
+
+  say "Exchange authorization code for refresh token"
+  cmd "curl -sS -X POST ${trakt_api_base_url}/oauth/token -H Content-Type: application/json ..."
+  token_http_code="$(
+    curl -sS -o "$response_file" -w '%{http_code}' \
+      -X POST "${trakt_api_base_url}/oauth/token" \
+      -H 'Content-Type: application/json' \
+      -d "{\"code\":\"${code}\",\"client_id\":\"${trakt_client_id}\",\"client_secret\":\"${trakt_client_secret}\",\"redirect_uri\":\"${trakt_redirect_uri}\",\"grant_type\":\"authorization_code\"}"
+  )"
+
+  if [[ "$token_http_code" != "200" ]]; then
+    fail "Trakt token exchange failed (HTTP ${token_http_code})."
+    cat "$response_file"
+    warn "You can re-run quick.sh and choose Trakt OAuth setup again."
+    return 0
+  fi
+
+  refresh_token="$(node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(j.refresh_token||'');" "$response_file")"
+  access_token="$(node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(j.access_token||'');" "$response_file")"
+
+  if [[ -z "$refresh_token" ]]; then
+    fail "Trakt token response did not include refresh_token."
+    cat "$response_file"
+    return 0
+  fi
+
+  upsert_env_key "TRAKT_REFRESH_TOKEN" "$refresh_token"
+  upsert_env_key "TRAKT_SYNC_ENABLED" "true"
+  if ! grep -Eq '^[[:space:]]*TRAKT_SYNC_MINS=' "$INSTALL_DIR/.env"; then
+    upsert_env_key "TRAKT_SYNC_MINS" "360"
+  fi
+
+  short_refresh="${refresh_token:0:6}...${refresh_token: -4}"
+  short_access="${access_token:0:6}...${access_token: -4}"
+  ok "Stored Trakt OAuth tokens in .env (refresh=${short_refresh}, access=${short_access})."
+  warn "Restart service to pick up updated TRAKT_* values."
+}
+
+VERIFICATION_FAILURES=0
+run_verification() {
+  local desc="$1"; shift
+  local log="$TMP_DIR/verify.log"
+  say "$desc"
+  cmd "$*"
+  if "$@" >"$log" 2>&1; then
+    print_status_line OK "$desc"
+  else
+    print_status_line FAIL "$desc"
+    echo -e "${C_RED}${C_BOLD}----- VERIFICATION OUTPUT BEGIN -----${C_RESET}"
+    cat "$log"
+    echo -e "${C_RED}${C_BOLD}----- VERIFICATION OUTPUT END -----${C_RESET}"
+    VERIFICATION_FAILURES=$((VERIFICATION_FAILURES + 1))
+  fi
+}
+
 # Helper: normalize semver tag input so 1.2.3 and v1.2.3 behave the same.
 normalize_tag() {
   local t="$1"
@@ -344,7 +461,7 @@ echo "Service account target: ${SVC_USER}:${SVC_GROUP}"
 echo "Install directory: $INSTALL_DIR"
 
 say "Preflight checks"
-for c in gh sha256sum tar npm curl sudo file diff icdiff systemctl; do
+for c in gh sha256sum tar npm node curl sudo file diff icdiff systemctl; do
   check_cmd "$c"
 done
 check_cmd "${EDITOR:-nano}"
@@ -451,6 +568,9 @@ else
   run_step "Restart stremio-addarr" sudo systemctl restart stremio-addarr
 fi
 
+configure_trakt_oauth
+load_env_file
+
 ###############################################################################
 # VERIFICATION SECTION
 # -----------------------------------------------------------------------------
@@ -462,42 +582,33 @@ if systemctl is-active --quiet stremio-addarr; then
   print_status_line OK "systemd reports stremio-addarr is active."
 else
   print_status_line FAIL "systemd does not report active service."
-  run_step "Show recent service logs" sudo journalctl -u stremio-addarr -n 80 --no-pager
+  VERIFICATION_FAILURES=$((VERIFICATION_FAILURES + 1))
+  say "Show recent service logs"
+  cmd "sudo journalctl -u stremio-addarr -n 80 --no-pager"
+  sudo journalctl -u stremio-addarr -n 80 --no-pager || true
 fi
-
-if curl -fsS http://127.0.0.1:7010/healthz >/dev/null; then
-  print_status_line OK "Local health endpoint responds."
-else
-  print_status_line FAIL "Local health endpoint failed."
-  run_step "Fetch local health endpoint for diagnostics" curl -v http://127.0.0.1:7010/healthz
-fi
-
-if curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null; then
-  print_status_line OK "Local manifest endpoint responds."
-else
-  print_status_line FAIL "Local manifest endpoint failed."
-  run_step "Fetch local manifest for diagnostics" curl -v http://127.0.0.1:7010/manifest.json
-fi
-
-set +u
-source "$INSTALL_DIR/.env"
-set -u
 
 if [[ -z "${PUBLIC_BASE_URL:-}" ]]; then
   print_status_line WARN "PUBLIC_BASE_URL is missing in .env. Configure hosting before Stremio install."
 else
-  if curl -fI "${PUBLIC_BASE_URL}/manifest.json" >/dev/null; then
-    print_status_line OK "Public HTTPS manifest endpoint responds."
-  else
-    print_status_line WARN "Public HTTPS manifest check failed. Usually Caddy/DNS/TLS still needs setup."
-  fi
+  run_verification "Public health endpoint responds." curl -fsS "${PUBLIC_BASE_URL}/healthz"
+  run_verification "Public HTTPS manifest endpoint responds." curl -fI "${PUBLIC_BASE_URL}/manifest.json"
+  run_verification "Public status.json endpoint responds." curl -fsS "${PUBLIC_BASE_URL}/status.json"
   echo
   echo -e "${C_GREEN}${C_BOLD}Install URL:${C_RESET} ${PUBLIC_BASE_URL}/manifest.json"
   echo "Paste this exact URL into Stremio: ${PUBLIC_BASE_URL}/manifest.json"
 fi
 
+run_verification "Local health endpoint responds." curl -fsS http://127.0.0.1:7010/healthz
+run_verification "Local manifest endpoint responds." curl -fsS http://127.0.0.1:7010/manifest.json
+run_verification "Local status.json endpoint responds." curl -fsS http://127.0.0.1:7010/status.json
+
 echo
-ok "Quick $MODE flow completed."
+if (( VERIFICATION_FAILURES == 0 )); then
+  ok "Quick $MODE flow completed."
+else
+  warn "Quick $MODE flow completed with ${VERIFICATION_FAILURES} verification failure(s)."
+fi
 warn "If hosting/TLS changed, re-run README_HOST.md and then re-run: bash quick.sh $MODE"
 
 ###############################################################################

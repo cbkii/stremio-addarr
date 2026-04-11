@@ -490,15 +490,54 @@ Checklist:
 
 This add-on cannot read native Stremio account sessions directly inside stream handlers, so watched sync is implemented as **addon-managed Trakt OAuth**.
 
+### Fast path (recommended): guided OAuth via `quick.sh`
+
+Run install or upgrade as normal, and when prompted:
+- choose **yes** for "Configure Trakt watched-sync OAuth in this quick run?"
+- open the printed Trakt authorize URL
+- approve access and paste the returned authorization code
+
+`quick.sh` then exchanges the code for tokens and writes:
+- `TRAKT_CLIENT_ID`
+- `TRAKT_CLIENT_SECRET`
+- `TRAKT_REFRESH_TOKEN`
+- `TRAKT_SYNC_ENABLED=true`
+- `TRAKT_SYNC_MINS=360` (if missing)
+
+### Manual path (advanced / no quick script)
+
 1. Create a Trakt API app and obtain:
    - `TRAKT_CLIENT_ID`
    - `TRAKT_CLIENT_SECRET`
-   - `TRAKT_REFRESH_TOKEN`
-2. Set:
+2. Set (or keep defaults):
+   - `TRAKT_API_BASE_URL=https://api.trakt.tv`
+   - `TRAKT_REDIRECT_URI=urn:ietf:wg:oauth:2.0:oob`
+3. Build authorize URL and approve access:
+
+```text
+https://trakt.tv/oauth/authorize?response_type=code&client_id=YOUR_TRAKT_CLIENT_ID&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob
+```
+
+4. Exchange the returned code for tokens:
+
+```bash
+curl -sS -X POST "https://api.trakt.tv/oauth/token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code":"PASTE_AUTHORIZATION_CODE",
+    "client_id":"YOUR_TRAKT_CLIENT_ID",
+    "client_secret":"YOUR_TRAKT_CLIENT_SECRET",
+    "redirect_uri":"urn:ietf:wg:oauth:2.0:oob",
+    "grant_type":"authorization_code"
+  }'
+```
+
+5. Copy `refresh_token` from response JSON into `.env` as `TRAKT_REFRESH_TOKEN`.
+6. Set:
    - `TRAKT_SYNC_ENABLED=true`
    - `TRAKT_SYNC_MINS=360` (enforced to `>=40`; values `<=40` become `40`)
    - `TZ=Etc/UTC` (or your Pi timezone, e.g. `Europe/Sofia`) for local date rendering
-3. Restart the service.
+7. Restart the service.
 
 Notes:
 - Sync is interval-gated and persisted to `TRAKT_SYNC_STATE_FILE` so restarts do not force immediate re-sync.
