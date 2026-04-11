@@ -92,6 +92,119 @@ run_step() {
   fi
 }
 
+# Helper: run one named step while streaming output to terminal.
+run_step_live() {
+  local desc="$1"; shift
+  say "$desc"
+  echo "Command: $*"
+  if "$@"; then
+    ok "$desc"
+  else
+    fail "$desc"
+    exit 1
+  fi
+}
+
+# Helper: show command output to terminal without failing the script when command
+# returns non-zero (e.g., diff when files differ).
+show_step_output() {
+  local desc="$1"; shift
+  say "$desc"
+  echo "Command: $*"
+  if "$@"; then
+    ok "$desc"
+  else
+    warn "$desc (command returned non-zero; continuing)"
+  fi
+}
+
+# Helper: prompt for yes/no confirmation.
+prompt_confirm() {
+  local question="$1"
+  local ans=""
+  while true; do
+    read -r -p "$question [y/N]: " ans
+    case "${ans,,}" in
+      y|yes) return 0 ;;
+      n|no|"") return 1 ;;
+      *) warn "Please enter y or n." ;;
+    esac
+  done
+}
+
+# Helper: merge existing .env values into .env.example template shape.
+# - Reads keys from commented and uncommented assignment lines.
+# - Prefers existing .env values for keys present in template.
+# - Preserves template comments/layout for unknown lines.
+# - Appends custom keys from existing .env that template does not include.
+merge_env_with_template() {
+  local current_env="$1"
+  local template_env="$2"
+  local output_env="$3"
+
+  awk -v existing_file="$current_env" '
+    function parse_assignment(line, key_out, val_out,  w, m) {
+      w = line
+      sub(/\r$/, "", w)
+      if (w ~ /^[[:space:]]*$/) return 0
+      if (w ~ /^[[:space:]]*#/) sub(/^[[:space:]]*#[[:space:]]*/, "", w)
+      if (match(w, /^([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=(.*)$/, m)) {
+        key_out[1] = m[1]
+        val_out[1] = m[2]
+        return 1
+      }
+      return 0
+    }
+
+    BEGIN {
+      while ((getline line < existing_file) > 0) {
+        delete key_buf
+        delete val_buf
+        if (parse_assignment(line, key_buf, val_buf)) {
+          key = key_buf[1]
+          if (!(key in existing_vals)) {
+            existing_vals[key] = val_buf[1]
+            existing_order[++existing_count] = key
+          }
+        }
+      }
+      close(existing_file)
+    }
+
+    {
+      line = $0
+      delete key_buf
+      delete val_buf
+      if (parse_assignment(line, key_buf, val_buf)) {
+        key = key_buf[1]
+        template_seen[key] = 1
+        if (key in existing_vals) {
+          print key "=" existing_vals[key]
+        } else {
+          print line
+        }
+      } else {
+        print line
+      }
+    }
+
+    END {
+      appended = 0
+      for (i = 1; i <= existing_count; i++) {
+        key = existing_order[i]
+        if (!(key in template_seen)) {
+          if (!appended) {
+            print ""
+            print "# --- Preserved custom entries from previous .env ---"
+            appended = 1
+          }
+          print key "=" existing_vals[key]
+        }
+      }
+    }
+  ' "$template_env" > "$output_env"
+}
+
 # Helper: ensure required command-line dependencies exist.
 check_cmd() {
   local c="$1"
@@ -107,10 +220,11 @@ check_cmd() {
 prompt_gate() {
   local title="$1"
   local edit_file="$2"
+  local editor="${EDITOR:-nano}"
   while true; do
     echo
     echo -e "${C_BOLD}${title}${C_RESET}"
-    read -r -p "Approve and continue? [y] yes / [n] stop and edit with nano: " ans
+    read -r -p "Approve and continue? [y] yes / [n] stop and edit with ${editor}: " ans
     case "${ans,,}" in
       y|yes)
         ok "Approved by operator."
@@ -118,7 +232,12 @@ prompt_gate() {
         ;;
       n|no)
         if [[ -n "$edit_file" ]]; then
-          run_step "Open $edit_file in nano for manual edits" nano "$edit_file"
+          if [[ ! -t 0 || ! -t 1 ]]; then
+            fail "Interactive editor requested but no TTY is available."
+            echo "Re-run from an interactive shell or manually edit: $edit_file"
+            exit 1
+          fi
+          run_step_live "Open $edit_file in ${editor} for manual edits" "$editor" "$edit_file"
         else
           warn "No edit file provided for this gate."
         fi
@@ -225,9 +344,10 @@ echo "Service account target: ${SVC_USER}:${SVC_GROUP}"
 echo "Install directory: $INSTALL_DIR"
 
 say "Preflight checks"
-for c in gh sha256sum tar npm curl sudo file diff nano systemctl; do
+for c in gh sha256sum tar npm curl sudo file diff icdiff systemctl; do
   check_cmd "$c"
 done
+check_cmd "${EDITOR:-nano}"
 run_step "Verify GitHub CLI authentication status" gh auth status
 
 ###############################################################################
@@ -302,7 +422,16 @@ else
   #############################################################################
   say "Upgrade mode review gates"
   if [[ -f "$INSTALL_DIR/.env" ]]; then
-    run_step "Show .env.example vs existing .env diff" bash -lc "cd '$INSTALL_DIR' && diff -u .env.example .env || true"
+    show_step_output "Show icdiff .env vs .env.example" bash -lc "cd '$INSTALL_DIR' && icdiff .env .env.example"
+    if prompt_confirm "Merge existing .env values into the new .env.example template and replace .env?"; then
+      merge_tmp_path="$TMP_DIR/.env.merged"
+      run_step "Back up existing .env to .env.backup-before-merge" cp "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.backup-before-merge"
+      run_step "Build merged .env from template + existing values" merge_env_with_template "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.example" "$merge_tmp_path"
+      run_step "Replace .env with merged template result" cp "$merge_tmp_path" "$INSTALL_DIR/.env"
+      show_step_output "Show merged .env vs .env.example (post-merge icdiff)" bash -lc "cd '$INSTALL_DIR' && icdiff .env .env.example"
+    else
+      warn "Skipped .env merge step at operator request."
+    fi
     prompt_gate "Review .env diff and approve." "$INSTALL_DIR/.env"
   else
     warn "No existing .env found. Creating from .env.example."
@@ -311,7 +440,7 @@ else
   fi
 
   if [[ -f "$SERVICE_PATH" ]]; then
-    run_step "Show systemd template vs installed unit diff" bash -lc "cd '$INSTALL_DIR' && diff -u deploy/stremio-addarr.service.example '$SERVICE_PATH' || true"
+    show_step_output "Show systemd template vs installed unit diff" bash -lc "cd '$INSTALL_DIR' && diff -u deploy/stremio-addarr.service.example '$SERVICE_PATH'"
   else
     warn "No existing service file found. Installing template."
     run_step "Install systemd service template" sudo cp "$INSTALL_DIR/deploy/stremio-addarr.service.example" "$SERVICE_PATH"
