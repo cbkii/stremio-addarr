@@ -67,15 +67,20 @@ bash quick.sh upgrade --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
 
 ---
 
-## 3) Choose your path
+## 3) Table of contents / choose your path
 
-- **Fresh install from scratch** → go to [4) Fresh install](#4-fresh-install-from-scratch)
-- **Upgrade existing install** → go to [5) Upgrade existing install](#5-upgrade-existing-install)
+- **Quick install (recommended)** → go to [4) Quick install](#4-quick-install-recommended)
+- **Quick upgrade (recommended)** → go to [5) Quick upgrade](#5-quick-upgrade-recommended)
+- **Runtime checks** → go to [6) Runtime checks](#6-runtime-checks)
+- **Logs and diagnostics** → go to [7) Logs and diagnostics](#7-logs-and-diagnostics)
+- **Android TV + Stremio troubleshooting** → go to [8) Android TV + Stremio troubleshooting](#8-android-tv--stremio-troubleshooting)
+- **Troubleshooting playbook** → go to [9) Troubleshooting playbook](#9-troubleshooting-playbook)
+- **Release and hosting docs** → go to [10) Release and hosting docs](#10-release-and-hosting-docs)
 - **Docker (optional alternative)**: `Dockerfile` and `docker-compose.example.yml` are provided for containerized deployment; the systemd path in this README remains the canonical/default setup.
 
 ---
 
-## 4) Fresh install from scratch
+## 4) Quick install (recommended)
 
 Use the guided quick script. It performs the release download, checksum verification, extraction, dependency install, `.env` setup gate, systemd setup gate, and verification checks with clear `OK|WARN|FAIL` output.
 
@@ -186,7 +191,7 @@ On Stremio (Android TV):
 
 ---
 
-## 5) Upgrade existing install
+## 5) Quick upgrade (recommended)
 
 Use the guided quick script. It keeps your existing `.env` and service wiring, reapplies ownership and dependencies, opens explicit review gates for `.env` and systemd unit changes, and runs verification checks.
 
