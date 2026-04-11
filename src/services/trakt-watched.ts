@@ -13,6 +13,8 @@ interface TraktTokenResponse {
 interface PersistedTraktState {
   lastSyncAt?: number;
   refreshToken?: string;
+  accessToken?: string;
+  tokenExpiresAt?: number;
 }
 
 interface TraktWatchedMovie {
@@ -24,6 +26,9 @@ interface TraktWatchedShow {
   seasons?: Array<{ number?: number; episodes?: Array<{ number?: number }> }>;
 }
 
+// Trakt access tokens expire after 90 days.
+const TRAKT_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
 export class TraktWatchedLookup implements WatchedLookup {
   private readonly syncMs: number;
   private readonly stateFile: string;
@@ -31,6 +36,7 @@ export class TraktWatchedLookup implements WatchedLookup {
   private readonly episodeWatched = new Set<string>();
   private readonly lookupCache = new TtlCache<boolean>(60_000);
   private accessToken = '';
+  private tokenExpiresAt = 0;
   private refreshToken: string;
   private lastSyncAt = 0;
   private lastSyncError?: string;
@@ -103,7 +109,9 @@ export class TraktWatchedLookup implements WatchedLookup {
     const startedAt = Date.now();
     this.logger.info('trakt sync start', { enabled: true });
     try {
-      await this.refreshAccessToken();
+      if (!this.accessToken || Date.now() >= this.tokenExpiresAt) {
+        await this.refreshAccessToken();
+      }
       const [movies, shows] = await Promise.all([
         this.traktGet<TraktWatchedMovie[]>('/sync/watched/movies'),
         this.traktGet<TraktWatchedShow[]>('/sync/watched/shows')
@@ -160,10 +168,24 @@ export class TraktWatchedLookup implements WatchedLookup {
     }
     this.accessToken = response.access_token;
     this.refreshToken = response.refresh_token;
+    this.tokenExpiresAt = Date.now() + TRAKT_TOKEN_TTL_MS;
     await this.persistState();
   }
 
   private async traktGet<T>(endpoint: string): Promise<T> {
+    try {
+      return await this.doTraktGet<T>(endpoint);
+    } catch (error) {
+      // On 401 the token may have been revoked early; refresh once and retry.
+      if (error instanceof Error && error.message === 'http_401') {
+        await this.refreshAccessToken();
+        return this.doTraktGet<T>(endpoint);
+      }
+      throw error;
+    }
+  }
+
+  private doTraktGet<T>(endpoint: string): Promise<T> {
     return this.fetchJson<T>(`${this.config.traktSync.apiBaseUrl}${endpoint}`, {
       method: 'GET',
       headers: {
@@ -197,6 +219,8 @@ export class TraktWatchedLookup implements WatchedLookup {
       if (parsed.refreshToken?.trim()) {
         this.refreshToken = parsed.refreshToken.trim();
       }
+      this.accessToken = typeof parsed.accessToken === 'string' ? parsed.accessToken : '';
+      this.tokenExpiresAt = typeof parsed.tokenExpiresAt === 'number' ? parsed.tokenExpiresAt : 0;
     } catch {
       this.lastSyncAt = 0;
     }
@@ -207,7 +231,9 @@ export class TraktWatchedLookup implements WatchedLookup {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(this.stateFile, JSON.stringify({
       lastSyncAt: this.lastSyncAt,
-      refreshToken: this.refreshToken
+      refreshToken: this.refreshToken,
+      accessToken: this.accessToken,
+      tokenExpiresAt: this.tokenExpiresAt
     }), 'utf8');
   }
 

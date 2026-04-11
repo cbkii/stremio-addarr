@@ -4,7 +4,7 @@ import { buildFileToken } from '../lib/file-tokens.js';
 import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
-import { TraktHtmlLookup, type TraktLookup } from './trakt.js';
+import { TraktHtmlLookup, TraktApiLookup, type TraktLookup } from './trakt.js';
 import { NoopWatchedLookup, type WatchedLookup } from './watched.js';
 
 // --- Tile formatting helpers ---
@@ -55,10 +55,16 @@ function formatReleaseDate(value: string | undefined, timeZone: string): string 
  * First line of a movie tile description: emoji + title + release date, ≤32 chars.
  */
 function movieLine(title: string | undefined, releaseDate: string | undefined, timeZone: string): string {
-  if (!title) return '📽 Not in Radarr';
+  if (!title) {
+    // For not-yet-added items only show a date if one was resolved; omit the
+    // ?📅 placeholder because the item is unknown to Radarr, not just undated.
+    const formattedDate = formatReleaseDate(releaseDate, timeZone);
+    return formattedDate ? `📽 Not in Radarr (${formattedDate})` : '📽 Not in Radarr';
+  }
   const release = formatReleaseDate(releaseDate, timeZone) ?? '?📅';
   const suffix = ` (${release})`;
-  const maxTitle = 32 - 3 - suffix.length; // 3 = '📽 '.length (emoji is 2 UTF-16 units + space)
+  // Use codepoint length to keep arithmetic consistent with truncate().
+  const maxTitle = 32 - 3 - Array.from(suffix).length; // 3 = '📽 ' (one emoji codepoint + space)
   return `📽 ${truncate(title, maxTitle)}${suffix}`;
 }
 
@@ -118,7 +124,7 @@ export class ArrStatusService {
     this.sonarr = new SonarrClient(config);
     this.healthCache = new TtlCache(config.serviceHealthCacheTtlMs);
     this.watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
-    this.traktLookup = deps?.traktLookup ?? new TraktHtmlLookup();
+    this.traktLookup = deps?.traktLookup ?? (config.traktSync.clientId ? new TraktApiLookup(config.traktSync.clientId) : new TraktHtmlLookup());
   }
 
   private async resolveMovieReleaseDate(imdbId: string, arrReleaseDate?: string): Promise<string> {
@@ -222,7 +228,7 @@ export class ArrStatusService {
       case 'not_added':
         return [{
           name: '➕ Add\nto *Arr\n+ DL',
-          description: desc(watchedLine(watched, borderFallback), '📽  Not in Radarr', '🗯️ ➕  ADD + SEARCH ►', this.radarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️ ➕  ADD + SEARCH ►', this.radarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -283,7 +289,7 @@ export class ArrStatusService {
       case 'series_not_added':
         return [{
           name: '➕ Add\nto *Arr\n+ DL',
-          description: desc(watchedLine(watched, borderFallback), '📺  Not in Sonarr', '🗯️ ➕  ADD SERIES + SEARCH ►', this.sonarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), '📺  Not in Sonarr', ep, '🗯️ ➕  ADD SERIES + SEARCH ►', this.sonarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true

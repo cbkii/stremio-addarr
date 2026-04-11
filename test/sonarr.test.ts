@@ -64,7 +64,7 @@ test('episode downloaded status includes episodeFileId', async () => {
   assert.equal(status.episodeFileId, 55);
 });
 
-test('episode release date prefers earliest Sonarr air date variant', async () => {
+test('episode release date prefers airDate (broadcast date) over airDateUtc', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
   const client = new SonarrClient(
@@ -87,6 +87,33 @@ test('episode release date prefers earliest Sonarr air date variant', async () =
 
   const status = await client.getEpisodeStatus('tt9', 1, 2);
   assert.equal(status.episodeReleaseDate, '2024-01-08');
+});
+
+test('episode release date uses airDate even when it is later than airDateUtc', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  const client = new SonarrClient(
+    cfg,
+    new FakeHttp({
+      get: {
+        '/api/v3/series': [{ id: 22, imdbId: 'tt9', title: 'Show' }],
+        '/api/v3/episode?seriesId=22': [{
+          id: 7,
+          seasonNumber: 1,
+          episodeNumber: 2,
+          monitored: true,
+          airDateUtc: '2024-01-08T23:00:00Z',
+          airDate: '2024-01-09'
+        }],
+        '/api/v3/queue?page=1&pageSize=250&includeUnknownSeriesItems=true': { records: [] }
+      }
+    }) as never
+  );
+
+  // airDate (2024-01-09) is the broadcast date and is preferred even though
+  // airDateUtc (2024-01-08T23:00:00Z) resolves to an earlier UTC timestamp.
+  const status = await client.getEpisodeStatus('tt9', 1, 2);
+  assert.equal(status.episodeReleaseDate, '2024-01-09');
 });
 
 test('getEpisodeFilePath returns path from Arr API', async () => {
