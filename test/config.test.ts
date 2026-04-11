@@ -27,7 +27,7 @@ test('loads valid config', () => {
   assert.equal(config.radarr.enabled, true);
   assert.equal(config.radarr.baseUrl, 'http://127.0.0.1:7878');
   assert.equal(config.radarr.cardUrl, 'http://127.0.0.1:7878');
-  assert.equal(config.manifestLogoUrl, 'https://raw.githubusercontent.com/cbkii/stremio-addarr/main/assets/logo.png');
+  assert.equal(config.manifestLogoUrl, `https://stremio-addarr.example.com/assets/logo.png?v=${encodeURIComponent(PKG_VERSION)}`);
 });
 
 test('manifest logo url accepts explicit https override', () => {
@@ -40,7 +40,7 @@ test('manifest logo url supports local fallback keyword', () => {
   process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.MANIFEST_LOGO_URL = 'local';
   const config = loadConfig();
-  assert.equal(config.manifestLogoUrl, 'https://stremio-addarr.example.com/assets/logo.png');
+  assert.equal(config.manifestLogoUrl, `https://stremio-addarr.example.com/assets/logo.png?v=${encodeURIComponent(PKG_VERSION)}`);
 });
 
 test('manifest logo url supports explicit none keyword', () => {
