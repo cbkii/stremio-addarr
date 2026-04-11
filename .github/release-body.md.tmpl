@@ -6,7 +6,7 @@ Use the primary guides for complete and current steps:
 Quick Install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/${REPO}/${TAG}/quick.sh -o quick.sh
+gh release download ${TAG} --repo ${REPO} --pattern quick.sh --output quick.sh --clobber
 chmod +x quick.sh
 bash quick.sh install --repo ${REPO} --tag ${TAG}
 ```
@@ -14,7 +14,7 @@ bash quick.sh install --repo ${REPO} --tag ${TAG}
 Quick Upgrade:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/${REPO}/${TAG}/quick.sh -o quick.sh
+gh release download ${TAG} --repo ${REPO} --pattern quick.sh --output quick.sh --clobber
 chmod +x quick.sh
 bash quick.sh upgrade --repo ${REPO} --tag ${TAG}
 ```

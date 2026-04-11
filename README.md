@@ -85,7 +85,7 @@ bash quick.sh upgrade --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
 Use the guided quick script. It performs the release download, checksum verification, extraction, dependency install, `.env` setup gate, systemd setup gate, and verification checks with clear `OK|WARN|FAIL` output.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cbkii/stremio-addarr/main/quick.sh -o quick.sh
+gh release download --repo cbkii/stremio-addarr --pattern quick.sh --output quick.sh --clobber
 chmod +x quick.sh
 bash quick.sh install
 ```
@@ -93,6 +93,7 @@ bash quick.sh install
 Pin to a specific release when needed (`--tag` is optional; default is latest, and both `1.2.3` and `v1.2.3` are accepted):
 
 ```bash
+gh release download vX.Y.Z --repo cbkii/stremio-addarr --pattern quick.sh --output quick.sh --clobber
 bash quick.sh install --repo cbkii/stremio-addarr --tag vX.Y.Z
 ```
 
@@ -196,7 +197,7 @@ On Stremio (Android TV):
 Use the guided quick script. It keeps your existing `.env` and service wiring, reapplies ownership and dependencies, opens explicit review gates for `.env` and systemd unit changes, and runs verification checks.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cbkii/stremio-addarr/main/quick.sh -o quick.sh
+gh release download --repo cbkii/stremio-addarr --pattern quick.sh --output quick.sh --clobber
 chmod +x quick.sh
 bash quick.sh upgrade
 ```
@@ -204,6 +205,7 @@ bash quick.sh upgrade
 Pin to a specific release when needed (`--tag` is optional; default is latest, and both `1.2.3` and `v1.2.3` are accepted):
 
 ```bash
+gh release download vX.Y.Z --repo cbkii/stremio-addarr --pattern quick.sh --output quick.sh --clobber
 bash quick.sh upgrade --repo cbkii/stremio-addarr --tag vX.Y.Z
 ```
 
