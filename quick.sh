@@ -668,7 +668,8 @@ load_env_file
 # Confirm service health and local/public manifest reachability.
 # Public manifest can warn when reverse-proxy/DNS/TLS is not yet finalized.
 ###############################################################################
-say "Verification checks"
+say "Verification checks..."
+sleep 3
 if systemctl is-active --quiet stremio-addarr; then
   print_status_line OK "systemd reports stremio-addarr is active."
 else
@@ -696,6 +697,10 @@ if (( VERIFICATION_FAILURES == 0 )); then
   ok "Quick $MODE flow completed."
 else
   warn "Quick $MODE flow completed with ${VERIFICATION_FAILURES} verification failure(s)."
+  warn "Try restarting once more before troubleshooting further:"
+  warn "  sudo systemctl restart stremio-addarr"
+  warn "  sudo systemctl status stremio-addarr --no-pager -l"
+  echo
 fi
 warn "If hosting/TLS changed, re-run README_HOST.md and then re-run: bash quick.sh $MODE"
 
