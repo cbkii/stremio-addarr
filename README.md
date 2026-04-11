@@ -69,40 +69,27 @@ If you run the service as a dedicated account, set `SVC_USER`/`SVC_GROUP` to tha
 
 ## 4) Fresh install from scratch
 
-### Step 1 — Download release assets
+Use the guided quick script. It performs the release download, checksum verification, extraction, dependency install, `.env` setup gate, systemd setup gate, and verification checks with clear `OK|WARN|FAIL` output.
 
 ```bash
-gh auth login
-gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-install.tar.gz*'
+curl -fsSL https://raw.githubusercontent.com/cbkii/stremio-addarr/main/quick.sh -o quick.sh
+chmod +x quick.sh
+bash quick.sh install
 ```
 
-### Step 2 — Verify and extract
+Pin to a specific release when needed (`--tag` is optional; default is latest, and both `1.2.3` and `v1.2.3` are accepted):
 
 ```bash
-sha256sum -c stremio-addarr-install.tar.gz.sha256
-file stremio-addarr-install.tar.gz | grep -q 'gzip' \
-  || { echo "ERROR: Downloaded file is not a valid gzip archive."; exit 1; }
-
-sudo mkdir -p /opt/stremio-addarr
-sudo tar -xzf stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
-sudo chown -R "$SVC_USER:$SVC_GROUP" /opt/stremio-addarr
+bash quick.sh install --repo cbkii/stremio-addarr --tag vX.Y.Z
 ```
 
-### Step 3 — Install production dependencies
+Optional account override:
 
 ```bash
-cd /opt/stremio-addarr
-npm ci --omit=dev
+bash quick.sh install --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
 ```
 
-### Step 4 — Configure app environment
-
-```bash
-cp .env.example .env
-nano .env
-```
-
-Set required values:
+During the guided `.env` review gate, ensure required values are set:
 
 ```dotenv
 HOST=127.0.0.1
@@ -161,23 +148,7 @@ Optional tuning:
 - `CATALOG_STALE_REVALIDATE_SEC` (default `60`): stale-while-revalidate hint sent to Stremio.
 - `CATALOG_STALE_ERROR_SEC` (default `120`): stale-if-error hint sent to Stremio.
 
-### Step 5 — Install systemd service
-
-```bash
-sudo cp deploy/stremio-addarr.service.example /etc/systemd/system/stremio-addarr.service
-sudo nano /etc/systemd/system/stremio-addarr.service
-```
-
-In the service file, replace these placeholders with your real account/group:
-- `YOUR_SVC_USER`
-- `YOUR_SVC_GROUP`
-
-Then load and start:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now stremio-addarr
-```
+The script also includes a guided systemd unit review gate and starts the service.
 
 ### Step 6 — Configure hosting/TLS (required)
 
@@ -189,20 +160,11 @@ When finished, you must have:
 
 ### Step 7 — End-to-end verification (required before Stremio install)
 
-Run these checks in order:
+`quick.sh install` already runs local and public manifest checks and prints the final install URL.
+Exact URL to paste into Stremio:
 
-```bash
-# 1) Local service is running
-sudo systemctl is-active stremio-addarr
-
-# 2) Local manifest is reachable
-curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null
-
-# 3) Public HTTPS manifest is reachable
-curl -fI https://YOUR_HOSTNAME/manifest.json
-
-# 4) Exact URL to paste into Stremio
-echo "https://YOUR_HOSTNAME/manifest.json"
+```text
+$PUBLIC_BASE_URL/manifest.json
 ```
 
 ### Step 8 — Install in Stremio
@@ -218,56 +180,18 @@ On Stremio (Android TV):
 
 ## 5) Upgrade existing install
 
-This keeps your existing `.env` and service wiring, then reapplies ownership and dependencies.
-
-### Step 1 — Download new release
+Use the guided quick script. It keeps your existing `.env` and service wiring, reapplies ownership and dependencies, opens explicit review gates for `.env` and systemd unit changes, and runs verification checks.
 
 ```bash
-gh auth login
-gh release download --repo cbkii/stremio-addarr --pattern 'stremio-addarr-install.tar.gz*' --dir ~
+curl -fsSL https://raw.githubusercontent.com/cbkii/stremio-addarr/main/quick.sh -o quick.sh
+chmod +x quick.sh
+bash quick.sh upgrade
 ```
 
-### Step 2 — Verify and extract over existing install
+Pin to a specific release when needed (`--tag` is optional; default is latest, and both `1.2.3` and `v1.2.3` are accepted):
 
 ```bash
-sha256sum -c ~/stremio-addarr-install.tar.gz.sha256
-file ~/stremio-addarr-install.tar.gz | grep -q 'gzip' \
-  || { echo "ERROR: Downloaded file is not a valid gzip archive."; exit 1; }
-
-sudo tar -xzf ~/stremio-addarr-install.tar.gz -C /opt/stremio-addarr --strip-components=1
-sudo chown -R "$SVC_USER:$SVC_GROUP" /opt/stremio-addarr
-```
-
-### Step 3 — Reinstall production dependencies
-
-```bash
-cd /opt/stremio-addarr
-npm ci --omit=dev
-```
-
-### Step 4 — Review config and service account
-
-- Compare your `.env` with the new `.env.example` and add any new required variables.
-- Confirm `/etc/systemd/system/stremio-addarr.service` still has your correct `User=` and `Group=`.
-
-If you edited the unit file, reload systemd:
-
-```bash
-sudo systemctl daemon-reload
-```
-
-### Step 5 — Restart and verify
-
-```bash
-sudo systemctl restart stremio-addarr
-sudo systemctl is-active stremio-addarr
-source /opt/stremio-addarr/.env
-curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null
-curl -fI "https://${PUBLIC_BASE_URL}/manifest.json"
-curl -f "https://${PUBLIC_BASE_URL}/manifest.json"
-cat /opt/stremio-addarr/package.json
-echo "[!] verify manifest returns 200"
-echo "[!] verify package and manifest versions match (updated)"
+bash quick.sh upgrade --repo cbkii/stremio-addarr --tag vX.Y.Z
 ```
 
 Important for systemd operators:
