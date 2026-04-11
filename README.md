@@ -85,6 +85,7 @@ bash quick.sh upgrade --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
 Use the guided quick script. It performs the release download, checksum verification, extraction, dependency install, `.env` setup gate, systemd setup gate, and verification checks with clear `OK|WARN|FAIL` output.
 
 ```bash
+# curl -fsSL https://raw.githubusercontent.com/${REPO}/${TAG}/quick.sh -o quick.sh
 gh release download --repo cbkii/stremio-addarr --pattern quick.sh --output quick.sh --clobber
 chmod +x quick.sh
 bash quick.sh install
