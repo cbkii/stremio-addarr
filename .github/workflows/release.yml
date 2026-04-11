@@ -358,7 +358,20 @@ jobs:
           REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PREV_TAG=$(git tag --sort=-version:refname | grep -vxF "${TAG}" | head -n1 || true)
+          PREV_TAG=""
+          # Prefer the latest published GitHub release as the comparison baseline.
+          # If no published release exists yet, fall back to the previous git tag logic.
+          if RELEASE_PREV_TAG=$(gh release list \
+            --repo "${REPO}" \
+            --limit 200 \
+            --exclude-drafts \
+            --json tagName,isLatest \
+            --jq 'map(select(.tagName != "'"${TAG}"'")) | (map(select(.isLatest == true)) + .)[0].tagName // empty' 2>/dev/null); then
+            PREV_TAG="${RELEASE_PREV_TAG}"
+          fi
+          if [[ -z "${PREV_TAG}" ]]; then
+            PREV_TAG=$(git tag --sort=-version:refname | grep -vxF "${TAG}" | head -n1 || true)
+          fi
           if [[ -n "${PREV_TAG}" ]]; then
             RANGE="${PREV_TAG}..${TAG}"
             SINCE_ISO=$(git log -1 --format=%cI "${PREV_TAG}")
