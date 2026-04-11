@@ -70,6 +70,11 @@ export function baseConfig(): AppConfig {
       refreshToken: '',
       redirectUri: 'urn:ietf:wg:oauth:2.0:oob',
       stateFilePath: '/tmp/stremio-addarr-test-trakt-sync.json'
+    },
+    tmdb: {
+      apiBaseUrl: 'https://api.themoviedb.org',
+      authToken: '',
+      region: 'US'
     }
   };
 }

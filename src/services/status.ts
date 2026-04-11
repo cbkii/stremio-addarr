@@ -4,6 +4,7 @@ import { buildFileToken } from '../lib/file-tokens.js';
 import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
+import { TmdbApiLookup, type TmdbLookup } from './tmdb.js';
 import { TraktHtmlLookup, TraktApiLookup, type TraktLookup } from './trakt.js';
 import { NoopWatchedLookup, type WatchedLookup } from './watched.js';
 
@@ -61,7 +62,7 @@ function movieLine(title: string | undefined, releaseDate: string | undefined, t
     const formattedDate = formatReleaseDate(releaseDate, timeZone);
     return formattedDate ? `📽 Not in Radarr (${formattedDate})` : '📽 Not in Radarr';
   }
-  const release = formatReleaseDate(releaseDate, timeZone) ?? '?📅';
+  const release = formatReleaseDate(releaseDate, timeZone) ?? ' ?📅 ';
   const suffix = ` (${release})`;
   // Use codepoint length to keep arithmetic consistent with truncate().
   const maxTitle = 32 - 3 - Array.from(suffix).length; // 3 = '📽 ' (one emoji codepoint + space)
@@ -97,12 +98,12 @@ function episodeLineLabel(season: number | undefined, episode: number | undefine
 function cardEndpointLine(raw: string): string {
   const value = raw.trim().replace(/\/+$/, '');
   const display = value.replace(/^https?:\/\//i, '');
-  return `📲 🔗  ${display}`;
+  return `└─── 📲  ${display}`;
 }
 
 function watchedLine(watched: boolean, borderFallback: boolean): string {
   if (borderFallback) return '════════════════════';
-  return watched ? '👁️  WATCHED' : '🆕  UNWATCHED';
+  return watched ? '══ 👁️ WATCHED ════════' : '══ 🆕 UNWATCHED ══════';
 }
 
 /**
@@ -118,27 +119,59 @@ export class ArrStatusService {
   private readonly healthCache: TtlCache<{ radarr: ServiceHealth; sonarr: ServiceHealth }>;
   private readonly watchedLookup: WatchedLookup;
   private readonly traktLookup: TraktLookup;
+  private readonly tmdbLookup?: TmdbLookup;
 
-  constructor(private readonly config: AppConfig, deps?: { watchedLookup?: WatchedLookup; traktLookup?: TraktLookup }) {
+  constructor(private readonly config: AppConfig, deps?: { watchedLookup?: WatchedLookup; traktLookup?: TraktLookup; tmdbLookup?: TmdbLookup }) {
     this.radarr = new RadarrClient(config);
     this.sonarr = new SonarrClient(config);
     this.healthCache = new TtlCache(config.serviceHealthCacheTtlMs);
     this.watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
     this.traktLookup = deps?.traktLookup ?? (config.traktSync.clientId ? new TraktApiLookup(config.traktSync.clientId) : new TraktHtmlLookup());
+    this.tmdbLookup = deps?.tmdbLookup ?? (config.tmdb.authToken ? new TmdbApiLookup(config.tmdb.authToken, config.tmdb.apiBaseUrl, config.tmdb.region) : undefined);
+  }
+
+  private normalizeDateCandidate(value?: string): string | undefined {
+    if (!value) return undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const parsed = Date.parse(`${value}T00:00:00Z`);
+      if (!Number.isFinite(parsed)) return undefined;
+      const year = Number(value.slice(0, 4));
+      if (!Number.isFinite(year) || year <= 1901) return undefined;
+      return value;
+    }
+    const parsed = Date.parse(value);
+    if (!Number.isFinite(parsed)) return undefined;
+    const year = new Date(parsed).getUTCFullYear();
+    if (!Number.isFinite(year) || year <= 1901) return undefined;
+    return value;
   }
 
   private async resolveMovieReleaseDate(imdbId: string, arrReleaseDate?: string): Promise<string> {
-    if (formatReleaseDate(arrReleaseDate, this.config.timeZone)) return arrReleaseDate!;
+    const arr = this.normalizeDateCandidate(arrReleaseDate);
+    if (arr) return arr;
     const trakt = await this.traktLookup.getMovieReleaseDate(imdbId);
-    if (formatReleaseDate(trakt, this.config.timeZone)) return trakt!;
-    return '?📅';
+    const traktDate = this.normalizeDateCandidate(trakt);
+    if (traktDate) return traktDate;
+    if (this.tmdbLookup) {
+      const tmdb = await this.tmdbLookup.getMovieReleaseDate(imdbId);
+      const tmdbDate = this.normalizeDateCandidate(tmdb);
+      if (tmdbDate) return tmdbDate;
+    }
+    return ' ?📅 ';
   }
 
   private async resolveEpisodeReleaseDate(imdbId: string, season?: number, episode?: number, arrReleaseDate?: string): Promise<string> {
-    if (formatReleaseDate(arrReleaseDate, this.config.timeZone)) return arrReleaseDate!;
+    const arr = this.normalizeDateCandidate(arrReleaseDate);
+    if (arr) return arr;
     const trakt = await this.traktLookup.getEpisodeReleaseDate(imdbId, season, episode);
-    if (formatReleaseDate(trakt, this.config.timeZone)) return trakt!;
-    return '?📅';
+    const traktDate = this.normalizeDateCandidate(trakt);
+    if (traktDate) return traktDate;
+    if (this.tmdbLookup) {
+      const tmdb = await this.tmdbLookup.getEpisodeReleaseDate(imdbId, season, episode);
+      const tmdbDate = this.normalizeDateCandidate(tmdb);
+      if (tmdbDate) return tmdbDate;
+    }
+    return ' ?📅 ';
   }
 
   private useBorderFallbackLine(): boolean {
@@ -188,7 +221,7 @@ export class ArrStatusService {
           : undefined;
         const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
-          name: '✅\nFile\nReady',
+          name: '✅🟢\nFile\nReady',
           description: desc(
             watchedLine(watched, borderFallback),
             movieLine(status.title, status.releaseDate, this.config.timeZone),
@@ -207,11 +240,11 @@ export class ArrStatusService {
       case 'downloading':
         return [{
           name: '⏱️📥...\nDLing',
-          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️ ⏱  DOWNLOADING IN RADARR…', this.radarrCardLine())
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️⏱️ DOWNLOAD IN PROGRESS…', this.radarrCardLine())
         }];
       case 'missing':
         return [{
-          name: '🔍🦜\nSearch\n+ DL',
+          name: '🔍🦜\nSearch\nDownload',
           description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ Monitored — file missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
@@ -219,15 +252,15 @@ export class ArrStatusService {
         }];
       case 'added':
         return [{
-          name: '🔍🦜\nSearch\n+ DL',
-          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ In Radarr — not monitored', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
+          name: '🔍🦜\nSearch\nDownload',
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ In Library — not monitored', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
         }];
       case 'not_added':
         return [{
-          name: '➕ Add\nto *Arr\n+ DL',
+          name: '➕ Add +\nDownload',
           description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️ ➕  ADD + SEARCH ►', this.radarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
@@ -248,7 +281,7 @@ export class ArrStatusService {
           : undefined;
         const kodiExternalUrl = this.canUseKodiFallback(fileUrl) ? this.buildKodiExternalUrl() : undefined;
         return [{
-          name: '✅\nFile\nReady',
+          name: '✅🟢\nFile\nReady',
           description: desc(
             watchedLine(watched, borderFallback),
             seriesLine(status.title),
@@ -267,11 +300,11 @@ export class ArrStatusService {
       case 'episode_downloading':
         return [{
           name: '⏱️📥...\nDLing',
-          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `🗯️ ⏱  ${ep} DOWNLOADING…` : '🗯️ ⏱  DOWNLOADING…', this.sonarrCardLine())
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `🗯️ ⏱  ${ep} DOWNLOADING…` : '🗯️⏱️ DOWNLOAD IN PROGRESS…', this.sonarrCardLine())
         }];
       case 'episode_missing':
         return [{
-          name: '🔍🦜\nSearch\n+ DL',
+          name: '🔍🦜\nSearch\nDownload',
           description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
@@ -280,7 +313,7 @@ export class ArrStatusService {
       case 'series_added':
       case 'episode_monitored':
         return [{
-          name: '🔍🦜\nSearch\n+ DL',
+          name: '🔍🦜\nSearch\nDownload',
           description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
@@ -288,7 +321,7 @@ export class ArrStatusService {
         }];
       case 'series_not_added':
         return [{
-          name: '➕ Add\nto *Arr\n+ DL',
+          name: '➕ Add +\nDownload',
           description: desc(watchedLine(watched, borderFallback), '📺  Not in Sonarr', ep, '🗯️ ➕  ADD SERIES + SEARCH ►', this.sonarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },

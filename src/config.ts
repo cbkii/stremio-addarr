@@ -95,6 +95,11 @@ export interface AppConfig {
     redirectUri: string;
     stateFilePath: string;
   };
+  tmdb: {
+    apiBaseUrl: string;
+    authToken: string;
+    region: string;
+  };
 }
 
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
@@ -376,6 +381,9 @@ export function loadConfig(): AppConfig {
   const traktRefreshToken = readString('TRAKT_REFRESH_TOKEN');
   const traktRedirectUri = readString('TRAKT_REDIRECT_URI', 'urn:ietf:wg:oauth:2.0:oob');
   const traktStateFilePath = readString('TRAKT_SYNC_STATE_FILE', path.resolve(process.cwd(), 'data/trakt-sync-state.json'));
+  const tmdbApiBaseUrl = ensureHttpUrl('TMDB_API_BASE_URL', readString('TMDB_API_BASE_URL', 'https://api.themoviedb.org'));
+  const tmdbAuthToken = readString('TMDB_API_READ_ACCESS_TOKEN') || readString('TMDB_API_KEY');
+  const tmdbRegion = readString('TMDB_RELEASE_REGION', 'US').toUpperCase();
 
   const config: AppConfig = {
     appName: 'stremio-addarr',
@@ -454,6 +462,11 @@ export function loadConfig(): AppConfig {
       refreshToken: traktRefreshToken,
       redirectUri: traktRedirectUri,
       stateFilePath: traktStateFilePath
+    },
+    tmdb: {
+      apiBaseUrl: tmdbApiBaseUrl,
+      authToken: tmdbAuthToken,
+      region: tmdbRegion
     }
   };
 

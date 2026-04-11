@@ -548,6 +548,18 @@ Notes:
 - `POST /trakt/sync` can be used for local manual sync trigger (loopback/local requests only).
 - `GET /status.json` and `GET /health` include watched sync diagnostics (`enabled`, `lastSyncAt`, `nextSyncAt`, `lastSyncError`).
 
+### Release-date fallback chain (movie + episode tiles)
+
+Release date resolution now uses a LAN-first fallback chain:
+1. Arr-local metadata (Radarr/Sonarr) first.
+2. Trakt lookup second.
+3. TMDB lookup last (optional, configure `TMDB_API_READ_ACCESS_TOKEN` or `TMDB_API_KEY`).
+
+Movie logic keeps the current convention and resolves:
+`min(release, digital, physical) › inCinema`.
+
+All providers are filtered to valid dates with year `> 1901`, and display remains `DD mmm YY`.
+
 ---
 
 ## 11) Release and hosting docs
