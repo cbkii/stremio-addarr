@@ -136,7 +136,8 @@ CATALOG_STALE_ERROR_SEC=120
 ```
 
 Notes:
-- `MANIFEST_LOGO_URL` defaults to a self-hosted URL (`$PUBLIC_BASE_URL/assets/logo.png?v=<app version>`). Set `MANIFEST_LOGO_URL=none` to hide the logo, or set any explicit HTTPS logo URL.
+- `MANIFEST_LOGO_URL` defaults to `https://img.icons8.com/?size=100&id=43669&format=png&color=000000`. Set `MANIFEST_LOGO_URL=none` to hide the logo, or set an explicit `https://` logo URL (query/fragment components are allowed).
+- The default logo is fetched by clients from `img.icons8.com`, which may expose client IPs to that service and depends on third-party availability. For privacy-sensitive deployments, set `MANIFEST_LOGO_URL=none` or use a self-hosted HTTPS logo URL.
 - `SONARR_SERIES_MONITOR` maps directly to Sonarr's `addOptions.monitor` field and accepts: `all`, `future`, `missing`, `existing`, `firstSeason`, `lastSeason`, `latestSeason`, `pilot`, `recent`, `monitorSpecials`, `unmonitorSpecials`, `none`, `skip`, `ep`, `epfuture`, or `epseason`.
 - `SONARR_SERIES_MONITOR` is parsed case-insensitively (`ALL`, `All`, `none` all work).
 - Episode-scoped custom values in `SONARR_SERIES_MONITOR`:

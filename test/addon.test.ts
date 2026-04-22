@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { DEFAULT_MANIFEST_LOGO_URL } from '../src/config.js';
 import { createApp } from '../src/index.js';
 import { baseConfig, withServer } from './_helpers.js';
 
@@ -23,7 +24,7 @@ test('manifest endpoint shape sanity', async () => {
     assert.deepEqual(manifest.resources, ['stream', 'catalog']);
     assert.deepEqual(manifest.types, ['movie', 'series']);
     assert.deepEqual(manifest.idPrefixes, ['tt']);
-    assert.equal(manifest.logo, 'http://127.0.0.1:7010/assets/logo.png?v=0.1.0-test');
+    assert.equal(manifest.logo, DEFAULT_MANIFEST_LOGO_URL);
   });
 });
 
