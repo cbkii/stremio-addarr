@@ -73,10 +73,11 @@ bash quick.sh upgrade --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
 - **[5) Quick upgrade](#5-quick-upgrade-recommended)**
 - **[6) Runtime checks](#6-runtime-checks)**
 - **[7) Logs and diagnostics](#7-logs-and-diagnostics)**
-- **[8) Android TV + Stremio troubleshooting](#8-android-tv--stremio-troubleshooting)**
-- **[9) Troubleshooting playbook](#9-troubleshooting-playbook)**
-- **[10) Trakt watched sync (optional)](#10-trakt-watched-sync-optional)**
-- **[11) Release and hosting docs](#11-release-and-hosting-docs)**
+- **[8) Troubleshooting](#8-troubleshooting)**
+- **[9) Trakt watched sync (optional)](#9-trakt-watched-sync-optional)**
+- **[10) Configuration reference](#10-configuration-reference)**
+- **[11) Developer notes](#11-developer-notes)**
+- **[12) Release and hosting docs](#12-release-and-hosting-docs)**
 - **Docker (optional alternative)**: `Dockerfile` and `docker-compose.example.yml` are provided for containerized deployment; the systemd path in this README remains the canonical/default setup.
 
 ---
@@ -99,21 +100,13 @@ gh release download vX.Y.Z --repo cbkii/stremio-addarr --pattern quick.sh --outp
 bash quick.sh install --repo cbkii/stremio-addarr --tag vX.Y.Z
 ```
 
-Optional account override:
-
-```bash
-bash quick.sh install --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
-```
-
-During the guided `.env` review gate, ensure required values are set:
+During the guided `.env` review gate, ensure at minimum the following required values are set (see [.env.example](.env.example) for the full annotated reference):
 
 ```dotenv
 HOST=127.0.0.1
 PORT=7010
 PUBLIC_BASE_URL=https://YOUR_HOSTNAME
 TARGET_CLIENT=android-tv
-GRACEFUL_SHUTDOWN_TIMEOUT_MS=10000
-FORCED_SHUTDOWN_EXIT_CODE=0
 
 RADARR_ENABLED=true
 RADARR_BASE_URL=http://127.0.0.1:7878
@@ -126,44 +119,10 @@ SONARR_BASE_URL=http://127.0.0.1:8989
 SONARR_API_KEY=replace-with-sonarr-api-key
 SONARR_ROOT_FOLDER_PATH=/media/tv
 SONARR_QUALITY_PROFILE_ID=1
-SONARR_LANGUAGE_PROFILE_ID=1
 SONARR_SERIES_MONITOR=all
-
-CATALOG_PAGE_SIZE=25
-CATALOG_CACHE_TTL_MS=5000
-CATALOG_CACHE_MAX_AGE_SEC=15
-CATALOG_STALE_REVALIDATE_SEC=60
-CATALOG_STALE_ERROR_SEC=120
 ```
 
-Notes:
-- `MANIFEST_LOGO_URL` defaults to a self-hosted URL (`$PUBLIC_BASE_URL/assets/logo.png?v=<app version>`). Set `MANIFEST_LOGO_URL=none` to hide the logo, or set any explicit HTTPS logo URL.
-- `SONARR_SERIES_MONITOR` maps directly to Sonarr's `addOptions.monitor` field and accepts: `all`, `future`, `missing`, `existing`, `firstSeason`, `lastSeason`, `latestSeason`, `pilot`, `recent`, `monitorSpecials`, `unmonitorSpecials`, `none`, `skip`, `ep`, `epfuture`, or `epseason`.
-- `SONARR_SERIES_MONITOR` is parsed case-insensitively (`ALL`, `All`, `none` all work).
-- Episode-scoped custom values in `SONARR_SERIES_MONITOR`:
-  - `ep`: after add/search, monitor only the selected episode and set Sonarr `monitorNewItems=none`.
-  - `epfuture`: after add/search, monitor selected episode and all later episodes, then set Sonarr `monitorNewItems=all` (future episodes).
-  - `epseason`: after add/search, monitor selected episode through season end, then set Sonarr `monitorNewItems=none`.
-- `SONARR_MONITOR_NEW_ITEMS` controls `monitorNewItems` updates:
-  - `auto` (default): `epfuture=>all`, `ep/epseason=>none`, non-scoped default add uses `all`.
-  - `all` / `none`: force one value regardless of scoped mode.
-- `EP_COUNT`/`EP_COUNT_MOD` tune `ep` auto-upgrade behavior:
-  - `EP_COUNT_PAST` controls how many prior normal episodes are examined (default `8`).
-  - If `EP_COUNT > 1`, the addon checks up to `EP_COUNT_PAST` prior episodes before the selected pivot.
-  - If downloaded count in that window is `>= EP_COUNT`, `ep` is upgraded to `EP_COUNT_MOD` (`epfuture` or `epseason`).
-  - `EP_COUNT <= 1` disables the auto-upgrade.
-  - Because Stremio add-on requests are anonymous, this heuristic currently uses Sonarr-known downloaded episodes (not user watch-history from Stremio/Trakt).
-- `SONARR_EPISODE_READY_TIMEOUT_MS` and `SONARR_EPISODE_READY_POLL_MS` tune how long the addon waits for Sonarr episode metadata to become ready after series add.
-- `RADARR_TAGS` and `SONARR_TAGS` accept comma-separated integer tag IDs (e.g. `1,3`). Find IDs via Arr → Settings → Tags.
-- Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
-- `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
-
-Optional tuning:
-- `CATALOG_PAGE_SIZE` (default `25`, max effective `50`): how many cards each catalog page returns.
-- `CATALOG_CACHE_TTL_MS` (default `5000`): short in-memory cache for merged Arr queue+history results.
-- `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint sent to Stremio for catalog responses.
-- `CATALOG_STALE_REVALIDATE_SEC` (default `60`): stale-while-revalidate hint sent to Stremio.
-- `CATALOG_STALE_ERROR_SEC` (default `120`): stale-if-error hint sent to Stremio.
+See [Configuration reference](#10-configuration-reference) for all options including advanced Sonarr monitor modes, Trakt, TMDB, file streaming, and cache tuning.
 
 The script also includes a guided systemd unit review gate and starts the service.
 
@@ -283,32 +242,6 @@ Expected startup output:
 {"time":"...","level":"info","message":"Server started","host":"127.0.0.1","port":7010,"manifest":"https://example.duckdns.org/manifest.json"}
 ```
 
-### Collecting logs — Docker (optional alternative deployment)
-
-Use this section only if you deployed with Docker.
-
-```bash
-# Last 200 lines
-docker logs stremio-addarr --tail 200
-
-# Follow live
-docker logs stremio-addarr -f
-
-# Filter errors with jq
-docker logs stremio-addarr --tail 500 2>&1 | jq 'select(.level == "error" or .level == "warn")'
-
-# Logs in a time window
-docker logs stremio-addarr --since 10m 2>&1 | jq .
-```
-
-### Collecting logs — local dev (`npm run dev`)
-
-Logs appear directly in the terminal. Pipe to `jq` for easier reading:
-
-```bash
-npm run dev 2>&1 | jq .
-```
-
 ### Correlating a Stremio stream request end-to-end
 
 Each HTTP request gets a unique `reqId`. Find the Stremio stream request and trace it:
@@ -325,7 +258,7 @@ sudo journalctl -u stremio-addarr -n 500 --no-pager -o cat \
 
 ---
 
-## 8) Android TV + Stremio troubleshooting
+## 8) Troubleshooting
 
 ### Symptoms to capture from Stremio on Android TV
 
@@ -375,8 +308,6 @@ This is typically not available on stock Android TV without developer options en
 4. Look for `radarr` or `sonarr` lines with the same `imdbId` to trace what the service returned.
 
 ---
-
-## 9) Troubleshooting playbook
 
 ### Stremio shows `🛑 Down` tile
 
@@ -488,7 +419,7 @@ Checklist:
 
 ---
 
-## 10) Trakt watched sync (optional)
+## 9) Trakt watched sync (optional)
 
 This add-on cannot read native Stremio account sessions directly inside stream handlers, so watched sync is implemented as **addon-managed Trakt OAuth**.
 
@@ -563,7 +494,91 @@ All providers are filtered to valid dates with year `> 1901`, and display remain
 
 ---
 
-## 11) Release and hosting docs
+## 10) Configuration reference
+
+Full annotated defaults: [.env.example](.env.example).
+
+### `SONARR_SERIES_MONITOR` values
+
+Maps directly to Sonarr's `addOptions.monitor` field. Accepts: `all`, `future`, `missing`, `existing`, `firstSeason`, `lastSeason`, `latestSeason`, `pilot`, `recent`, `monitorSpecials`, `unmonitorSpecials`, `none`, `skip` — plus the three episode-scoped custom values below. Parsed case-insensitively.
+
+Episode-scoped custom values:
+- `ep`: monitor only the selected episode; set Sonarr `monitorNewItems=none`.
+- `epfuture`: monitor selected episode and all later episodes; set Sonarr `monitorNewItems=all`.
+- `epseason`: monitor selected episode through season end; set Sonarr `monitorNewItems=none`.
+
+### `SONARR_MONITOR_NEW_ITEMS`
+
+Controls `monitorNewItems` applied via series editor after add:
+- `auto` (default): `epfuture→all`, `ep`/`epseason→none`, non-scoped default add uses `all`.
+- `all` / `none`: force one value regardless of scoped mode.
+
+### EP_COUNT auto-upgrade (`ep` mode)
+
+| Variable        | Default    | Description |
+|-----------------|------------|-------------|
+| `EP_COUNT`      | `2`        | If `> 1`, check downloaded count in the look-back window. Set `<= 1` to disable. |
+| `EP_COUNT_PAST` | `8`        | How many prior normal episodes to examine. |
+| `EP_COUNT_MOD`  | `epfuture` | Mode to upgrade to if downloaded count `>= EP_COUNT`. |
+
+Because Stremio add-on requests are anonymous, the heuristic uses Sonarr-known downloaded episodes (not user watch-history from Stremio/Trakt).
+
+### Other notable options
+
+| Variable | Notes |
+|----------|-------|
+| `SONARR_EPISODE_READY_TIMEOUT_MS` | Max wait for Sonarr to materialise episode metadata after series add. |
+| `SONARR_EPISODE_READY_POLL_MS` | Poll interval during the above wait. |
+| `SONARR_LANGUAGE_PROFILE_ID` | Only needed for Sonarr v3. Leave unset or `0` on Sonarr v4. |
+| `RADARR_TAGS` / `SONARR_TAGS` | Comma-separated integer tag IDs (e.g. `1,3`). Find IDs via Arr → Settings → Tags. |
+| `MANIFEST_LOGO_URL` | Defaults to self-hosted logo. Set to `none` to hide, or any explicit HTTPS URL. |
+| `STATUS_CACHE_TTL_MS` | TTL for Radarr/Sonarr status list caches (default `30000` ms). |
+| `REQUEST_TIMEOUT_MS` | Timeout per Arr HTTP request (default `5000` ms). |
+| `FORCED_SHUTDOWN_EXIT_CODE` | `0` keeps orchestrators from flagging timeout-forced stop as failure. |
+| `FILE_STREAMING_ENABLED` | Enable direct HTTP file playback from Pi. Requires `FILE_STREAMING_SECRET`. |
+| `TRAKT_SYNC_ENABLED` | Enable addon-managed Trakt OAuth watched-sync. |
+| `TMDB_API_READ_ACCESS_TOKEN` | Optional TMDB fallback for release dates. |
+
+Catalog cache tuning (defaults are production-safe for Pi/LAN use):
+- `CATALOG_PAGE_SIZE` (default `25`, max effective `50`): cards per catalog page.
+- `CATALOG_CACHE_TTL_MS` (default `5000`): in-memory cache for merged Arr queue+history.
+- `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint to Stremio.
+- `CATALOG_STALE_REVALIDATE_SEC` (default `60`): stale-while-revalidate hint.
+- `CATALOG_STALE_ERROR_SEC` (default `120`): stale-if-error hint.
+
+---
+
+## 11) Developer notes
+
+### Collecting logs — Docker (optional alternative deployment)
+
+Use this section only if you deployed with Docker.
+
+```bash
+# Last 200 lines
+docker logs stremio-addarr --tail 200
+
+# Follow live
+docker logs stremio-addarr -f
+
+# Filter errors with jq
+docker logs stremio-addarr --tail 500 2>&1 | jq 'select(.level == "error" or .level == "warn")'
+
+# Logs in a time window
+docker logs stremio-addarr --since 10m 2>&1 | jq .
+```
+
+### Collecting logs — local dev (`npm run dev`)
+
+Logs appear directly in the terminal. Pipe to `jq` for easier reading:
+
+```bash
+npm run dev 2>&1 | jq .
+```
+
+---
+
+## 12) Release and hosting docs
 
 - Hosting/TLS (canonical): [README_HOST.md](README_HOST.md)
 - Example env variables: [.env.example](.env.example)
