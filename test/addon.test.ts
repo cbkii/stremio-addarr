@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/index.js';
 import { baseConfig, withServer } from './_helpers.js';
+import { DEFAULT_MANIFEST_LOGO_URL } from '../src/config.js';
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
@@ -23,7 +24,7 @@ test('manifest endpoint shape sanity', async () => {
     assert.deepEqual(manifest.resources, ['stream', 'catalog']);
     assert.deepEqual(manifest.types, ['movie', 'series']);
     assert.deepEqual(manifest.idPrefixes, ['tt']);
-    assert.equal(manifest.logo, 'https://img.icons8.com/?size=100&id=43669&format=png&color=000000');
+    assert.equal(manifest.logo, DEFAULT_MANIFEST_LOGO_URL);
   });
 });
 
