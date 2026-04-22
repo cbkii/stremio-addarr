@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { loadConfig, validateConfig } from '../src/config.js';
+import { loadConfig, validateConfig, DEFAULT_MANIFEST_LOGO_URL } from '../src/config.js';
 import { baseConfig } from './_helpers.js';
 
 const PKG_VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
@@ -27,7 +27,7 @@ test('loads valid config', () => {
   assert.equal(config.radarr.enabled, true);
   assert.equal(config.radarr.baseUrl, 'http://127.0.0.1:7878');
   assert.equal(config.radarr.cardUrl, 'http://127.0.0.1:7878');
-  assert.equal(config.manifestLogoUrl, `https://stremio-addarr.example.com/assets/logo.png?v=${encodeURIComponent(PKG_VERSION)}`);
+  assert.equal(config.manifestLogoUrl, DEFAULT_MANIFEST_LOGO_URL);
 });
 
 test('manifest logo url accepts explicit https override', () => {
@@ -36,11 +36,15 @@ test('manifest logo url accepts explicit https override', () => {
   assert.equal(config.manifestLogoUrl, 'https://example.com/stremio/logo.png');
 });
 
-test('manifest logo url supports local fallback keyword', () => {
-  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
-  process.env.MANIFEST_LOGO_URL = 'local';
+test('manifest logo url accepts https url with query parameters', () => {
+  process.env.MANIFEST_LOGO_URL = 'https://img.icons8.com/?size=200&id=43669&format=png';
   const config = loadConfig();
-  assert.equal(config.manifestLogoUrl, `https://stremio-addarr.example.com/assets/logo.png?v=${encodeURIComponent(PKG_VERSION)}`);
+  assert.equal(config.manifestLogoUrl, 'https://img.icons8.com/?size=200&id=43669&format=png');
+});
+
+test('manifest logo url rejects http urls', () => {
+  process.env.MANIFEST_LOGO_URL = 'http://example.com/logo.png';
+  assert.throws(() => loadConfig(), /MANIFEST_LOGO_URL/);
 });
 
 test('manifest logo url supports explicit none keyword', () => {

@@ -136,7 +136,7 @@ CATALOG_STALE_ERROR_SEC=120
 ```
 
 Notes:
-- `MANIFEST_LOGO_URL` defaults to a self-hosted URL (`$PUBLIC_BASE_URL/assets/logo.png?v=<app version>`). Set `MANIFEST_LOGO_URL=none` to hide the logo, or set any explicit HTTPS logo URL.
+- `MANIFEST_LOGO_URL` defaults to `https://img.icons8.com/?size=100&id=43669&format=png&color=000000`. With this default, Stremio clients will fetch the logo from `img.icons8.com`, which can leak client IPs to that third party and makes logo availability depend on that external service. For privacy-sensitive deployments, set `MANIFEST_LOGO_URL=none` to hide the logo, or set `MANIFEST_LOGO_URL` to a self-hosted HTTPS logo URL (query parameters are allowed, e.g. `https://example.com/logo.png?v=2`).
 - `SONARR_SERIES_MONITOR` maps directly to Sonarr's `addOptions.monitor` field and accepts: `all`, `future`, `missing`, `existing`, `firstSeason`, `lastSeason`, `latestSeason`, `pilot`, `recent`, `monitorSpecials`, `unmonitorSpecials`, `none`, `skip`, `ep`, `epfuture`, or `epseason`.
 - `SONARR_SERIES_MONITOR` is parsed case-insensitively (`ALL`, `All`, `none` all work).
 - Episode-scoped custom values in `SONARR_SERIES_MONITOR`:
