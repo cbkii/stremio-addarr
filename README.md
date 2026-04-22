@@ -75,7 +75,8 @@ bash quick.sh upgrade --svc-user YOUR_SVC_USER --svc-group YOUR_SVC_GROUP
 - **[7) Logs and diagnostics](#7-logs-and-diagnostics)**
 - **[8) Android TV + Stremio troubleshooting](#8-android-tv--stremio-troubleshooting)**
 - **[9) Troubleshooting playbook](#9-troubleshooting-playbook)**
-- **[10) Release and hosting docs](#10-release-and-hosting-docs)**
+- **[10) Trakt watched sync (optional)](#10-trakt-watched-sync-optional)**
+- **[11) Release and hosting docs](#11-release-and-hosting-docs)**
 - **Docker (optional alternative)**: `Dockerfile` and `docker-compose.example.yml` are provided for containerized deployment; the systemd path in this README remains the canonical/default setup.
 
 ---
@@ -166,7 +167,7 @@ Optional tuning:
 
 The script also includes a guided systemd unit review gate and starts the service.
 
-### Step 6 — Configure hosting/TLS (required)
+### Configure hosting/TLS (required)
 
 Follow **README_HOST.md** now: [README_HOST.md](README_HOST.md).
 
@@ -174,7 +175,7 @@ When finished, you must have:
 - Caddy serving `https://YOUR_HOSTNAME`
 - `PUBLIC_BASE_URL=https://YOUR_HOSTNAME`
 
-### Step 7 — End-to-end verification (required before Stremio install)
+### End-to-end verification (required before Stremio install)
 
 `quick.sh install` already runs local and public manifest checks and prints the final install URL.
 Exact URL to paste into Stremio:
@@ -183,12 +184,12 @@ Exact URL to paste into Stremio:
 $PUBLIC_BASE_URL/manifest.json
 ```
 
-### Step 8 — Install in Stremio
+### Install in Stremio
 
 On Stremio (Android TV):
 1. Open **Add-ons**.
 2. Open **Community Add-ons** (or search).
-3. Paste the manifest URL from Step 7:
+3. Paste the manifest URL printed above:
    - `https://YOUR_HOSTNAME/manifest.json`
 4. Click **Install**.
 
