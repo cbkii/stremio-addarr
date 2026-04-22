@@ -7,7 +7,7 @@ export function baseConfig(): AppConfig {
     host: '127.0.0.1',
     port: 0,
     publicBaseUrl: 'http://127.0.0.1:7010',
-    manifestLogoUrl: 'http://127.0.0.1:7010/assets/logo.png?v=0.1.0-test',
+    manifestLogoUrl: 'https://img.icons8.com/?size=100&id=43669&format=png&color=000000',
     targetClient: 'android-tv',
     timeZone: 'UTC',
     logLevel: 'error',

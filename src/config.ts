@@ -103,6 +103,7 @@ export interface AppConfig {
 }
 
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
+const DEFAULT_MANIFEST_LOGO_URL = 'https://img.icons8.com/?size=100&id=43669&format=png&color=000000';
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
 const SONARR_MONITOR_NEW_ITEMS = new Set<AppConfig['sonarr']['monitorNewItems']>(['auto', 'all', 'none']);
@@ -306,14 +307,11 @@ export function loadConfig(): AppConfig {
   const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
   const manifestLogoEnv = readString('MANIFEST_LOGO_URL');
   const normalizedManifestLogo = manifestLogoEnv.toLowerCase();
-  const localManifestLogoUrl = `${publicBaseUrl}/assets/logo.png?v=${encodeURIComponent(packageVersion)}`;
   const manifestLogoUrl = normalizedManifestLogo === 'none'
     ? ''
-    : normalizedManifestLogo === 'local'
-      ? localManifestLogoUrl
-      : (manifestLogoEnv
-        ? ensureHttpUrl('MANIFEST_LOGO_URL', manifestLogoEnv)
-        : localManifestLogoUrl);
+    : (manifestLogoEnv
+      ? ensureHttpUrl('MANIFEST_LOGO_URL', manifestLogoEnv)
+      : DEFAULT_MANIFEST_LOGO_URL);
   const targetClient = parseTargetClient(readString('TARGET_CLIENT', 'android-tv'));
   const timeZone = readString('TZ', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);
