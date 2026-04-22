@@ -106,6 +106,11 @@ const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none'])
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
 const SONARR_MONITOR_NEW_ITEMS = new Set<AppConfig['sonarr']['monitorNewItems']>(['auto', 'all', 'none']);
+/**
+ * External default icon used when MANIFEST_LOGO_URL is unset.
+ * Clients fetch this directly, so privacy-sensitive deployments should set
+ * MANIFEST_LOGO_URL=none or provide a self-hosted HTTPS logo URL.
+ */
 export const DEFAULT_MANIFEST_LOGO_URL = 'https://img.icons8.com/?size=100&id=43669&format=png&color=000000';
 const SONARR_MONITOR_ALIASES: Record<string, AppConfig['sonarr']['seriesMonitor']> = {
   all: 'all',
