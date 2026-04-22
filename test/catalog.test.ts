@@ -45,6 +45,15 @@ test('imported movie items sort newest first', () => {
   assert.deepEqual(merged.map((item) => item.imdbId), ['tt12', 'tt13', 'tt11']);
 });
 
+test('imported items use added timestamp as tiebreaker when download timestamps are missing', () => {
+  const merged = mergeMovieItems([
+    movieItem({ imdbId: 'tt11', timestamp: 0, addedTimestamp: 100 }),
+    movieItem({ imdbId: 'tt12', timestamp: 0, addedTimestamp: 300 }),
+    movieItem({ imdbId: 'tt13', timestamp: 0, addedTimestamp: 200 })
+  ]);
+  assert.deepEqual(merged.map((item) => item.imdbId), ['tt12', 'tt13', 'tt11']);
+});
+
 test('series items collapse multiple episode events to one card per series', () => {
   const merged = mergeSeriesItems([
     movieItem({ source: 'sonarr', type: 'series', imdbId: 'tt20', seasonNumber: 1, episodeNumber: 2, timestamp: 100 }),
@@ -220,4 +229,134 @@ test('catalog drops invalid non-imdb ids to avoid broken native poster lookups',
 
   const result = await service.buildCatalog('sonarr-recent', 0, 25);
   assert.equal(result.metas.length, 0);
+});
+
+test('radarr catalog fills to limit from library even when history is sparse', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const movies = Array.from({ length: 30 }, (_, i) => ({
+    id: i + 1,
+    title: `Movie ${i + 1}`,
+    imdbId: `tt${1000 + i}`,
+    added: `2024-01-${String((i % 28) + 1).padStart(2, '0')}T00:00:00Z`
+  }));
+
+  const service = new CatalogService(cfg, {
+    radarr: {
+      async listMovies() { return movies; },
+      async listMovieQueueDetails() { return []; },
+      async listRecentMovieImports() { return [{ movieId: 1, date: '2024-03-01T00:00:00Z' }]; }
+    } as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 25);
+  assert.equal(result.metas.length, 25);
+});
+
+test('sonarr catalog fills to limit from library even when history is sparse', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  const series = Array.from({ length: 30 }, (_, i) => ({
+    id: i + 1,
+    title: `Series ${i + 1}`,
+    imdbId: `tt${2000 + i}`,
+    added: `2024-02-${String((i % 28) + 1).padStart(2, '0')}T00:00:00Z`
+  }));
+
+  const service = new CatalogService(cfg, {
+    radarr: { async listMovies() { return []; }, async listMovieQueueDetails() { return []; }, async listRecentMovieImports() { return []; } } as never,
+    sonarr: {
+      async listSeries() { return series; },
+      async listSeriesQueueDetails() { return []; },
+      async listRecentSeriesImports() { return [{ seriesId: 1, date: '2024-03-01T00:00:00Z' }]; }
+    } as never
+  });
+
+  const result = await service.buildCatalog('sonarr-recent', 0, 25);
+  assert.equal(result.metas.length, 25);
+});
+
+test('radarr catalog sorts by latest import first, then by most recent added date', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const service = new CatalogService(cfg, {
+    radarr: {
+      async listMovies() {
+        return [
+          { id: 1, title: 'Imported Newest', imdbId: 'tt4001', added: '2024-01-01T00:00:00Z' },
+          { id: 2, title: 'Imported Older', imdbId: 'tt4002', added: '2024-03-01T00:00:00Z' },
+          { id: 3, title: 'Added Newest', imdbId: 'tt4003', added: '2024-04-01T00:00:00Z' },
+          { id: 4, title: 'Added Older', imdbId: 'tt4004', added: '2024-02-01T00:00:00Z' }
+        ];
+      },
+      async listMovieQueueDetails() { return []; },
+      async listRecentMovieImports() {
+        return [
+          { movieId: 2, date: '2024-02-10T00:00:00Z' },
+          { movieId: 1, date: '2024-03-15T00:00:00Z' }
+        ];
+      }
+    } as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 25);
+  assert.deepEqual(result.metas.map((m) => m.id), ['tt4001', 'tt4002', 'tt4003', 'tt4004']);
+});
+
+test('sonarr catalog sorts by latest import first, then by most recent added date', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  const service = new CatalogService(cfg, {
+    radarr: { async listMovies() { return []; }, async listMovieQueueDetails() { return []; }, async listRecentMovieImports() { return []; } } as never,
+    sonarr: {
+      async listSeries() {
+        return [
+          { id: 11, title: 'Imported Newest', imdbId: 'tt5001', added: '2024-01-01T00:00:00Z' },
+          { id: 12, title: 'Imported Older', imdbId: 'tt5002', added: '2024-03-01T00:00:00Z' },
+          { id: 13, title: 'Added Newest', imdbId: 'tt5003', added: '2024-04-01T00:00:00Z' },
+          { id: 14, title: 'Added Older', imdbId: 'tt5004', added: '2024-02-01T00:00:00Z' }
+        ];
+      },
+      async listSeriesQueueDetails() { return []; },
+      async listRecentSeriesImports() {
+        return [
+          { seriesId: 12, date: '2024-02-10T00:00:00Z' },
+          { seriesId: 11, date: '2024-03-15T00:00:00Z' }
+        ];
+      }
+    } as never
+  });
+
+  const result = await service.buildCatalog('sonarr-recent', 0, 25);
+  assert.deepEqual(result.metas.map((m) => m.id), ['tt5001', 'tt5002', 'tt5003', 'tt5004']);
+});
+
+test('catalog still returns library items when history endpoints fail', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.sonarr.enabled = true;
+
+  const service = new CatalogService(cfg, {
+    radarr: {
+      async listMovies() { return [{ id: 20, title: 'Movie Fallback', imdbId: 'tt6001', added: '2024-05-01T00:00:00Z' }]; },
+      async listMovieQueueDetails() { return []; },
+      async listRecentMovieImports() { throw new Error('history failed'); }
+    } as never,
+    sonarr: {
+      async listSeries() { return [{ id: 21, title: 'Series Fallback', imdbId: 'tt6002', added: '2024-05-01T00:00:00Z' }]; },
+      async listSeriesQueueDetails() { return []; },
+      async listRecentSeriesImports() { throw new Error('history failed'); }
+    } as never
+  });
+
+  const radarr = await service.buildCatalog('radarr-recent', 0, 25);
+  const sonarr = await service.buildCatalog('sonarr-recent', 0, 25);
+  assert.equal(radarr.metas[0]?.id, 'tt6001');
+  assert.equal(sonarr.metas[0]?.id, 'tt6002');
 });

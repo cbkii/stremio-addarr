@@ -269,14 +269,11 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Catalog-focused regression tests
+        run: npm run test:catalog
 
-      - name: Test
-        run: npm run test:ci
-
-      - name: Build
-        run: npm run build
+      - name: Full CI checks (typecheck, tests, build)
+        run: npm run ci
 
       # ── Package ───────────────────────────────────────────────────────
       - name: Package release

@@ -34,6 +34,12 @@ function formatRelativeImport(timestamp: number, nowMs: number): string {
   return days <= 0 ? 'Imported today' : `Imported ${days}d ago`;
 }
 
+function formatRelativeAdded(timestamp: number, nowMs: number): string {
+  if (!timestamp) return 'Added recently';
+  const days = Math.floor(Math.max(0, nowMs - timestamp) / DAY_MS);
+  return days <= 0 ? 'Added today' : `Added ${days}d ago`;
+}
+
 function parseEtaSeconds(value?: string): number | undefined {
   if (!value) return undefined;
   const match = /(?:(\d+)\.)?(\d{1,2}):(\d{2}):(\d{2})/.exec(value);
@@ -145,7 +151,9 @@ export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
     const bk = downloadingSortKey(b);
     return ak[0] - bk[0] || ak[1] - bk[1] || ak[2] - bk[2] || ak[3].localeCompare(bk[3]);
   });
-  const imported = values.filter((item) => item.status === 'imported').sort((a, b) => b.timestamp - a.timestamp);
+  const imported = values.filter((item) => item.status === 'imported').sort((a, b) => {
+    return (b.timestamp - a.timestamp) || ((b.addedTimestamp ?? 0) - (a.addedTimestamp ?? 0));
+  });
   return [...downloading, ...imported];
 }
 
@@ -181,7 +189,9 @@ export function mergeSeriesItems(items: CatalogItem[]): CatalogItem[] {
     const bk = downloadingSortKey(b);
     return ak[0] - bk[0] || ak[1] - bk[1] || ak[2] - bk[2] || ak[3].localeCompare(bk[3]);
   });
-  const imported = values.filter((item) => item.status === 'imported').sort((a, b) => b.timestamp - a.timestamp);
+  const imported = values.filter((item) => item.status === 'imported').sort((a, b) => {
+    return (b.timestamp - a.timestamp) || ((b.addedTimestamp ?? 0) - (a.addedTimestamp ?? 0));
+  });
   return [...downloading, ...imported];
 }
 
@@ -249,7 +259,7 @@ export class CatalogService {
       const nowMs = this.clock.now();
       const movies = await this.radarr.listMovies().catch(() => []);
       const queue = await this.radarr.listMovieQueueDetails().catch(() => []);
-      const historyWindow = Math.max(50, skip + limit + queue.length + 25);
+      const historyWindow = Math.max(100, skip + limit + queue.length + movies.length + 25);
       const history = await this.radarr.listRecentMovieImports(historyWindow, 0).catch(() => []);
 
     const moviesById = new Map<number, RadarrMovieRecord>();
@@ -287,24 +297,37 @@ export class CatalogService {
       }
     }
 
-    const importItems: CatalogItem[] = [];
+    const latestImportByMovieId = new Map<number, { timestamp: number; row: RadarrHistoryRecord }>();
     for (const row of history) {
+      if (row.movieId == null) continue;
+      const ts = toTimestamp(row.date);
+      if (!ts) continue;
+      const existing = latestImportByMovieId.get(row.movieId);
+      if (!existing || ts > existing.timestamp) {
+        latestImportByMovieId.set(row.movieId, { timestamp: ts, row });
+      }
+    }
+
+    const importItems: CatalogItem[] = [];
+    for (const movie of movies) {
       try {
-        const movie = row.movieId != null ? moviesById.get(row.movieId) : undefined;
-        const imdbId = normalizeImdbId(movie?.imdbId);
+        const imdbId = normalizeImdbId(movie.imdbId);
         if (!imdbId) continue;
 
-        const ts = toTimestamp(row.date);
+        const latestImport = latestImportByMovieId.get(movie.id);
+        const importedTs = latestImport?.timestamp ?? 0;
+        const addedTs = toTimestamp(movie.added);
         importItems.push({
           source: 'radarr',
           status: 'imported',
           type: 'movie',
           imdbId,
-          title: movie?.title ?? 'Unknown movie',
-          poster: pickPoster(movie?.images),
-          releaseInfo: formatRelativeImport(ts, nowMs),
-          description: compact([row.quality?.quality?.name, row.sourceTitle]),
-          timestamp: ts
+          title: movie.title ?? 'Unknown movie',
+          poster: pickPoster(movie.images),
+          releaseInfo: importedTs ? formatRelativeImport(importedTs, nowMs) : formatRelativeAdded(addedTs, nowMs),
+          description: compact([latestImport?.row.quality?.quality?.name, latestImport?.row.sourceTitle]),
+          timestamp: importedTs,
+          addedTimestamp: addedTs
         });
       } catch {
         continue;
@@ -323,7 +346,7 @@ export class CatalogService {
       const nowMs = this.clock.now();
       const seriesList = await this.sonarr.listSeries().catch(() => []);
       const queue = await this.sonarr.listSeriesQueueDetails().catch(() => []);
-      const historyWindow = Math.max(50, skip + limit + queue.length + 25);
+      const historyWindow = Math.max(100, skip + limit + queue.length + seriesList.length + 25);
       const history = await this.sonarr.listRecentSeriesImports(historyWindow, 0).catch(() => []);
 
     const bySeriesId = new Map<number, SonarrSeriesRecord>();
@@ -364,27 +387,40 @@ export class CatalogService {
       }
     }
 
-    const importItems: CatalogItem[] = [];
+    const latestImportBySeriesId = new Map<number, { timestamp: number; row: SonarrHistoryRecord }>();
     for (const row of history) {
+      if (row.seriesId == null) continue;
+      const ts = toTimestamp(row.date);
+      if (!ts) continue;
+      const existing = latestImportBySeriesId.get(row.seriesId);
+      if (!existing || ts > existing.timestamp) {
+        latestImportBySeriesId.set(row.seriesId, { timestamp: ts, row });
+      }
+    }
+
+    const importItems: CatalogItem[] = [];
+    for (const series of seriesList) {
       try {
-        const series = row.seriesId != null ? bySeriesId.get(row.seriesId) : undefined;
-        const imdbId = normalizeImdbId(series?.imdbId);
+        const imdbId = normalizeImdbId(series.imdbId);
         if (!imdbId) continue;
 
-        const ts = toTimestamp(row.date);
-        const ep = episodeLabel(row.episode?.seasonNumber, row.episode?.episodeNumber);
+        const latestImport = latestImportBySeriesId.get(series.id);
+        const importedTs = latestImport?.timestamp ?? 0;
+        const addedTs = toTimestamp(series.added);
+        const ep = episodeLabel(latestImport?.row.episode?.seasonNumber, latestImport?.row.episode?.episodeNumber);
         importItems.push({
           source: 'sonarr',
           status: 'imported',
           type: 'series',
           imdbId,
-          title: series?.title ?? 'Unknown series',
-          poster: pickPoster(series?.images),
-          releaseInfo: formatRelativeImport(ts, nowMs),
-          description: compact([ep ? `Latest: ${ep}` : undefined, row.quality?.quality?.name, row.sourceTitle]),
-          timestamp: ts,
-          seasonNumber: row.episode?.seasonNumber,
-          episodeNumber: row.episode?.episodeNumber
+          title: series.title ?? 'Unknown series',
+          poster: pickPoster(series.images),
+          releaseInfo: importedTs ? formatRelativeImport(importedTs, nowMs) : formatRelativeAdded(addedTs, nowMs),
+          description: compact([ep ? `Latest: ${ep}` : undefined, latestImport?.row.quality?.quality?.name, latestImport?.row.sourceTitle]),
+          timestamp: importedTs,
+          addedTimestamp: addedTs,
+          seasonNumber: latestImport?.row.episode?.seasonNumber,
+          episodeNumber: latestImport?.row.episode?.episodeNumber
         });
       } catch {
         continue;
