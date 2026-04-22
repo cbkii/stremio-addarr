@@ -1,4 +1,5 @@
 import type { AppConfig } from '../src/config.js';
+import { DEFAULT_MANIFEST_LOGO_URL } from '../src/config.js';
 
 export function baseConfig(): AppConfig {
   return {
@@ -7,7 +8,7 @@ export function baseConfig(): AppConfig {
     host: '127.0.0.1',
     port: 0,
     publicBaseUrl: 'http://127.0.0.1:7010',
-    manifestLogoUrl: 'https://img.icons8.com/?size=100&id=43669&format=png&color=000000',
+    manifestLogoUrl: DEFAULT_MANIFEST_LOGO_URL,
     targetClient: 'android-tv',
     timeZone: 'UTC',
     logLevel: 'error',

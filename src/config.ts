@@ -103,7 +103,7 @@ export interface AppConfig {
 }
 
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
-const DEFAULT_MANIFEST_LOGO_URL = 'https://img.icons8.com/?size=100&id=43669&format=png&color=000000';
+export const DEFAULT_MANIFEST_LOGO_URL = 'https://img.icons8.com/?size=100&id=43669&format=png&color=000000';
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
 const SONARR_MONITOR_NEW_ITEMS = new Set<AppConfig['sonarr']['monitorNewItems']>(['auto', 'all', 'none']);
@@ -233,6 +233,22 @@ function ensureHttpUrl(name: string, value: string): string {
   return stripTrailingSlash(parsed.toString());
 }
 
+function ensureHttpsLogoUrl(name: string, value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`Environment variable ${name} must be a valid URL.`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`Environment variable ${name} must start with https://.`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`Environment variable ${name} must not contain embedded credentials (userinfo).`);
+  }
+  return parsed.toString();
+}
+
 function parseTargetClient(value: string): AppConfig['targetClient'] {
   const normalized = value.trim().toLowerCase() as AppConfig['targetClient'];
   if (!TARGET_CLIENTS.has(normalized)) {
@@ -310,7 +326,7 @@ export function loadConfig(): AppConfig {
   const manifestLogoUrl = normalizedManifestLogo === 'none'
     ? ''
     : (manifestLogoEnv
-      ? ensureHttpUrl('MANIFEST_LOGO_URL', manifestLogoEnv)
+      ? ensureHttpsLogoUrl('MANIFEST_LOGO_URL', manifestLogoEnv)
       : DEFAULT_MANIFEST_LOGO_URL);
   const targetClient = parseTargetClient(readString('TARGET_CLIENT', 'android-tv'));
   const timeZone = readString('TZ', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
