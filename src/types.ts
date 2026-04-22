@@ -217,6 +217,7 @@ export interface CatalogItem {
   description?: string;
   poster?: string;
   timestamp: number;
+  addedTimestamp?: number;
   progressPct?: number;
   etaSeconds?: number;
   stalled?: boolean;
