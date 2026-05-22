@@ -86,7 +86,10 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
       };
     }
     const rawFilter = extra?.filter;
-    const filter: CatalogFilter | undefined = rawFilter === 'recent' ? 'recent' : rawFilter === 'unwatched' ? 'unwatched' : undefined;
+    let filter: CatalogFilter | undefined;
+    if (rawFilter === 'recent' || rawFilter === 'unwatched') {
+      filter = rawFilter;
+    }
     const result = await catalogService.buildCatalog(id, skip, limit, filter);
     return {
       metas: result.metas,

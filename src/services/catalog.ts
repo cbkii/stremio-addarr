@@ -266,8 +266,10 @@ export class CatalogService {
   }
 
   private async filterUnwatchedMovies(items: CatalogItem[]): Promise<CatalogItem[]> {
-    const watched = await Promise.all(items.map((item) => this.watchedLookup.isMovieWatched(item.imdbId)));
-    return items.filter((_, i) => !watched[i]);
+    const withStatus = await Promise.all(
+      items.map(async (item) => ({ item, watched: await this.watchedLookup.isMovieWatched(item.imdbId) }))
+    );
+    return withStatus.filter(({ watched }) => !watched).map(({ item }) => item);
   }
 
   private async buildAllRadarrItems(): Promise<CatalogItem[]> {
