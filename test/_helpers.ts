@@ -19,7 +19,7 @@ export function baseConfig(): AppConfig {
     serviceHealthCacheTtlMs: 2_000,
     streamCacheMaxAgeSec: 2,
     streamStaleRevalidateSec: 5,
-    catalogPageSize: 25,
+    catalogPageSize: 35,
     catalogCacheTtlMs: 5_000,
     catalogCacheMaxAgeSec: 15,
     catalogStaleRevalidateSec: 60,

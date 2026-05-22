@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CatalogService, downloadingReleaseInfo, mergeMovieItems, mergeSeriesItems } from '../src/services/catalog.js';
 import type { CatalogItem } from '../src/types.js';
+import type { WatchedLookup } from '../src/services/watched.js';
 import { baseConfig } from './_helpers.js';
 
 function movieItem(partial: Partial<CatalogItem>): CatalogItem {
@@ -359,4 +360,115 @@ test('catalog still returns library items when history endpoints fail', async ()
   const sonarr = await service.buildCatalog('sonarr-recent', 0, 25);
   assert.equal(radarr.metas[0]?.id, 'tt6001');
   assert.equal(sonarr.metas[0]?.id, 'tt6002');
+});
+
+// --- Watched-filter tests (movie items only) ---
+
+function makeWatchedLookup(watchedImdbIds: Set<string>): WatchedLookup {
+  return {
+    async isMovieWatched(imdbId) { return watchedImdbIds.has(imdbId); },
+    async isEpisodeWatched() { return false; }
+  };
+}
+
+function makeRadarrDeps(movies: Array<{ id: number; title: string; imdbId: string }>) {
+  return {
+    async listMovies() { return movies; },
+    async listMovieQueueDetails() { return []; },
+    async listRecentMovieImports() { return movies.map((m) => ({ movieId: m.id, date: '2024-01-01T00:00:00Z' })); }
+  };
+}
+
+const sonarrNoop = {
+  async listSeries() { return []; },
+  async listSeriesQueueDetails() { return []; },
+  async listRecentSeriesImports() { return []; }
+};
+
+test('radarr catalog with no filter excludes watched movies (homepage default)', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const movies = [
+    { id: 1, title: 'Watched Movie', imdbId: 'tt7001' },
+    { id: 2, title: 'Unwatched Movie', imdbId: 'tt7002' }
+  ];
+  const watchedLookup = makeWatchedLookup(new Set(['tt7001']));
+
+  const service = new CatalogService(cfg, {
+    radarr: makeRadarrDeps(movies) as never,
+    sonarr: sonarrNoop as never,
+    watchedLookup
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 25);
+  const ids = result.metas.map((m) => m.id);
+  assert.ok(!ids.includes('tt7001'), 'watched movie must be excluded');
+  assert.ok(ids.includes('tt7002'), 'unwatched movie must be included');
+});
+
+test('radarr catalog filter=unwatched excludes watched movies', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const movies = [
+    { id: 1, title: 'Watched Movie', imdbId: 'tt7001' },
+    { id: 2, title: 'Unwatched Movie', imdbId: 'tt7002' }
+  ];
+  const watchedLookup = makeWatchedLookup(new Set(['tt7001']));
+
+  const service = new CatalogService(cfg, {
+    radarr: makeRadarrDeps(movies) as never,
+    sonarr: sonarrNoop as never,
+    watchedLookup
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 25, 'unwatched');
+  const ids = result.metas.map((m) => m.id);
+  assert.ok(!ids.includes('tt7001'), 'watched movie must be excluded');
+  assert.ok(ids.includes('tt7002'), 'unwatched movie must be included');
+});
+
+test('radarr catalog filter=recent includes all movies regardless of watched status', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+
+  const movies = [
+    { id: 1, title: 'Watched Movie', imdbId: 'tt7001' },
+    { id: 2, title: 'Unwatched Movie', imdbId: 'tt7002' }
+  ];
+  const watchedLookup = makeWatchedLookup(new Set(['tt7001']));
+
+  const service = new CatalogService(cfg, {
+    radarr: makeRadarrDeps(movies) as never,
+    sonarr: sonarrNoop as never,
+    watchedLookup
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 25, 'recent');
+  const ids = result.metas.map((m) => m.id);
+  assert.ok(ids.includes('tt7001'), 'watched movie must be included in recent');
+  assert.ok(ids.includes('tt7002'), 'unwatched movie must be included in recent');
+});
+
+test('sonarr catalog is not affected by watched filter', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+
+  const watchedLookup = makeWatchedLookup(new Set(['tt8001']));
+
+  const service = new CatalogService(cfg, {
+    radarr: { async listMovies() { return []; }, async listMovieQueueDetails() { return []; }, async listRecentMovieImports() { return []; } } as never,
+    sonarr: {
+      async listSeries() { return [{ id: 1, title: 'Watched Show', imdbId: 'tt8001' }]; },
+      async listSeriesQueueDetails() { return []; },
+      async listRecentSeriesImports() { return [{ seriesId: 1, date: '2024-01-01T00:00:00Z' }]; }
+    } as never,
+    watchedLookup
+  });
+
+  // sonarr-recent with no filter should still return the series (watched filter not applied)
+  const result = await service.buildCatalog('sonarr-recent', 0, 25);
+  assert.equal(result.metas.length, 1);
+  assert.equal(result.metas[0]?.id, 'tt8001');
 });

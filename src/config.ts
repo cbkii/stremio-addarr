@@ -337,7 +337,7 @@ export function loadConfig(): AppConfig {
   const serviceHealthCacheTtlMs = readNumber('SERVICE_HEALTH_CACHE_TTL_MS', 10000);
   const streamCacheMaxAgeSec = readNumber('STREAM_CACHE_MAX_AGE', 2);
   const streamStaleRevalidateSec = readNumber('STREAM_STALE_REVALIDATE', 5);
-  const catalogPageSize = readNumber('CATALOG_PAGE_SIZE', 25);
+  const catalogPageSize = readNumber('CATALOG_PAGE_SIZE', 35);
   const catalogCacheTtlMs = readNumber('CATALOG_CACHE_TTL_MS', 5000);
   const catalogCacheMaxAgeSec = readNumber('CATALOG_CACHE_MAX_AGE_SEC', 15);
   const catalogStaleRevalidateSec = readNumber('CATALOG_STALE_REVALIDATE_SEC', 60);

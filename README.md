@@ -128,7 +128,7 @@ SONARR_QUALITY_PROFILE_ID=1
 SONARR_LANGUAGE_PROFILE_ID=1
 SONARR_SERIES_MONITOR=all
 
-CATALOG_PAGE_SIZE=25
+CATALOG_PAGE_SIZE=35
 CATALOG_CACHE_TTL_MS=5000
 CATALOG_CACHE_MAX_AGE_SEC=15
 CATALOG_STALE_REVALIDATE_SEC=60
@@ -158,7 +158,7 @@ Notes:
 - `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
 
 Optional tuning:
-- `CATALOG_PAGE_SIZE` (default `25`, max effective `50`): how many cards each catalog page returns.
+- `CATALOG_PAGE_SIZE` (default `35`, max effective `50`): how many cards each catalog page returns.
 - `CATALOG_CACHE_TTL_MS` (default `5000`): short in-memory cache for merged Arr queue+history results.
 - `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint sent to Stremio for catalog responses.
 - `CATALOG_STALE_REVALIDATE_SEC` (default `60`): stale-while-revalidate hint sent to Stremio.

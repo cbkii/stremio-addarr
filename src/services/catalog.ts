@@ -12,6 +12,9 @@ import type {
 } from '../types.js';
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
+import { NoopWatchedLookup, type WatchedLookup } from './watched.js';
+
+export type CatalogFilter = 'recent' | 'unwatched';
 
 const DAY_MS = 86_400_000;
 const IMDB_ID_PATTERN = /^tt\d+$/i;
@@ -224,42 +227,56 @@ export class CatalogService {
   private readonly radarr: RadarrClient;
   private readonly sonarr: SonarrClient;
   private readonly clock: Clock;
+  private readonly watchedLookup: WatchedLookup;
   private readonly mergedCache: TtlCache<CatalogItem[]>;
 
   constructor(
     private readonly config: AppConfig,
-    deps?: { radarr?: RadarrClient; sonarr?: SonarrClient; clock?: Clock }
+    deps?: { radarr?: RadarrClient; sonarr?: SonarrClient; clock?: Clock; watchedLookup?: WatchedLookup }
   ) {
     this.radarr = deps?.radarr ?? new RadarrClient(config);
     this.sonarr = deps?.sonarr ?? new SonarrClient(config);
     this.clock = deps?.clock ?? systemClock;
+    this.watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
     this.mergedCache = new TtlCache<CatalogItem[]>(config.catalogCacheTtlMs);
   }
 
-  async buildCatalog(catalogId: string, skip: number, limit: number): Promise<{ metas: CatalogMetaPreview[] }> {
-    const key = `${catalogId}:${skip}:${limit}`;
-    const cached = this.mergedCache.get(key);
-    if (cached) {
-      return { metas: cached.map(toMeta) };
+  async buildCatalog(catalogId: string, skip: number, limit: number, filter?: CatalogFilter): Promise<{ metas: CatalogMetaPreview[] }> {
+    const cacheKey = `${catalogId}:all`;
+    let allItems = this.mergedCache.get(cacheKey);
+    if (!allItems) {
+      if (catalogId === 'radarr-recent') {
+        allItems = await this.buildAllRadarrItems();
+      } else if (catalogId === 'sonarr-recent') {
+        allItems = await this.buildAllSonarrItems();
+      } else {
+        allItems = [];
+      }
+      this.mergedCache.set(cacheKey, allItems);
     }
 
-    let items: CatalogItem[] = [];
-    if (catalogId === 'radarr-recent') {
-      items = await this.buildRadarrItems(skip, limit);
-    } else if (catalogId === 'sonarr-recent') {
-      items = await this.buildSonarrItems(skip, limit);
+    let items = allItems;
+    // Apply watched filter only for movie items (radarr-recent).
+    // No filter (homepage default) and filter=unwatched both exclude watched movies.
+    if (catalogId === 'radarr-recent' && filter !== 'recent') {
+      items = await this.filterUnwatchedMovies(allItems);
     }
-    this.mergedCache.set(key, items);
-    return { metas: items.map(toMeta) };
+
+    return { metas: items.slice(skip, skip + limit).map(toMeta) };
   }
 
-  private async buildRadarrItems(skip: number, limit: number): Promise<CatalogItem[]> {
+  private async filterUnwatchedMovies(items: CatalogItem[]): Promise<CatalogItem[]> {
+    const watched = await Promise.all(items.map((item) => this.watchedLookup.isMovieWatched(item.imdbId)));
+    return items.filter((_, i) => !watched[i]);
+  }
+
+  private async buildAllRadarrItems(): Promise<CatalogItem[]> {
     if (!this.config.radarr.enabled) return [];
     try {
       const nowMs = this.clock.now();
       const movies = await this.radarr.listMovies().catch(() => []);
       const queue = await this.radarr.listMovieQueueDetails().catch(() => []);
-      const historyWindow = Math.max(100, skip + limit + queue.length + movies.length + 25);
+      const historyWindow = Math.max(100, queue.length + movies.length + 25);
       const history = await this.radarr.listRecentMovieImports(historyWindow, 0).catch(() => []);
 
     const moviesById = new Map<number, RadarrMovieRecord>();
@@ -334,19 +351,19 @@ export class CatalogService {
       }
     }
 
-      return mergeMovieItems([...queueItems, ...importItems]).slice(skip, skip + limit);
+      return mergeMovieItems([...queueItems, ...importItems]);
     } catch {
       return [];
     }
   }
 
-  private async buildSonarrItems(skip: number, limit: number): Promise<CatalogItem[]> {
+  private async buildAllSonarrItems(): Promise<CatalogItem[]> {
     if (!this.config.sonarr.enabled) return [];
     try {
       const nowMs = this.clock.now();
       const seriesList = await this.sonarr.listSeries().catch(() => []);
       const queue = await this.sonarr.listSeriesQueueDetails().catch(() => []);
-      const historyWindow = Math.max(100, skip + limit + queue.length + seriesList.length + 25);
+      const historyWindow = Math.max(100, queue.length + seriesList.length + 25);
       const history = await this.sonarr.listRecentSeriesImports(historyWindow, 0).catch(() => []);
 
     const bySeriesId = new Map<number, SonarrSeriesRecord>();
@@ -427,7 +444,7 @@ export class CatalogService {
       }
     }
 
-      return mergeSeriesItems([...queueItems, ...importItems]).slice(skip, skip + limit);
+      return mergeSeriesItems([...queueItems, ...importItems]);
     } catch {
       return [];
     }
