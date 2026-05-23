@@ -3,6 +3,9 @@ name: Release
 # ─── Supported release triggers ───────────────────────────────────────────
 # 1. Tag push:           push a semver tag like v1.2.3
 # 2. Manual dispatch:    Actions → Release → Run workflow (version + dry_run)
+#    • Leave the version field blank to auto-increment the patch version
+#      from the latest semver tag (e.g. v1.2.3 → v1.2.4). Supply an
+#      explicit X.Y.Z value to target a specific version instead.
 # 3. PR comment command: comment `/release` or `/release-dry-run` on a PR
 #    • Only collaborators/owners/members may trigger.
 #    • `/release-dry-run` builds and packages but does NOT publish.
@@ -16,8 +19,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g. 1.2.3 — without the v prefix). Must be X.Y.Z semver.'
-        required: true
+        description: 'Release version (e.g. 1.2.3 — without the v prefix). Leave blank to auto-increment the patch version from the latest tag.'
+        required: false
+        default: ''
         type: string
       dry_run:
         description: 'Dry run — build and verify archive without publishing a release'
@@ -145,10 +149,10 @@ jobs:
             echo "dry_run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── Validate version input (workflow_dispatch or PR comment with explicit version) ──
+      # ── Validate version input (workflow_dispatch with explicit version, or PR comment with explicit version) ──
       - name: Validate version input
         if: >-
-          github.event_name == 'workflow_dispatch'
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.version != '')
           || (github.event_name == 'issue_comment' && needs.pr-comment-gate.outputs.version != '')
         env:
           VERSION: ${{ github.event.inputs.version || needs.pr-comment-gate.outputs.version }}
@@ -178,7 +182,22 @@ jobs:
             # Tag was already pushed — use it directly
             TAG="${GITHUB_REF_NAME}"
           elif [[ "$EVENT" == "workflow_dispatch" ]]; then
-            TAG="v${VERSION}"
+            if [[ -n "${VERSION}" ]]; then
+              TAG="v${VERSION}"
+            else
+              # Auto-increment: find the latest semver tag and bump the patch version.
+              LATEST=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+              if [[ -n "${LATEST}" ]]; then
+                BASE="${LATEST#v}"
+              else
+                BASE=$(node -p "require('./package.json').version")
+              fi
+              MAJOR=$(echo "$BASE" | cut -d. -f1)
+              MINOR=$(echo "$BASE" | cut -d. -f2)
+              PATCH=$(echo "$BASE" | cut -d. -f3)
+              TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+              echo "::notice::No version supplied — auto-incremented patch to ${TAG} (from ${LATEST:-package.json v${BASE}})."
+            fi
           else
             # PR comment: use explicit version from comment if provided, else derive from package.json
             if [[ -n "${COMMENT_VERSION}" ]]; then
@@ -193,9 +212,9 @@ jobs:
           echo "### Release tag: \`$TAG\`  |  dry_run=${{ steps.flags.outputs.dry_run }}" >> "$GITHUB_STEP_SUMMARY"
 
       # Update package manifests before build so the runtime manifest version
-      # and packaged version always match the release tag. Runs for any trigger
-      # where an explicit version is supplied (workflow_dispatch or a PR comment
-      # of the form `/release X.Y.Z` or `/release-dry-run X.Y.Z`).
+      # and packaged version always match the release tag. Runs for all
+      # workflow_dispatch triggers (whether the version was explicit or
+      # auto-incremented) and for PR comments with an explicit version.
       # For tag-push releases the developer is expected to have run `npm version`
       # locally before pushing the tag (enforced by the Verify step below).
       - name: Sync package version
