@@ -3,7 +3,7 @@ import type { AppConfig } from './config.js';
 import type { Logger } from './logger.js';
 import { parseStremioId } from './lib/stremio-ids.js';
 import type { StatusTile } from './types.js';
-import { CatalogService } from './services/catalog.js';
+import { CatalogService, type CatalogFilter } from './services/catalog.js';
 import { ArrStatusService } from './services/status.js';
 import { NoopWatchedLookup } from './services/watched.js';
 import type { WatchedLookup } from './services/watched.js';
@@ -27,7 +27,15 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
     name: 'Arr Status & Add',
     description: 'Shows Radarr/Sonarr status and adds the current movie or series from Stremio.',
     catalogs: [
-      { id: 'radarr-recent', type: 'movie', name: 'Recent on Radarr', extra: [{ name: 'skip', isRequired: false }] },
+      {
+        id: 'radarr-recent',
+        type: 'movie',
+        name: 'Recent on Radarr',
+        extra: [
+          { name: 'filter', options: ['unwatched', 'recent'], isRequired: false },
+          { name: 'skip', isRequired: false }
+        ]
+      },
       { id: 'sonarr-recent', type: 'series', name: 'Recent on Sonarr', extra: [{ name: 'skip', isRequired: false }] }
     ],
     resources: ['stream', 'catalog'],
@@ -40,8 +48,9 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
     ...(config.manifestLogoUrl ? { logo: config.manifestLogoUrl } : {})
   });
 
-  const statusService = new ArrStatusService(config, { watchedLookup: deps?.watchedLookup ?? new NoopWatchedLookup() });
-  const catalogService = new CatalogService(config);
+  const watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
+  const statusService = new ArrStatusService(config, { watchedLookup });
+  const catalogService = new CatalogService(config, { watchedLookup });
 
   builder.defineStreamHandler(async ({ type, id }: { type: string; id: string }) => {
     if (type !== 'movie' && type !== 'series') {
@@ -76,7 +85,12 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
         staleError: config.catalogStaleErrorSec
       };
     }
-    const result = await catalogService.buildCatalog(id, skip, limit);
+    const rawFilter = extra?.filter;
+    let filter: CatalogFilter | undefined;
+    if (rawFilter === 'recent' || rawFilter === 'unwatched') {
+      filter = rawFilter;
+    }
+    const result = await catalogService.buildCatalog(id, skip, limit, filter);
     return {
       metas: result.metas,
       cacheMaxAge: config.catalogCacheMaxAgeSec,

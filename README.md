@@ -128,7 +128,8 @@ SONARR_QUALITY_PROFILE_ID=1
 SONARR_LANGUAGE_PROFILE_ID=1
 SONARR_SERIES_MONITOR=all
 
-CATALOG_PAGE_SIZE=25
+CATALOG_PAGE_SIZE=35
+RADARR_CATALOG_WATCHED_KEEP_COUNT=1
 CATALOG_CACHE_TTL_MS=5000
 CATALOG_CACHE_MAX_AGE_SEC=15
 CATALOG_STALE_REVALIDATE_SEC=60
@@ -155,14 +156,23 @@ Notes:
 - `SONARR_EPISODE_READY_TIMEOUT_MS` and `SONARR_EPISODE_READY_POLL_MS` tune how long the addon waits for Sonarr episode metadata to become ready after series add.
 - `RADARR_TAGS` and `SONARR_TAGS` accept comma-separated integer tag IDs (e.g. `1,3`). Find IDs via Arr → Settings → Tags.
 - Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
+- `RADARR_CATALOG_WATCHED_KEEP_COUNT` (default `1`) keeps a small number of watched movies visible in filtered Radarr catalogs; set `0` to hide watched movies entirely or raise it to keep more.
 - `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
 
 Optional tuning:
-- `CATALOG_PAGE_SIZE` (default `25`, max effective `50`): how many cards each catalog page returns.
-- `CATALOG_CACHE_TTL_MS` (default `5000`): short in-memory cache for merged Arr queue+history results.
+- `CATALOG_PAGE_SIZE` (default `35`, max effective `50`): how many cards each catalog page returns.
+- `RADARR_CATALOG_WATCHED_KEEP_COUNT` (default `1`): how many watched movies remain visible in filtered Radarr catalog views.
+- `CATALOG_CACHE_TTL_MS` (default `5000`): short in-memory cache for merged Arr queue+history results and progressive Radarr watched-filter pagination state.
 - `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint sent to Stremio for catalog responses.
 - `CATALOG_STALE_REVALIDATE_SEC` (default `60`): stale-while-revalidate hint sent to Stremio.
 - `CATALOG_STALE_ERROR_SEC` (default `120`): stale-if-error hint sent to Stremio.
+
+Catalog caching behavior:
+- Radarr and Sonarr base catalog rows (queue+import merge) are cached in-memory for `CATALOG_CACHE_TTL_MS`.
+- Radarr default/unwatched filtered pagination is cached progressively within the same TTL window, so adjacent `skip` pages avoid re-checking already-scanned items.
+- `filter=recent` remains unfiltered and bypasses watched filtering.
+- `RADARR_CATALOG_WATCHED_KEEP_COUNT` is applied globally across the sorted filtered catalog (not per-page), including when cached pagination is used.
+- Add/search/monitor actions are **not** cached; status/catalog caches are invalidated after Arr mutations.
 
 The script also includes a guided systemd unit review gate and starts the service.
 

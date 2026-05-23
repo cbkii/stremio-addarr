@@ -27,6 +27,7 @@ test('loads valid config', () => {
   assert.equal(config.radarr.enabled, true);
   assert.equal(config.radarr.baseUrl, 'http://127.0.0.1:7878');
   assert.equal(config.radarr.cardUrl, 'http://127.0.0.1:7878');
+  assert.equal(config.radarrCatalogWatchedKeepCount, 1);
   assert.equal(config.manifestLogoUrl, DEFAULT_MANIFEST_LOGO_URL);
 });
 
@@ -317,6 +318,11 @@ test('fails for invalid catalog page size', () => {
   assert.throws(() => loadConfig(), /CATALOG_PAGE_SIZE/);
 });
 
+test('fails for invalid radarr catalog watched keep count', () => {
+  process.env.RADARR_CATALOG_WATCHED_KEEP_COUNT = '-1';
+  assert.throws(() => loadConfig(), /RADARR_CATALOG_WATCHED_KEEP_COUNT/);
+});
+
 test('fails for negative catalog stale error hint', () => {
   process.env.CATALOG_STALE_ERROR_SEC = '-1';
   assert.throws(() => loadConfig(), /CATALOG_STALE_ERROR_SEC/);
@@ -338,6 +344,12 @@ test('APP_VERSION overrides package version', () => {
   process.env.APP_VERSION = '9.9.9-test';
   const config = loadConfig();
   assert.equal(config.version, '9.9.9-test');
+});
+
+test('RADARR_CATALOG_WATCHED_KEEP_COUNT overrides default', () => {
+  process.env.RADARR_CATALOG_WATCHED_KEEP_COUNT = '3';
+  const config = loadConfig();
+  assert.equal(config.radarrCatalogWatchedKeepCount, 3);
 });
 
 test('allows empty KODI_PACKAGE when Kodi is disabled', () => {
