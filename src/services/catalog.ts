@@ -229,6 +229,8 @@ export class CatalogService {
   private readonly clock: Clock;
   private readonly watchedLookup: WatchedLookup;
   private readonly mergedCache: TtlCache<CatalogItem[]>;
+  private readonly filteredRadarrProgressCache: TtlCache<{ accepted: CatalogItem[]; scannedIndex: number; keptWatched: number }>;
+  private readonly allItemsRevision = new Map<string, number>();
 
   constructor(
     private readonly config: AppConfig,
@@ -239,6 +241,7 @@ export class CatalogService {
     this.clock = deps?.clock ?? systemClock;
     this.watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
     this.mergedCache = new TtlCache<CatalogItem[]>(config.catalogCacheTtlMs);
+    this.filteredRadarrProgressCache = new TtlCache(config.catalogCacheTtlMs);
   }
 
   async buildCatalog(catalogId: string, skip: number, limit: number, filter?: CatalogFilter): Promise<{ metas: CatalogMetaPreview[] }> {
@@ -253,32 +256,41 @@ export class CatalogService {
         allItems = [];
       }
       this.mergedCache.set(cacheKey, allItems);
+      this.allItemsRevision.set(catalogId, (this.allItemsRevision.get(catalogId) ?? 0) + 1);
     }
 
-    let items = allItems;
     // Apply watched filtering only for movie items (radarr-recent).
     // No filter (homepage default) and filter=unwatched keep only a small recent watched allowance.
     if (catalogId === 'radarr-recent' && filter !== 'recent') {
-      items = await this.filterRadarrMovies(allItems);
+      const items = await this.filterRadarrMoviesPage(allItems, skip, limit, filter);
+      return { metas: items.map(toMeta) };
     }
 
-    return { metas: items.slice(skip, skip + limit).map(toMeta) };
+    return { metas: allItems.slice(skip, skip + limit).map(toMeta) };
   }
 
-  private async filterRadarrMovies(items: CatalogItem[]): Promise<CatalogItem[]> {
+  private async filterRadarrMoviesPage(items: CatalogItem[], skip: number, limit: number, filter?: CatalogFilter): Promise<CatalogItem[]> {
+    const targetAccepted = skip + limit;
     const keepWatchedCount = this.config.radarrCatalogWatchedKeepCount;
-    const withStatus = await Promise.all(
-      items.map(async (item) => ({ item, watched: await this.watchedLookup.isMovieWatched(item.imdbId) }))
-    );
-    let keptWatched = 0;
-    return withStatus.filter(({ watched }) => {
-      if (!watched) return true;
-      if (keptWatched < keepWatchedCount) {
-        keptWatched += 1;
-        return true;
+    const revision = this.allItemsRevision.get('radarr-recent') ?? 0;
+    const progressKey = `radarr-recent:${filter ?? 'default'}:${keepWatchedCount}:${revision}`;
+    const progress = this.filteredRadarrProgressCache.get(progressKey) ?? { accepted: [], scannedIndex: 0, keptWatched: 0 };
+
+    while (progress.accepted.length < targetAccepted && progress.scannedIndex < items.length) {
+      const item = items[progress.scannedIndex++];
+      const watched = await this.watchedLookup.isMovieWatched(item.imdbId);
+      if (!watched) {
+        progress.accepted.push(item);
+        continue;
       }
-      return false;
-    }).map(({ item }) => item);
+      if (progress.keptWatched < keepWatchedCount) {
+        progress.keptWatched += 1;
+        progress.accepted.push(item);
+      }
+    }
+
+    this.filteredRadarrProgressCache.set(progressKey, progress);
+    return progress.accepted.slice(skip, skip + limit);
   }
 
   private async buildAllRadarrItems(): Promise<CatalogItem[]> {

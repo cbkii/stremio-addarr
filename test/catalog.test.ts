@@ -498,3 +498,39 @@ test('sonarr catalog is not affected by watched filter', async () => {
   assert.equal(result.metas.length, 1);
   assert.equal(result.metas[0]?.id, 'tt8001');
 });
+
+test('radarr filtered pagination caches progressive watched checks and avoids rescanning', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarrCatalogWatchedKeepCount = 1;
+  const calls: string[] = [];
+  const watchedLookup: WatchedLookup = {
+    async isMovieWatched(imdbId) { calls.push(imdbId); return imdbId === 'tt9001' || imdbId === 'tt9003'; },
+    async isEpisodeWatched() { return false; }
+  };
+  const movies = [1, 2, 3, 4, 5].map((n) => ({ id: n, title: `M${n}`, imdbId: `tt900${n}`, added: `2024-03-0${n}T00:00:00Z` }));
+  const service = new CatalogService(cfg, { radarr: makeRadarrDeps(movies) as never, sonarr: sonarrNoop as never, watchedLookup });
+
+  const page1 = await service.buildCatalog('radarr-recent', 0, 2);
+  assert.deepEqual(page1.metas.map((m) => m.id), ['tt9005', 'tt9004']);
+  assert.equal(calls.length, 2);
+
+  const page2 = await service.buildCatalog('radarr-recent', 2, 2);
+  assert.deepEqual(page2.metas.map((m) => m.id), ['tt9003', 'tt9002']);
+  assert.equal(calls.length, 4);
+
+  await service.buildCatalog('radarr-recent', 2, 2);
+  assert.equal(calls.length, 4);
+});
+
+test('radarr watched keep count is global across pages and can be zero', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarrCatalogWatchedKeepCount = 0;
+  const watchedLookup = makeWatchedLookup(new Set(['tt9105', 'tt9104', 'tt9103']));
+  const movies = [1, 2, 3, 4, 5].map((n) => ({ id: n, title: `M${n}`, imdbId: `tt910${n}`, added: `2024-03-0${n}T00:00:00Z` }));
+  const service = new CatalogService(cfg, { radarr: makeRadarrDeps(movies) as never, sonarr: sonarrNoop as never, watchedLookup });
+
+  const page = await service.buildCatalog('radarr-recent', 0, 3);
+  assert.deepEqual(page.metas.map((m) => m.id), ['tt9102', 'tt9101']);
+});
