@@ -371,11 +371,11 @@ function makeWatchedLookup(watchedImdbIds: Set<string>): WatchedLookup {
   };
 }
 
-function makeRadarrDeps(movies: Array<{ id: number; title: string; imdbId: string }>) {
+function makeRadarrDeps(movies: Array<{ id: number; title: string; imdbId: string; added?: string }>) {
   return {
     async listMovies() { return movies; },
     async listMovieQueueDetails() { return []; },
-    async listRecentMovieImports() { return movies.map((m) => ({ movieId: m.id, date: '2024-01-01T00:00:00Z' })); }
+    async listRecentMovieImports() { return []; }
   };
 }
 
@@ -385,15 +385,16 @@ const sonarrNoop = {
   async listRecentSeriesImports() { return []; }
 };
 
-test('radarr catalog with no filter excludes watched movies (homepage default)', async () => {
+test('radarr catalog with no filter keeps one recent watched movie by default', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
 
   const movies = [
-    { id: 1, title: 'Watched Movie', imdbId: 'tt7001' },
-    { id: 2, title: 'Unwatched Movie', imdbId: 'tt7002' }
+    { id: 1, title: 'Newest Watched Movie', imdbId: 'tt7001', added: '2024-03-03T00:00:00Z' },
+    { id: 2, title: 'Unwatched Movie', imdbId: 'tt7002', added: '2024-03-02T00:00:00Z' },
+    { id: 3, title: 'Older Watched Movie', imdbId: 'tt7003', added: '2024-03-01T00:00:00Z' }
   ];
-  const watchedLookup = makeWatchedLookup(new Set(['tt7001']));
+  const watchedLookup = makeWatchedLookup(new Set(['tt7001', 'tt7003']));
 
   const service = new CatalogService(cfg, {
     radarr: makeRadarrDeps(movies) as never,
@@ -403,19 +404,21 @@ test('radarr catalog with no filter excludes watched movies (homepage default)',
 
   const result = await service.buildCatalog('radarr-recent', 0, 25);
   const ids = result.metas.map((m) => m.id);
-  assert.ok(!ids.includes('tt7001'), 'watched movie must be excluded');
+  assert.ok(ids.includes('tt7001'), 'newest watched movie must be kept');
   assert.ok(ids.includes('tt7002'), 'unwatched movie must be included');
+  assert.ok(!ids.includes('tt7003'), 'older watched movies beyond keep count must be excluded');
 });
 
-test('radarr catalog filter=unwatched excludes watched movies', async () => {
+test('radarr catalog filter=unwatched keeps one recent watched movie by default', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
 
   const movies = [
-    { id: 1, title: 'Watched Movie', imdbId: 'tt7001' },
-    { id: 2, title: 'Unwatched Movie', imdbId: 'tt7002' }
+    { id: 1, title: 'Newest Watched Movie', imdbId: 'tt7001', added: '2024-03-03T00:00:00Z' },
+    { id: 2, title: 'Unwatched Movie', imdbId: 'tt7002', added: '2024-03-02T00:00:00Z' },
+    { id: 3, title: 'Older Watched Movie', imdbId: 'tt7003', added: '2024-03-01T00:00:00Z' }
   ];
-  const watchedLookup = makeWatchedLookup(new Set(['tt7001']));
+  const watchedLookup = makeWatchedLookup(new Set(['tt7001', 'tt7003']));
 
   const service = new CatalogService(cfg, {
     radarr: makeRadarrDeps(movies) as never,
@@ -425,8 +428,31 @@ test('radarr catalog filter=unwatched excludes watched movies', async () => {
 
   const result = await service.buildCatalog('radarr-recent', 0, 25, 'unwatched');
   const ids = result.metas.map((m) => m.id);
-  assert.ok(!ids.includes('tt7001'), 'watched movie must be excluded');
+  assert.ok(ids.includes('tt7001'), 'newest watched movie must be kept');
   assert.ok(ids.includes('tt7002'), 'unwatched movie must be included');
+  assert.ok(!ids.includes('tt7003'), 'older watched movies beyond keep count must be excluded');
+});
+
+test('radarr catalog watched keep count is configurable', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarrCatalogWatchedKeepCount = 2;
+
+  const movies = [
+    { id: 1, title: 'Newest Watched Movie', imdbId: 'tt7001', added: '2024-03-03T00:00:00Z' },
+    { id: 2, title: 'Unwatched Movie', imdbId: 'tt7002', added: '2024-03-02T00:00:00Z' },
+    { id: 3, title: 'Older Watched Movie', imdbId: 'tt7003', added: '2024-03-01T00:00:00Z' }
+  ];
+  const watchedLookup = makeWatchedLookup(new Set(['tt7001', 'tt7003']));
+
+  const service = new CatalogService(cfg, {
+    radarr: makeRadarrDeps(movies) as never,
+    sonarr: sonarrNoop as never,
+    watchedLookup
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 25);
+  assert.deepEqual(result.metas.map((m) => m.id), ['tt7001', 'tt7002', 'tt7003']);
 });
 
 test('radarr catalog filter=recent includes all movies regardless of watched status', async () => {

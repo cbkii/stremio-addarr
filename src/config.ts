@@ -23,6 +23,8 @@ export interface AppConfig {
   streamStaleRevalidateSec: number;
   /** Number of catalog cards returned per page before Stremio asks for next skip. */
   catalogPageSize: number;
+  /** Keep this many watched movie cards in filtered Radarr catalogs before hiding the rest. */
+  radarrCatalogWatchedKeepCount: number;
   /** Short local cache for merged catalog rows to reduce repeat Arr calls. */
   catalogCacheTtlMs: number;
   /** How long Stremio may cache catalog responses as fresh. */
@@ -338,6 +340,7 @@ export function loadConfig(): AppConfig {
   const streamCacheMaxAgeSec = readNumber('STREAM_CACHE_MAX_AGE', 2);
   const streamStaleRevalidateSec = readNumber('STREAM_STALE_REVALIDATE', 5);
   const catalogPageSize = readNumber('CATALOG_PAGE_SIZE', 35);
+  const radarrCatalogWatchedKeepCount = readNumber('RADARR_CATALOG_WATCHED_KEEP_COUNT', 1);
   const catalogCacheTtlMs = readNumber('CATALOG_CACHE_TTL_MS', 5000);
   const catalogCacheMaxAgeSec = readNumber('CATALOG_CACHE_MAX_AGE_SEC', 15);
   const catalogStaleRevalidateSec = readNumber('CATALOG_STALE_REVALIDATE_SEC', 60);
@@ -358,6 +361,9 @@ export function loadConfig(): AppConfig {
   }
   if (catalogPageSize <= 0) {
     throw new Error('CATALOG_PAGE_SIZE must be greater than 0.');
+  }
+  if (!Number.isInteger(radarrCatalogWatchedKeepCount) || radarrCatalogWatchedKeepCount < 0) {
+    throw new Error('RADARR_CATALOG_WATCHED_KEEP_COUNT must be an integer greater than or equal to 0.');
   }
   if (catalogCacheTtlMs < 0) {
     throw new Error('CATALOG_CACHE_TTL_MS must be at least 0.');
@@ -417,6 +423,7 @@ export function loadConfig(): AppConfig {
     streamCacheMaxAgeSec,
     streamStaleRevalidateSec,
     catalogPageSize,
+    radarrCatalogWatchedKeepCount,
     catalogCacheTtlMs,
     catalogCacheMaxAgeSec,
     catalogStaleRevalidateSec,

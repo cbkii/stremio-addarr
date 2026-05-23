@@ -256,20 +256,29 @@ export class CatalogService {
     }
 
     let items = allItems;
-    // Apply watched filter only for movie items (radarr-recent).
-    // No filter (homepage default) and filter=unwatched both exclude watched movies.
+    // Apply watched filtering only for movie items (radarr-recent).
+    // No filter (homepage default) and filter=unwatched keep only a small recent watched allowance.
     if (catalogId === 'radarr-recent' && filter !== 'recent') {
-      items = await this.filterUnwatchedMovies(allItems);
+      items = await this.filterRadarrMovies(allItems);
     }
 
     return { metas: items.slice(skip, skip + limit).map(toMeta) };
   }
 
-  private async filterUnwatchedMovies(items: CatalogItem[]): Promise<CatalogItem[]> {
+  private async filterRadarrMovies(items: CatalogItem[]): Promise<CatalogItem[]> {
+    const keepWatchedCount = this.config.radarrCatalogWatchedKeepCount;
     const withStatus = await Promise.all(
       items.map(async (item) => ({ item, watched: await this.watchedLookup.isMovieWatched(item.imdbId) }))
     );
-    return withStatus.filter(({ watched }) => !watched).map(({ item }) => item);
+    let keptWatched = 0;
+    return withStatus.filter(({ watched }) => {
+      if (!watched) return true;
+      if (keptWatched < keepWatchedCount) {
+        keptWatched += 1;
+        return true;
+      }
+      return false;
+    }).map(({ item }) => item);
   }
 
   private async buildAllRadarrItems(): Promise<CatalogItem[]> {

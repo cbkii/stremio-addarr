@@ -20,6 +20,7 @@ export function baseConfig(): AppConfig {
     streamCacheMaxAgeSec: 2,
     streamStaleRevalidateSec: 5,
     catalogPageSize: 35,
+    radarrCatalogWatchedKeepCount: 1,
     catalogCacheTtlMs: 5_000,
     catalogCacheMaxAgeSec: 15,
     catalogStaleRevalidateSec: 60,
