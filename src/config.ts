@@ -105,7 +105,7 @@ export interface AppConfig {
 }
 
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error', 'none']);
-export const DEFAULT_MANIFEST_LOGO_URL = 'https://img.icons8.com/?size=100&id=43669&format=png&color=000000';
+export const DEFAULT_MANIFEST_LOGO_PATH = '/assets/logo.png';
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
 const SONARR_MONITOR_NEW_ITEMS = new Set<AppConfig['sonarr']['monitorNewItems']>(['auto', 'all', 'none']);
@@ -251,6 +251,12 @@ function ensureHttpsLogoUrl(name: string, value: string): string {
   return parsed.toString();
 }
 
+export function buildDefaultManifestLogoUrl(publicBaseUrl: string, version: string): string {
+  const logoUrl = new URL(DEFAULT_MANIFEST_LOGO_PATH, `${publicBaseUrl}/`);
+  logoUrl.searchParams.set('v', version);
+  return logoUrl.toString();
+}
+
 function parseTargetClient(value: string): AppConfig['targetClient'] {
   const normalized = value.trim().toLowerCase() as AppConfig['targetClient'];
   if (!TARGET_CLIENTS.has(normalized)) {
@@ -325,13 +331,13 @@ export function loadConfig(): AppConfig {
   const host = readString('HOST', '127.0.0.1');
   const port = readNumber('PORT', 7010);
   const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
-  const manifestLogoEnv = readString('MANIFEST_LOGO_URL');
+  const manifestLogoEnv = readString('MANIFEST_LOGO_URL', 'local');
   const normalizedManifestLogo = manifestLogoEnv.toLowerCase();
   const manifestLogoUrl = normalizedManifestLogo === 'none'
     ? ''
-    : (manifestLogoEnv
-      ? ensureHttpsLogoUrl('MANIFEST_LOGO_URL', manifestLogoEnv)
-      : DEFAULT_MANIFEST_LOGO_URL);
+    : (normalizedManifestLogo === 'local'
+      ? buildDefaultManifestLogoUrl(publicBaseUrl, packageVersion)
+      : ensureHttpsLogoUrl('MANIFEST_LOGO_URL', manifestLogoEnv));
   const targetClient = parseTargetClient(readString('TARGET_CLIENT', 'android-tv'));
   const timeZone = readString('TZ', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);

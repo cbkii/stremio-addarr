@@ -96,7 +96,17 @@ export function createApp(config: AppConfig) {
   app.set('trust proxy', 'loopback');
   app.disable('x-powered-by');
 
-  app.use('/assets', express.static(resolveAssetsDir(), { maxAge: '7d' }));
+  app.use('/assets', express.static(resolveAssetsDir(), {
+    immutable: true,
+    maxAge: '365d',
+    setHeaders(res, filePath) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      if (filePath.toLowerCase().endsWith('.png')) {
+        res.setHeader('Content-Type', 'image/png');
+      }
+    }
+  }));
 
   app.use((req, res, next) => {
     const reqId = randomUUID();
@@ -119,6 +129,7 @@ export function createApp(config: AppConfig) {
       req.path === '/manifest.json' ||
       req.path.startsWith('/stream/') ||
       req.path.startsWith('/catalog/') ||
+      req.path.startsWith('/assets/') ||
       req.path.startsWith('/action/') ||
       req.path.startsWith('/files/');
     if (isStremioRoute) {
