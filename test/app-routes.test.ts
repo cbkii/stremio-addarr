@@ -103,6 +103,8 @@ test('assets logo is served from local repo static path', async () => {
     const res = await fetch(`${baseUrl}/assets/logo.png`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-type') ?? '', /image\/png/);
+    assert.equal(res.headers.get('access-control-allow-origin'), '*');
+    assert.equal(res.headers.get('cross-origin-resource-policy'), 'cross-origin');
     const body = await res.text();
     assert.ok(body.length > 0);
   });

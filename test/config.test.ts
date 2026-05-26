@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { loadConfig, validateConfig, DEFAULT_MANIFEST_LOGO_URL } from '../src/config.js';
+import { buildDefaultManifestLogoUrl, loadConfig, validateConfig } from '../src/config.js';
 import { baseConfig } from './_helpers.js';
 
 const PKG_VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
@@ -28,7 +28,13 @@ test('loads valid config', () => {
   assert.equal(config.radarr.baseUrl, 'http://127.0.0.1:7878');
   assert.equal(config.radarr.cardUrl, 'http://127.0.0.1:7878');
   assert.equal(config.radarrCatalogWatchedKeepCount, 1);
-  assert.equal(config.manifestLogoUrl, DEFAULT_MANIFEST_LOGO_URL);
+  assert.equal(config.manifestLogoUrl, buildDefaultManifestLogoUrl('https://stremio-addarr.example.com', PKG_VERSION));
+});
+
+test('manifest logo url accepts local keyword and derives self-hosted logo from public base url', () => {
+  process.env.MANIFEST_LOGO_URL = 'local';
+  const config = loadConfig();
+  assert.equal(config.manifestLogoUrl, `https://stremio-addarr.example.com/assets/logo.png?v=${PKG_VERSION}`);
 });
 
 test('manifest logo url accepts explicit https override', () => {
@@ -344,6 +350,13 @@ test('APP_VERSION overrides package version', () => {
   process.env.APP_VERSION = '9.9.9-test';
   const config = loadConfig();
   assert.equal(config.version, '9.9.9-test');
+});
+
+test('legacy APP_VERSION placeholder does not override package version', () => {
+  process.env.APP_VERSION = '0.1.1';
+  delete process.env.npm_package_version;
+  const config = loadConfig();
+  assert.equal(config.version, PKG_VERSION);
 });
 
 test('RADARR_CATALOG_WATCHED_KEEP_COUNT overrides default', () => {
