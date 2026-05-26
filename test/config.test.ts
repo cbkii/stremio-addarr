@@ -346,6 +346,13 @@ test('APP_VERSION overrides package version', () => {
   assert.equal(config.version, '9.9.9-test');
 });
 
+test('legacy APP_VERSION placeholder does not override package version', () => {
+  process.env.APP_VERSION = '0.1.1';
+  delete process.env.npm_package_version;
+  const config = loadConfig();
+  assert.equal(config.version, PKG_VERSION);
+});
+
 test('RADARR_CATALOG_WATCHED_KEEP_COUNT overrides default', () => {
   process.env.RADARR_CATALOG_WATCHED_KEEP_COUNT = '3';
   const config = loadConfig();

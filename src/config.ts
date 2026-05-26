@@ -312,7 +312,9 @@ function readVersionFromPackageJson(): string | undefined {
 
 function resolveVersion(): string {
   const appVersion = readString('APP_VERSION');
-  if (appVersion) return appVersion;
+  // Legacy installs may carry forward this old sample value from early .env templates.
+  // Treat it as unset so runtime version stays aligned with package/release versioning.
+  if (appVersion && appVersion !== '0.1.1') return appVersion;
   const npmPackageVersion = process.env.npm_package_version?.trim();
   if (npmPackageVersion) return npmPackageVersion;
   return readVersionFromPackageJson() ?? '0.1.0';
