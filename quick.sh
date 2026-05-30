@@ -67,16 +67,16 @@ fi
 
 # Configure ANSI colors when output is a terminal; otherwise use plain text.
 if [[ -t 1 ]]; then
-  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_BLUE=$'\033[34m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_CYAN=$'\033[36m'
+  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_BLUE=$'\033[34m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'
 else
-  C_RESET=""; C_BOLD=""; C_BLUE=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_CYAN=""
+  C_RESET=""; C_BOLD=""; C_BLUE=""; C_GREEN=""; C_YELLOW=""; C_RED=""
 fi
 
 say() { echo -e "${C_BLUE}${C_BOLD}==>${C_RESET} $*"; }
 ok() { echo -e "${C_GREEN}${C_BOLD}[OK]${C_RESET} $*"; }
 warn() { echo -e "${C_YELLOW}${C_BOLD}[WARN]${C_RESET} $*"; }
 fail() { echo -e "${C_RED}${C_BOLD}[FAIL]${C_RESET} $*"; }
-cmd() { echo -e "${C_CYAN}${C_BOLD}[»]${C_RESET} $*"; }
+cmd() { echo -e "${C_BLUE}${C_BOLD}[»]${C_RESET} $*"; }
 ask() { echo -e "${C_YELLOW}${C_BOLD}[?]${C_RESET} $*"; }
 
 TMP_DIR="$(mktemp -d)"
@@ -226,15 +226,14 @@ check_cmd() {
   fi
 }
 
-# Helper: approval gate (y=proceed, n=open file in nano, then re-prompt).
+# Helper: approval gate (y=proceed, n=open file in editor, then re-prompt).
 prompt_gate() {
   local title="$1"
   local edit_file="$2"
-  local editor="${EDITOR:-nano}"
   while true; do
     echo
     ask "${C_BOLD}${title}${C_RESET}"
-    read -r -p "${C_YELLOW}${C_BOLD}Approve and continue? [y] yes / [n] stop and edit with ${editor}: ${C_RESET}" ans
+    read -r -p "${C_YELLOW}${C_BOLD}Approve and continue? [y] yes / [n] pause and edit: ${C_RESET}" ans
     case "${ans,,}" in
       y|yes)
         ok "Approved by operator."
@@ -245,6 +244,13 @@ prompt_gate() {
           if [[ ! -t 0 || ! -t 1 ]]; then
             fail "Interactive editor requested but no TTY is available."
             echo "Re-run from an interactive shell or manually edit: $edit_file"
+            exit 1
+          fi
+          local editor
+          editor="$(pick_editor)"
+          if [[ -z "$editor" ]]; then
+            warn "No interactive editor found (tried nano, vi). Manually edit the file and re-run:"
+            warn "  $edit_file"
             exit 1
           fi
           run_step_live "Open $edit_file in ${editor} for manual edits" "$editor" "$edit_file"
@@ -268,6 +274,28 @@ print_status_line() {
     WARN) warn "WARN: $msg" ;;
     FAIL) fail "FAIL: $msg" ;;
   esac
+}
+
+# Helper: colorized diff (prefers icdiff; falls back to diff --color=always).
+coloured_diff() {
+  if [[ "$HAVE_ICDIFF" == "true" ]]; then
+    icdiff "$@" || true
+  else
+    diff --color=always -u "$@" || true
+  fi
+}
+
+# Helper: pick the best available interactive editor (nano preferred).
+pick_editor() {
+  if command -v nano >/dev/null 2>&1; then
+    echo nano
+  elif [[ -n "${EDITOR:-}" ]] && command -v "${EDITOR}" >/dev/null 2>&1; then
+    echo "${EDITOR}"
+  elif command -v vi >/dev/null 2>&1; then
+    echo vi
+  else
+    echo ""
+  fi
 }
 
 load_env_file() {
@@ -410,6 +438,7 @@ configure_trakt_oauth() {
 }
 
 VERIFICATION_FAILURES=0
+VERIFY_ERRORS=()
 
 # Helper: poll until service becomes active or timeout expires.
 # Does not exit the script on timeout — verification section will catch it.
@@ -444,6 +473,7 @@ run_verification() {
     cat "$log"
     echo -e "${C_RED}${C_BOLD}----- VERIFICATION OUTPUT END -----${C_RESET}"
     VERIFICATION_FAILURES=$((VERIFICATION_FAILURES + 1))
+    VERIFY_ERRORS+=("$desc")
   fi
 }
 
@@ -534,15 +564,25 @@ say "Preflight checks"
 for c in gh sha256sum tar npm node curl sudo file diff systemctl; do
   check_cmd "$c"
 done
-check_cmd "${EDITOR:-nano}"
 
-# icdiff is optional — used for colored upgrade diffs but not critical.
+# Editor check: nano is preferred; soft-warn if no editor is available at all.
+if command -v nano >/dev/null 2>&1; then
+  ok "Found preferred editor: nano"
+elif [[ -n "${EDITOR:-}" ]] && command -v "${EDITOR}" >/dev/null 2>&1; then
+  ok "Found editor (via EDITOR): ${EDITOR}"
+elif command -v vi >/dev/null 2>&1; then
+  ok "Found fallback editor: vi"
+else
+  warn "No interactive editor found (nano, vi). Manual editing at review gates will not be available."
+fi
+
+# icdiff is optional — preferred for colored upgrade diffs; falls back to diff --color=always.
 HAVE_ICDIFF=false
 if command -v icdiff >/dev/null 2>&1; then
   HAVE_ICDIFF=true
   ok "Found optional dependency: icdiff"
 else
-  warn "icdiff not found — upgrade diffs will use plain diff. Install via your package manager (e.g. sudo apt install icdiff or pip install icdiff)."
+  warn "icdiff not found — diffs will use diff --color=always. Install via your package manager (e.g. sudo apt install icdiff or pip install icdiff)."
 fi
 run_step "Verify GitHub CLI authentication status" gh auth status
 
@@ -603,7 +643,7 @@ if [[ "$MODE" == "install" ]]; then
     -e "s|YOUR_SVC_GROUP|$SVC_GROUP|g" \
     "$SERVICE_PATH"
 
-  run_step "Show service diff vs template" bash -lc "diff -u '$INSTALL_DIR/deploy/stremio-addarr.service.example' '$SERVICE_PATH' || true"
+  show_step_output "Show service diff vs template" coloured_diff "$INSTALL_DIR/deploy/stremio-addarr.service.example" "$SERVICE_PATH"
   prompt_gate "Review systemd unit file now." "$SERVICE_PATH"
 
   run_step "Reload systemd" sudo systemctl daemon-reload
@@ -619,21 +659,13 @@ else
   #############################################################################
   say "Upgrade mode review gates"
   if [[ -f "$INSTALL_DIR/.env" ]]; then
-    if [[ "$HAVE_ICDIFF" == "true" ]]; then
-      show_step_output "Show icdiff .env vs .env.example" bash -lc "cd '$INSTALL_DIR' && icdiff .env .env.example"
-    else
-      show_step_output "Show diff .env vs .env.example" bash -lc "cd '$INSTALL_DIR' && diff -u .env .env.example || true"
-    fi
+    show_step_output "Show .env vs .env.example" coloured_diff "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.example"
     if prompt_confirm "Merge existing .env values into the new .env.example template and replace .env?"; then
       merge_tmp_path="$TMP_DIR/.env.merged"
       run_step "Back up existing .env to .env.backup-before-merge" cp "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.backup-before-merge"
       run_step "Build merged .env from template + existing values" merge_env_with_template "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.example" "$merge_tmp_path"
       run_step "Replace .env with merged template result" cp "$merge_tmp_path" "$INSTALL_DIR/.env"
-      if [[ "$HAVE_ICDIFF" == "true" ]]; then
-        show_step_output "Show merged .env vs .env.example (post-merge icdiff)" bash -lc "cd '$INSTALL_DIR' && icdiff .env .env.example"
-      else
-        show_step_output "Show merged .env vs .env.example (post-merge diff)" bash -lc "cd '$INSTALL_DIR' && diff -u .env .env.example || true"
-      fi
+      show_step_output "Show merged .env vs .env.example (post-merge)" coloured_diff "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.example"
     else
       warn "Skipped .env merge step at operator request."
     fi
@@ -645,7 +677,7 @@ else
   fi
 
   if [[ -f "$SERVICE_PATH" ]]; then
-    show_step_output "Show systemd template vs installed unit diff" bash -lc "cd '$INSTALL_DIR' && diff -u deploy/stremio-addarr.service.example '$SERVICE_PATH'"
+    show_step_output "Show systemd template vs installed unit diff" coloured_diff "$INSTALL_DIR/deploy/stremio-addarr.service.example" "$SERVICE_PATH"
   else
     warn "No existing service file found. Installing template."
     run_step "Install systemd service template" sudo cp "$INSTALL_DIR/deploy/stremio-addarr.service.example" "$SERVICE_PATH"
@@ -675,6 +707,7 @@ if systemctl is-active --quiet stremio-addarr; then
 else
   print_status_line FAIL "systemd does not report active service."
   VERIFICATION_FAILURES=$((VERIFICATION_FAILURES + 1))
+  VERIFY_ERRORS+=("systemd does not report stremio-addarr as active")
   say "Show recent service logs"
   cmd "sudo journalctl -u stremio-addarr -n 80 --no-pager"
   sudo journalctl -u stremio-addarr -n 80 --no-pager || true
@@ -693,24 +726,41 @@ run_verification "Local manifest endpoint responds." curl -fsS http://127.0.0.1:
 run_verification "Local status.json endpoint responds." curl -fsS http://127.0.0.1:7010/status.json
 
 echo
+echo -e "${C_BLUE}${C_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
 if (( VERIFICATION_FAILURES == 0 )); then
-  ok "Quick $MODE flow completed."
+  echo -e "  ${C_GREEN}${C_BOLD}${MODE^^} SUCCESSFUL${C_RESET}"
 else
-  warn "Quick $MODE flow completed with ${VERIFICATION_FAILURES} verification failure(s)."
-  warn "Try restarting once more before troubleshooting further:"
-  warn "  sudo systemctl restart stremio-addarr"
-  warn "  sudo systemctl status stremio-addarr --no-pager -l"
-  echo
+  echo -e "  ${C_YELLOW}${C_BOLD}${MODE^^} COMPLETED WITH ${VERIFICATION_FAILURES} VERIFICATION ERROR(S)${C_RESET}"
 fi
-warn "If hosting/TLS changed, re-run README_HOST.md and then re-run: bash quick.sh $MODE"
-
-# Always print the install URL at the end if PUBLIC_BASE_URL is configured,
-# even when verification steps failed, so it is easy to copy.
+echo -e "${C_BLUE}${C_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+echo
+echo -e "  ${C_BOLD}Mode:${C_RESET}         $MODE"
+echo -e "  ${C_BOLD}Install path:${C_RESET} $INSTALL_DIR"
+echo -e "  ${C_BOLD}Env file:${C_RESET}     $INSTALL_DIR/.env"
+echo
+echo -e "  ${C_BOLD}Quick commands:${C_RESET}"
+echo "    sudo systemctl restart stremio-addarr"
+echo "    sudo systemctl status  stremio-addarr --no-pager -l"
+echo "    sudo journalctl -u stremio-addarr -f"
 if [[ -n "${PUBLIC_BASE_URL:-}" ]]; then
   echo
-  echo -e "${C_GREEN}${C_BOLD}Install URL:${C_RESET} ${PUBLIC_BASE_URL}/manifest.json"
-  echo "Paste this exact URL into Stremio: ${PUBLIC_BASE_URL}/manifest.json"
+  echo -e "  ${C_BOLD}Add-on URL:${C_RESET}   ${PUBLIC_BASE_URL}/manifest.json"
+  echo "  Paste into Stremio: ${PUBLIC_BASE_URL}/manifest.json"
 fi
+if (( VERIFICATION_FAILURES > 0 )); then
+  echo
+  echo -e "  ${C_YELLOW}${C_BOLD}ERRORS — ${VERIFICATION_FAILURES} VERIFICATION FAILURE(S) (see above for details):${C_RESET}"
+  for err in "${VERIFY_ERRORS[@]}"; do
+    echo -e "  ${C_RED}${C_BOLD}  • ${err}${C_RESET}"
+  done
+  echo
+  echo -e "  ${C_YELLOW}${C_BOLD}Try restarting before troubleshooting further:${C_RESET}"
+  echo "    sudo systemctl restart stremio-addarr"
+  echo "    sudo systemctl status  stremio-addarr --no-pager -l"
+fi
+echo
+warn "If hosting/TLS changed, re-run README_HOST.md and then re-run: bash quick.sh $MODE"
+echo -e "${C_BLUE}${C_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
 
 ###############################################################################
 # END OF SCRIPT
