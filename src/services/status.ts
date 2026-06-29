@@ -346,9 +346,11 @@ export class ArrStatusService {
       if (!this.config.radarr.enabled) {
         return [];
       }
-      const watched = await this.watchedLookup.isMovieWatched(parsed.imdbId);
+      const [watched, health] = await Promise.all([
+        this.watchedLookup.isMovieWatched(parsed.imdbId),
+        this.getServiceHealth()
+      ]);
       const borderFallback = this.useBorderFallbackLine();
-      const health = await this.getServiceHealth();
       if (!health.radarr.reachable) {
         return [{ name: '🛑❌\nRadarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()) }];
       }
@@ -361,9 +363,11 @@ export class ArrStatusService {
       return [];
     }
 
-    const watched = await this.watchedLookup.isEpisodeWatched(parsed.imdbId, parsed.season, parsed.episode);
+    const [watched, health] = await Promise.all([
+      this.watchedLookup.isEpisodeWatched(parsed.imdbId, parsed.season, parsed.episode),
+      this.getServiceHealth()
+    ]);
     const borderFallback = this.useBorderFallbackLine();
-    const health = await this.getServiceHealth();
     if (!health.sonarr.reachable) {
       return [{ name: '🛑❌\nSonarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];
     }
@@ -422,8 +426,10 @@ export class ArrStatusService {
       return cached;
     }
 
-    const radarrPing = await this.radarr.ping();
-    const sonarrPing = await this.sonarr.ping();
+    const [radarrPing, sonarrPing] = await Promise.all([
+      this.radarr.ping(),
+      this.sonarr.ping()
+    ]);
     const value = {
       radarr: {
         configured: this.config.radarr.enabled,

@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config.js';
-import { TtlCache } from '../lib/cache.js';
+import { AsyncTtlCache, TtlCache } from '../lib/cache.js';
 import { HttpError, HttpTimeoutError, JsonHttpClient } from '../lib/http.js';
 import { createLogger } from '../logger.js';
 import type {
@@ -16,9 +16,10 @@ import type {
 export class SonarrClient {
   private readonly http: JsonHttpClient;
   private readonly logger: ReturnType<typeof createLogger>;
-  private readonly seriesCache: TtlCache<SonarrSeriesRecord[]>;
-  private readonly episodeCache: TtlCache<SonarrEpisodeRecord[]>;
-  private readonly queueCache: TtlCache<SonarrQueueRecord[]>;
+  private readonly seriesCache: AsyncTtlCache<SonarrSeriesRecord[]>;
+  private readonly episodeCache: AsyncTtlCache<SonarrEpisodeRecord[]>;
+  private readonly queueCache: AsyncTtlCache<SonarrQueueRecord[]>;
+  private readonly seriesByImdbIdCache: AsyncTtlCache<Map<string, SonarrSeriesRecord>>;
 
   constructor(
     private readonly config: AppConfig,
@@ -34,9 +35,23 @@ export class SonarrClient {
         logger: this.logger,
         serviceName: 'sonarr'
       });
-    this.seriesCache = new TtlCache<SonarrSeriesRecord[]>(config.statusCacheTtlMs);
-    this.episodeCache = new TtlCache<SonarrEpisodeRecord[]>(config.statusCacheTtlMs);
-    this.queueCache = new TtlCache<SonarrQueueRecord[]>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
+    this.seriesCache = new AsyncTtlCache<SonarrSeriesRecord[]>(config.statusCacheTtlMs);
+    this.episodeCache = new AsyncTtlCache<SonarrEpisodeRecord[]>(config.statusCacheTtlMs);
+    this.queueCache = new AsyncTtlCache<SonarrQueueRecord[]>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
+    this.seriesByImdbIdCache = new AsyncTtlCache<Map<string, SonarrSeriesRecord>>(config.statusCacheTtlMs);
+  }
+
+  private async getSeriesByImdbIdMap(): Promise<Map<string, SonarrSeriesRecord>> {
+    return this.seriesByImdbIdCache.getOrSet('map', async () => {
+      const seriesList = await this.listSeries();
+      const map = new Map<string, SonarrSeriesRecord>();
+      for (const series of seriesList) {
+        if (series.imdbId) {
+          map.set(series.imdbId, series);
+        }
+      }
+      return map;
+    });
   }
 
   private async sleep(ms: number): Promise<void> {
@@ -231,8 +246,7 @@ export class SonarrClient {
         error.status === 400 &&
         /already been added/i.test(error.body)
       ) {
-        this.seriesCache.clear();
-        this.episodeCache.clear();
+        this.invalidateCache();
         this.logger.info('sonarr add skipped', { imdbId, reason: 'already_exists_400', title: lookup.title });
         return {
           ok: true,
@@ -244,8 +258,7 @@ export class SonarrClient {
       }
       throw error;
     }
-    this.seriesCache.clear();
-    this.episodeCache.clear();
+    this.invalidateCache();
 
     if (useEpisodeScopedMonitor) {
       const applied = await this.applyEpisodeMonitoringFromReferencePoint(
@@ -372,8 +385,7 @@ export class SonarrClient {
       monitored: true,
       monitorNewItems: this.resolveMonitorNewItems(effectiveMode)
     });
-    this.episodeCache.clear();
-    this.seriesCache.clear();
+    this.invalidateCache();
     this.logger.info('sonarr episode monitor applied', {
       imdbId,
       seriesId: series.id,
@@ -451,7 +463,7 @@ export class SonarrClient {
       }
     } else if (status.seriesId) {
       await this.http.put('/api/v3/series/editor', { seriesIds: [status.seriesId], monitored: true });
-      this.seriesCache.clear();
+      this.invalidateCache();
     }
 
     if (status.episodeId && !scopedMode) {
@@ -462,8 +474,7 @@ export class SonarrClient {
           episodeIds: [status.episodeId]
         });
       }
-      this.seriesCache.clear();
-      this.episodeCache.clear();
+      this.invalidateCache();
       this.logger.info('sonarr search queued', { imdbId, episodeId: status.episodeId, method: grabbed ? 'release_grab' : 'command_search' });
       return {
         ok: true,
@@ -489,8 +500,7 @@ export class SonarrClient {
           });
         }
       }
-      this.seriesCache.clear();
-      this.episodeCache.clear();
+      this.invalidateCache();
       this.logger.info('sonarr search queued', { imdbId, seriesId: status.seriesId, type: scopedMode === 'epseason' ? 'season_search' : 'missing_episode', scopedMode: scopedMode ?? null });
       return {
         ok: true,
@@ -513,6 +523,7 @@ export class SonarrClient {
 
   invalidateCache(): void {
     this.seriesCache.clear();
+    this.seriesByImdbIdCache.clear();
     this.episodeCache.clear();
     this.queueCache.clear();
   }
@@ -532,54 +543,45 @@ export class SonarrClient {
   }
 
   private async listQueueRecords(): Promise<SonarrQueueRecord[]> {
-    const cached = this.queueCache.get('records');
-    if (cached) {
-      return cached;
-    }
+    return this.queueCache.getOrSet('records', async () => {
+      const results: SonarrQueueRecord[] = [];
+      const pageSize = 250;
+      for (let page = 1; page <= 20; page++) {
+        const response = await this.http.get<
+          { records?: SonarrQueueRecord[]; totalRecords?: number }
+          | SonarrQueueRecord[]
+        >(`/api/v3/queue?page=${page}&pageSize=${pageSize}&includeUnknownSeriesItems=true`);
+        const records = Array.isArray(response) ? response : (response.records ?? []);
+        results.push(...records);
 
-    const results: SonarrQueueRecord[] = [];
-    const pageSize = 250;
-    for (let page = 1; page <= 20; page++) {
-      const response = await this.http.get<
-        { records?: SonarrQueueRecord[]; totalRecords?: number }
-        | SonarrQueueRecord[]
-      >(`/api/v3/queue?page=${page}&pageSize=${pageSize}&includeUnknownSeriesItems=true`);
-      const records = Array.isArray(response) ? response : (response.records ?? []);
-      results.push(...records);
+        if (records.length === 0) {
+          break;
+        }
+        if (!Array.isArray(response) && typeof response.totalRecords === 'number' && results.length >= response.totalRecords) {
+          break;
+        }
 
-      if (records.length === 0) {
-        break;
+        if (records.length < pageSize && (Array.isArray(response) || typeof response.totalRecords !== 'number')) {
+          break;
+        }
       }
-      if (!Array.isArray(response) && typeof response.totalRecords === 'number' && results.length >= response.totalRecords) {
-        break;
-      }
-
-      if (records.length < pageSize && (Array.isArray(response) || typeof response.totalRecords !== 'number')) {
-        break;
-      }
-    }
-
-    this.queueCache.set('records', results);
-    return results;
+      return results;
+    });
   }
 
   async listSeries(): Promise<SonarrSeriesRecord[]> {
-    const cached = this.seriesCache.get('all');
-    if (cached) return cached;
-    const series = await this.http.get<SonarrSeriesRecord[]>('/api/v3/series');
-    this.seriesCache.set('all', series);
-    return series;
+    return this.seriesCache.getOrSet('all', async () => {
+      return this.http.get<SonarrSeriesRecord[]>('/api/v3/series');
+    });
   }
 
   private async listEpisodes(seriesId: number): Promise<SonarrEpisodeRecord[]> {
     const key = `episodes:${seriesId}`;
-    const cached = this.episodeCache.get(key);
-    if (cached) return cached;
-    const episodes = await this.http.get<SonarrEpisodeRecord[]>(
-      `/api/v3/episode?seriesId=${seriesId}`
-    );
-    this.episodeCache.set(key, episodes);
-    return episodes;
+    return this.episodeCache.getOrSet(key, async () => {
+      return this.http.get<SonarrEpisodeRecord[]>(
+        `/api/v3/episode?seriesId=${seriesId}`
+      );
+    });
   }
 
   async listRecentSeriesImports(limit: number, offset = 0): Promise<SonarrHistoryRecord[]> {
@@ -615,31 +617,30 @@ export class SonarrClient {
 
   async listSeriesQueueDetails(): Promise<SonarrQueueRecord[]> {
     if (!this.config.sonarr.enabled) return [];
-    const cached = this.queueCache.get('details');
-    if (cached) return cached;
+    return this.queueCache.getOrSet('details', async () => {
+      const detailsPath = '/api/v3/queue/details?page=1&pageSize=250&includeUnknownSeriesItems=true';
+      let records: SonarrQueueRecord[] = [];
 
-    const detailsPath = '/api/v3/queue/details?page=1&pageSize=250&includeUnknownSeriesItems=true';
-    let records: SonarrQueueRecord[] = [];
+      try {
+        const details = await this.http.get<{ records?: SonarrQueueRecord[] } | SonarrQueueRecord[]>(detailsPath);
+        records = Array.isArray(details) ? details : (details.records ?? []);
+      } catch {
+        records = await this.listQueueRecords();
+      }
 
-    try {
-      const details = await this.http.get<{ records?: SonarrQueueRecord[] } | SonarrQueueRecord[]>(detailsPath);
-      records = Array.isArray(details) ? details : (details.records ?? []);
-    } catch {
-      records = await this.listQueueRecords();
-    }
-
-    this.queueCache.set('details', records);
-    return records;
+      return records;
+    });
   }
 
   private async findSeriesByImdbId(imdbId: string): Promise<SonarrSeriesRecord | undefined> {
-    const series = await this.listSeries();
-    const inLibrary = series.find((item) => item.imdbId === imdbId);
+    const seriesMap = await this.getSeriesByImdbIdMap();
+    const inLibrary = seriesMap.get(imdbId);
     if (inLibrary) return inLibrary;
 
     const lookup = await this.lookupSeries(imdbId);
     if (!lookup) return undefined;
 
+    const series = await this.listSeries();
     if (lookup.tvdbId != null) {
       return series.find((item) => item.tvdbId === lookup.tvdbId);
     }

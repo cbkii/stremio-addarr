@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config.js';
-import { TtlCache } from '../lib/cache.js';
+import { AsyncTtlCache, TtlCache } from '../lib/cache.js';
 import { systemClock, type Clock } from '../lib/clock.js';
 import type {
   CatalogItem,
@@ -148,16 +148,27 @@ export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
     }
   }
 
-  const values = [...bestByImdb.values()];
-  const downloading = values.filter((item) => item.status === 'downloading').sort((a, b) => {
-    const ak = downloadingSortKey(a);
-    const bk = downloadingSortKey(b);
+  const downloading: { item: CatalogItem; key: [number, number, number, string] }[] = [];
+  const imported: CatalogItem[] = [];
+
+  for (const item of bestByImdb.values()) {
+    if (item.status === 'downloading') {
+      downloading.push({ item, key: downloadingSortKey(item) });
+    } else if (item.status === 'imported') {
+      imported.push(item);
+    }
+  }
+
+  downloading.sort((a, b) => {
+    const ak = a.key;
+    const bk = b.key;
     return ak[0] - bk[0] || ak[1] - bk[1] || ak[2] - bk[2] || ak[3].localeCompare(bk[3]);
   });
-  const imported = values.filter((item) => item.status === 'imported').sort((a, b) => {
+  imported.sort((a, b) => {
     return (b.timestamp - a.timestamp) || ((b.addedTimestamp ?? 0) - (a.addedTimestamp ?? 0));
   });
-  return [...downloading, ...imported];
+
+  return [...downloading.map(d => d.item), ...imported];
 }
 
 export function mergeSeriesItems(items: CatalogItem[]): CatalogItem[] {
@@ -186,16 +197,27 @@ export function mergeSeriesItems(items: CatalogItem[]): CatalogItem[] {
     }
   }
 
-  const values = [...byImdb.values()];
-  const downloading = values.filter((item) => item.status === 'downloading').sort((a, b) => {
-    const ak = downloadingSortKey(a);
-    const bk = downloadingSortKey(b);
+  const downloading: { item: CatalogItem; key: [number, number, number, string] }[] = [];
+  const imported: CatalogItem[] = [];
+
+  for (const item of byImdb.values()) {
+    if (item.status === 'downloading') {
+      downloading.push({ item, key: downloadingSortKey(item) });
+    } else if (item.status === 'imported') {
+      imported.push(item);
+    }
+  }
+
+  downloading.sort((a, b) => {
+    const ak = a.key;
+    const bk = b.key;
     return ak[0] - bk[0] || ak[1] - bk[1] || ak[2] - bk[2] || ak[3].localeCompare(bk[3]);
   });
-  const imported = values.filter((item) => item.status === 'imported').sort((a, b) => {
+  imported.sort((a, b) => {
     return (b.timestamp - a.timestamp) || ((b.addedTimestamp ?? 0) - (a.addedTimestamp ?? 0));
   });
-  return [...downloading, ...imported];
+
+  return [...downloading.map(d => d.item), ...imported];
 }
 
 interface CatalogMetaPreview {
@@ -228,7 +250,7 @@ export class CatalogService {
   private readonly sonarr: SonarrClient;
   private readonly clock: Clock;
   private readonly watchedLookup: WatchedLookup;
-  private readonly mergedCache: TtlCache<CatalogItem[]>;
+  private readonly mergedCache: AsyncTtlCache<CatalogItem[]>;
   private readonly filteredRadarrProgressCache: TtlCache<{ accepted: CatalogItem[]; scannedIndex: number; keptWatched: number }>;
   private readonly allItemsRevision = new Map<string, number>();
 
@@ -240,24 +262,22 @@ export class CatalogService {
     this.sonarr = deps?.sonarr ?? new SonarrClient(config);
     this.clock = deps?.clock ?? systemClock;
     this.watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
-    this.mergedCache = new TtlCache<CatalogItem[]>(config.catalogCacheTtlMs);
+    this.mergedCache = new AsyncTtlCache<CatalogItem[]>(config.catalogCacheTtlMs);
     this.filteredRadarrProgressCache = new TtlCache(config.catalogCacheTtlMs);
   }
 
   async buildCatalog(catalogId: string, skip: number, limit: number, filter?: CatalogFilter): Promise<{ metas: CatalogMetaPreview[] }> {
     const cacheKey = `${catalogId}:all`;
-    let allItems = this.mergedCache.get(cacheKey);
-    if (!allItems) {
+    const allItems = await this.mergedCache.getOrSet(cacheKey, async () => {
+      let items: CatalogItem[] = [];
       if (catalogId === 'radarr-recent') {
-        allItems = await this.buildAllRadarrItems();
+        items = await this.buildAllRadarrItems();
       } else if (catalogId === 'sonarr-recent') {
-        allItems = await this.buildAllSonarrItems();
-      } else {
-        allItems = [];
+        items = await this.buildAllSonarrItems();
       }
-      this.mergedCache.set(cacheKey, allItems);
       this.allItemsRevision.set(catalogId, (this.allItemsRevision.get(catalogId) ?? 0) + 1);
-    }
+      return items;
+    });
 
     // Apply watched filtering only for movie items (radarr-recent).
     // No filter (homepage default) and filter=unwatched keep only a small recent watched allowance.
@@ -297,8 +317,10 @@ export class CatalogService {
     if (!this.config.radarr.enabled) return [];
     try {
       const nowMs = this.clock.now();
-      const movies = await this.radarr.listMovies().catch(() => []);
-      const queue = await this.radarr.listMovieQueueDetails().catch(() => []);
+      const [movies, queue] = await Promise.all([
+        this.radarr.listMovies().catch(() => []),
+        this.radarr.listMovieQueueDetails().catch(() => [])
+      ]);
       const historyWindow = Math.max(100, queue.length + movies.length + 25);
       const history = await this.radarr.listRecentMovieImports(historyWindow, 0).catch(() => []);
 
@@ -384,8 +406,10 @@ export class CatalogService {
     if (!this.config.sonarr.enabled) return [];
     try {
       const nowMs = this.clock.now();
-      const seriesList = await this.sonarr.listSeries().catch(() => []);
-      const queue = await this.sonarr.listSeriesQueueDetails().catch(() => []);
+      const [seriesList, queue] = await Promise.all([
+        this.sonarr.listSeries().catch(() => []),
+        this.sonarr.listSeriesQueueDetails().catch(() => [])
+      ]);
       const historyWindow = Math.max(100, queue.length + seriesList.length + 25);
       const history = await this.sonarr.listRecentSeriesImports(historyWindow, 0).catch(() => []);
 

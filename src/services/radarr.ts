@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config.js';
-import { TtlCache } from '../lib/cache.js';
+import { AsyncTtlCache, TtlCache } from '../lib/cache.js';
 import { HttpError, HttpTimeoutError, JsonHttpClient } from '../lib/http.js';
 import { createLogger } from '../logger.js';
 import type {
@@ -15,8 +15,9 @@ import type {
 export class RadarrClient {
   private readonly http: JsonHttpClient;
   private readonly logger: ReturnType<typeof createLogger>;
-  private readonly moviesCache: TtlCache<RadarrMovieRecord[]>;
-  private readonly queueCache: TtlCache<RadarrQueueRecord[]>;
+  private readonly moviesCache: AsyncTtlCache<RadarrMovieRecord[]>;
+  private readonly queueCache: AsyncTtlCache<RadarrQueueRecord[]>;
+  private readonly moviesByImdbIdCache: AsyncTtlCache<Map<string, RadarrMovieRecord>>;
 
   constructor(
     private readonly config: AppConfig,
@@ -32,8 +33,22 @@ export class RadarrClient {
         logger: this.logger,
         serviceName: 'radarr'
       });
-    this.moviesCache = new TtlCache<RadarrMovieRecord[]>(config.statusCacheTtlMs);
-    this.queueCache = new TtlCache<RadarrQueueRecord[]>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
+    this.moviesCache = new AsyncTtlCache<RadarrMovieRecord[]>(config.statusCacheTtlMs);
+    this.queueCache = new AsyncTtlCache<RadarrQueueRecord[]>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
+    this.moviesByImdbIdCache = new AsyncTtlCache<Map<string, RadarrMovieRecord>>(config.statusCacheTtlMs);
+  }
+
+  private async getMoviesByImdbIdMap(): Promise<Map<string, RadarrMovieRecord>> {
+    return this.moviesByImdbIdCache.getOrSet('map', async () => {
+      const movies = await this.listMovies();
+      const map = new Map<string, RadarrMovieRecord>();
+      for (const movie of movies) {
+        if (movie.imdbId) {
+          map.set(movie.imdbId, movie);
+        }
+      }
+      return map;
+    });
   }
 
   async getMovieStatus(imdbId: string): Promise<ArrMovieStatus> {
@@ -42,8 +57,8 @@ export class RadarrClient {
     }
 
     try {
-      const movies = await this.listMovies();
-      const existing = movies.find((movie) => movie.imdbId === imdbId);
+      const moviesMap = await this.getMoviesByImdbIdMap();
+      const existing = moviesMap.get(imdbId);
       if (!existing) {
         return { state: 'not_added' };
       }
@@ -170,7 +185,7 @@ export class RadarrClient {
         error.status === 400 &&
         /already been added/i.test(error.body)
       ) {
-        this.moviesCache.clear();
+        this.invalidateCache();
         this.logger.info('radarr add skipped', { imdbId, reason: 'already_exists_400', state: 'unknown' });
         return {
           ok: true,
@@ -182,7 +197,7 @@ export class RadarrClient {
       }
       throw error;
     }
-    this.moviesCache.clear();
+    this.invalidateCache();
 
     this.logger.info('radarr add success', { imdbId, title: lookup.title, searchOnAdd: this.config.radarr.searchOnAdd });
     return {
@@ -246,7 +261,7 @@ export class RadarrClient {
         movieIds: [status.movieId]
       });
     }
-    this.moviesCache.clear();
+    this.invalidateCache();
     this.logger.info('radarr search queued', { imdbId, movieId: status.movieId, method: grabbed ? 'release_grab' : 'command_search' });
     return {
       ok: true,
@@ -279,6 +294,7 @@ export class RadarrClient {
 
   invalidateCache(): void {
     this.moviesCache.clear();
+    this.moviesByImdbIdCache.clear();
     this.queueCache.clear();
   }
 
@@ -297,42 +313,35 @@ export class RadarrClient {
   }
 
   private async listQueueRecords(): Promise<RadarrQueueRecord[]> {
-    const cached = this.queueCache.get('records');
-    if (cached) {
-      return cached;
-    }
+    return this.queueCache.getOrSet('records', async () => {
+      const results: RadarrQueueRecord[] = [];
+      const pageSize = 250;
+      for (let page = 1; page <= 20; page++) {
+        const response = await this.http.get<{ records?: RadarrQueueRecord[]; totalRecords?: number } | RadarrQueueRecord[]>(
+          `/api/v3/queue?page=${page}&pageSize=${pageSize}&includeUnknownMovieItems=true`
+        );
+        const records = Array.isArray(response) ? response : (response.records ?? []);
+        results.push(...records);
 
-    const results: RadarrQueueRecord[] = [];
-    const pageSize = 250;
-    for (let page = 1; page <= 20; page++) {
-      const response = await this.http.get<{ records?: RadarrQueueRecord[]; totalRecords?: number } | RadarrQueueRecord[]>(
-        `/api/v3/queue?page=${page}&pageSize=${pageSize}&includeUnknownMovieItems=true`
-      );
-      const records = Array.isArray(response) ? response : (response.records ?? []);
-      results.push(...records);
+        if (records.length === 0) {
+          break;
+        }
+        if (!Array.isArray(response) && typeof response.totalRecords === 'number' && results.length >= response.totalRecords) {
+          break;
+        }
 
-      if (records.length === 0) {
-        break;
+        if (records.length < pageSize && (Array.isArray(response) || typeof response.totalRecords !== 'number')) {
+          break;
+        }
       }
-      if (!Array.isArray(response) && typeof response.totalRecords === 'number' && results.length >= response.totalRecords) {
-        break;
-      }
-
-      if (records.length < pageSize && (Array.isArray(response) || typeof response.totalRecords !== 'number')) {
-        break;
-      }
-    }
-
-    this.queueCache.set('records', results);
-    return results;
+      return results;
+    });
   }
 
   async listMovies(): Promise<RadarrMovieRecord[]> {
-    const cached = this.moviesCache.get('all');
-    if (cached) return cached;
-    const movies = await this.http.get<RadarrMovieRecord[]>('/api/v3/movie');
-    this.moviesCache.set('all', movies);
-    return movies;
+    return this.moviesCache.getOrSet('all', async () => {
+      return this.http.get<RadarrMovieRecord[]>('/api/v3/movie');
+    });
   }
 
 
@@ -370,21 +379,19 @@ export class RadarrClient {
 
   async listMovieQueueDetails(): Promise<RadarrQueueRecord[]> {
     if (!this.config.radarr.enabled) return [];
-    const cached = this.queueCache.get('details');
-    if (cached) return cached;
+    return this.queueCache.getOrSet('details', async () => {
+      const detailsPath = '/api/v3/queue/details?page=1&pageSize=250&includeUnknownMovieItems=true';
+      let records: RadarrQueueRecord[] = [];
 
-    const detailsPath = '/api/v3/queue/details?page=1&pageSize=250&includeUnknownMovieItems=true';
-    let records: RadarrQueueRecord[] = [];
+      try {
+        const details = await this.http.get<{ records?: RadarrQueueRecord[] } | RadarrQueueRecord[]>(detailsPath);
+        records = Array.isArray(details) ? details : (details.records ?? []);
+      } catch {
+        records = await this.listQueueRecords();
+      }
 
-    try {
-      const details = await this.http.get<{ records?: RadarrQueueRecord[] } | RadarrQueueRecord[]>(detailsPath);
-      records = Array.isArray(details) ? details : (details.records ?? []);
-    } catch {
-      records = await this.listQueueRecords();
-    }
-
-    this.queueCache.set('details', records);
-    return records;
+      return records;
+    });
   }
 
   private async lookupMovie(imdbId: string): Promise<RadarrLookupRecord | null> {
