@@ -443,3 +443,29 @@ test('trakt sync mins is clamped to 40 when env is <=40', () => {
   const config = loadConfig();
   assert.equal(config.traktSync.syncMins, 40);
 });
+
+test('RADARR_TAGS and SONARR_TAGS parse empty correctly', () => {
+  process.env.RADARR_TAGS = '';
+  process.env.SONARR_TAGS = '   ';
+  const config = loadConfig();
+  assert.deepEqual(config.radarr.tags, []);
+  assert.deepEqual(config.sonarr.tags, []);
+});
+
+test('RADARR_TAGS and SONARR_TAGS parse comma-separated integers correctly with whitespace', () => {
+  process.env.RADARR_TAGS = '1, 3, 5';
+  process.env.SONARR_TAGS = '2,  4 ,  ';
+  const config = loadConfig();
+  assert.deepEqual(config.radarr.tags, [1, 3, 5]);
+  assert.deepEqual(config.sonarr.tags, [2, 4]);
+});
+
+test('RADARR_TAGS validation rejects non-integer strings', () => {
+  process.env.RADARR_TAGS = '1,foo,3';
+  assert.throws(() => loadConfig(), /RADARR_TAGS/);
+});
+
+test('SONARR_TAGS validation rejects float strings', () => {
+  process.env.SONARR_TAGS = '1.5';
+  assert.throws(() => loadConfig(), /SONARR_TAGS/);
+});

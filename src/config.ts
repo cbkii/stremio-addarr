@@ -190,7 +190,7 @@ function readStringList(name: string): string[] {
     .filter(Boolean);
 }
 
-function readNumberList(name: string): number[] {
+function readIntegerListEnv(name: string): number[] {
   return readString(name)
     .split(',')
     .map((item) => item.trim())
@@ -453,7 +453,7 @@ export function loadConfig(): AppConfig {
       rootFolderPath: readString('RADARR_ROOT_FOLDER_PATH'),
       qualityProfileId: readNumber('RADARR_QUALITY_PROFILE_ID', 1),
       minimumAvailability: readString('RADARR_MINIMUM_AVAILABILITY', 'announced'),
-      tags: readNumberList('RADARR_TAGS'),
+      tags: readIntegerListEnv('RADARR_TAGS'),
       searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true)
     },
     sonarr: (() => {
@@ -478,7 +478,7 @@ export function loadConfig(): AppConfig {
         epCount: parseEpCount(readString('EP_COUNT', '2')),
         epCountPast: parseEpCountPast(readString('EP_COUNT_PAST', '8')),
         epCountMod: parseEpCountMod(readString('EP_COUNT_MOD', 'epfuture')),
-        tags: readNumberList('SONARR_TAGS'),
+        tags: readIntegerListEnv('SONARR_TAGS'),
         searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
       };
     })(),
