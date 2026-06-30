@@ -43,7 +43,8 @@ export function baseConfig(): AppConfig {
       qualityProfileId: 1,
       minimumAvailability: 'announced',
       tags: [],
-      searchOnAdd: true
+      searchOnAdd: true,
+      strictImdbMatch: false
     },
     sonarr: {
       enabled: false,

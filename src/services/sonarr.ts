@@ -13,13 +13,17 @@ import type {
   SonarrSeriesRecord
 } from '../types.js';
 
+interface SeriesSnapshot {
+  series: SonarrSeriesRecord[];
+  byImdbId: Map<string, SonarrSeriesRecord>;
+}
+
 export class SonarrClient {
   private readonly http: JsonHttpClient;
   private readonly logger: ReturnType<typeof createLogger>;
-  private readonly seriesCache: AsyncTtlCache<SonarrSeriesRecord[]>;
+  private readonly seriesSnapshotCache: AsyncTtlCache<SeriesSnapshot>;
   private readonly episodeCache: AsyncTtlCache<SonarrEpisodeRecord[]>;
   private readonly queueCache: AsyncTtlCache<SonarrQueueRecord[]>;
-  private readonly seriesByImdbIdCache: AsyncTtlCache<Map<string, SonarrSeriesRecord>>;
 
   constructor(
     private readonly config: AppConfig,
@@ -35,22 +39,21 @@ export class SonarrClient {
         logger: this.logger,
         serviceName: 'sonarr'
       });
-    this.seriesCache = new AsyncTtlCache<SonarrSeriesRecord[]>(config.statusCacheTtlMs);
+    this.seriesSnapshotCache = new AsyncTtlCache<SeriesSnapshot>(config.statusCacheTtlMs);
     this.episodeCache = new AsyncTtlCache<SonarrEpisodeRecord[]>(config.statusCacheTtlMs);
     this.queueCache = new AsyncTtlCache<SonarrQueueRecord[]>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
-    this.seriesByImdbIdCache = new AsyncTtlCache<Map<string, SonarrSeriesRecord>>(config.statusCacheTtlMs);
   }
 
-  private async getSeriesByImdbIdMap(): Promise<Map<string, SonarrSeriesRecord>> {
-    return this.seriesByImdbIdCache.getOrSet('map', async () => {
-      const seriesList = await this.listSeries();
-      const map = new Map<string, SonarrSeriesRecord>();
-      for (const series of seriesList) {
-        if (series.imdbId) {
-          map.set(series.imdbId, series);
+  private async getSeriesSnapshot(): Promise<SeriesSnapshot> {
+    return this.seriesSnapshotCache.getOrSet('snapshot', async () => {
+      const series = await this.http.get<SonarrSeriesRecord[]>('/api/v3/series');
+      const byImdbId = new Map<string, SonarrSeriesRecord>();
+      for (const s of series) {
+        if (s.imdbId) {
+          byImdbId.set(s.imdbId, s);
         }
       }
-      return map;
+      return { series, byImdbId };
     });
   }
 
@@ -522,8 +525,7 @@ export class SonarrClient {
   }
 
   invalidateCache(): void {
-    this.seriesCache.clear();
-    this.seriesByImdbIdCache.clear();
+    this.seriesSnapshotCache.clear();
     this.episodeCache.clear();
     this.queueCache.clear();
   }
@@ -570,9 +572,8 @@ export class SonarrClient {
   }
 
   async listSeries(): Promise<SonarrSeriesRecord[]> {
-    return this.seriesCache.getOrSet('all', async () => {
-      return this.http.get<SonarrSeriesRecord[]>('/api/v3/series');
-    });
+    const snapshot = await this.getSeriesSnapshot();
+    return snapshot.series;
   }
 
   private async listEpisodes(seriesId: number): Promise<SonarrEpisodeRecord[]> {
@@ -633,8 +634,8 @@ export class SonarrClient {
   }
 
   private async findSeriesByImdbId(imdbId: string): Promise<SonarrSeriesRecord | undefined> {
-    const seriesMap = await this.getSeriesByImdbIdMap();
-    const inLibrary = seriesMap.get(imdbId);
+    const snapshot = await this.getSeriesSnapshot();
+    const inLibrary = snapshot.byImdbId.get(imdbId);
     if (inLibrary) return inLibrary;
 
     const lookup = await this.lookupSeries(imdbId);

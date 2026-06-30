@@ -52,6 +52,7 @@ export interface AppConfig {
     minimumAvailability: string;
     tags: number[];
     searchOnAdd: boolean;
+    strictImdbMatch: boolean;
   };
   sonarr: {
     enabled: boolean;
@@ -454,7 +455,8 @@ export function loadConfig(): AppConfig {
       qualityProfileId: readNumber('RADARR_QUALITY_PROFILE_ID', 1),
       minimumAvailability: readString('RADARR_MINIMUM_AVAILABILITY', 'announced'),
       tags: readIntegerListEnv('RADARR_TAGS'),
-      searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true)
+      searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true),
+      strictImdbMatch: readBoolean('RADARR_STRICT_IMDB_MATCH', false)
     },
     sonarr: (() => {
       const sonarrEnabled = readBoolean('SONARR_ENABLED', false);

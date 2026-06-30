@@ -7,6 +7,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 export interface TmdbLookup {
   getMovieReleaseDate(imdbId: string): Promise<string | undefined>;
   getEpisodeReleaseDate(imdbId: string, season?: number, episode?: number): Promise<string | undefined>;
+  getMovieTmdbId(imdbId: string): Promise<number | undefined>;
 }
 
 type CachedDate = { value: string | undefined };
@@ -37,6 +38,11 @@ export class TmdbApiLookup implements TmdbLookup {
     private readonly apiBaseUrl = TMDB_DEFAULT_API_BASE_URL,
     private readonly region = 'US'
   ) {}
+
+  async getMovieTmdbId(imdbId: string): Promise<number | undefined> {
+    const find = await this.apiGet<TmdbFindResponse>(`/3/find/${encodeURIComponent(imdbId)}?external_source=imdb_id`);
+    return find?.movie_results?.find((row) => typeof row.id === 'number')?.id;
+  }
 
   async getMovieReleaseDate(imdbId: string): Promise<string | undefined> {
     const key = `movie:${imdbId}`;

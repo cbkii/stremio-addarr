@@ -113,21 +113,23 @@ function desc(...lines: string[]): string {
   return lines.filter(Boolean).join('\n');
 }
 
+import { AsyncTtlCache } from '../lib/cache.js';
+
 export class ArrStatusService {
   private readonly radarr: RadarrClient;
   private readonly sonarr: SonarrClient;
-  private readonly healthCache: TtlCache<{ radarr: ServiceHealth; sonarr: ServiceHealth }>;
+  private readonly healthCache: AsyncTtlCache<{ radarr: ServiceHealth; sonarr: ServiceHealth }>;
   private readonly watchedLookup: WatchedLookup;
   private readonly traktLookup: TraktLookup;
   private readonly tmdbLookup?: TmdbLookup;
 
   constructor(private readonly config: AppConfig, deps?: { watchedLookup?: WatchedLookup; traktLookup?: TraktLookup; tmdbLookup?: TmdbLookup }) {
-    this.radarr = new RadarrClient(config);
+    this.tmdbLookup = deps?.tmdbLookup ?? (config.tmdb.authToken ? new TmdbApiLookup(config.tmdb.authToken, config.tmdb.apiBaseUrl, config.tmdb.region) : undefined);
+    this.radarr = new RadarrClient(config, undefined, this.tmdbLookup);
     this.sonarr = new SonarrClient(config);
-    this.healthCache = new TtlCache(config.serviceHealthCacheTtlMs);
+    this.healthCache = new AsyncTtlCache(config.serviceHealthCacheTtlMs);
     this.watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
     this.traktLookup = deps?.traktLookup ?? (config.traktSync.clientId ? new TraktApiLookup(config.traktSync.clientId) : new TraktHtmlLookup());
-    this.tmdbLookup = deps?.tmdbLookup ?? (config.tmdb.authToken ? new TmdbApiLookup(config.tmdb.authToken, config.tmdb.apiBaseUrl, config.tmdb.region) : undefined);
   }
 
   private normalizeDateCandidate(value?: string): string | undefined {
@@ -421,28 +423,23 @@ export class ArrStatusService {
   }
 
   async getServiceHealth(): Promise<{ radarr: ServiceHealth; sonarr: ServiceHealth }> {
-    const cached = this.healthCache.get('services');
-    if (cached) {
-      return cached;
-    }
-
-    const [radarrPing, sonarrPing] = await Promise.all([
-      this.radarr.ping(),
-      this.sonarr.ping()
-    ]);
-    const value = {
-      radarr: {
-        configured: this.config.radarr.enabled,
-        reachable: radarrPing.reachable,
-        detail: radarrPing.detail
-      },
-      sonarr: {
-        configured: this.config.sonarr.enabled,
-        reachable: sonarrPing.reachable,
-        detail: sonarrPing.detail
-      }
-    };
-    this.healthCache.set('services', value);
-    return value;
+    return this.healthCache.getOrSet('services', async () => {
+      const [radarrPing, sonarrPing] = await Promise.all([
+        this.radarr.ping(),
+        this.sonarr.ping()
+      ]);
+      return {
+        radarr: {
+          configured: this.config.radarr.enabled,
+          reachable: radarrPing.reachable,
+          detail: radarrPing.detail
+        },
+        sonarr: {
+          configured: this.config.sonarr.enabled,
+          reachable: sonarrPing.reachable,
+          detail: sonarrPing.detail
+        }
+      };
+    });
   }
 }

@@ -43,6 +43,10 @@ class StaticTraktLookup implements TraktLookup {
   async getEpisodeReleaseDate(_imdbId: string, _season?: number, _episode?: number): Promise<string | undefined> {
     return this.episodeDate;
   }
+
+  async getMovieTmdbId(_imdbId: string): Promise<number | undefined> {
+    return undefined;
+  }
 }
 
 class StaticTmdbLookup implements TmdbLookup {
@@ -57,6 +61,10 @@ class StaticTmdbLookup implements TmdbLookup {
 
   async getEpisodeReleaseDate(_imdbId: string, _season?: number, _episode?: number): Promise<string | undefined> {
     return this.episodeDate;
+  }
+
+  async getMovieTmdbId(_imdbId: string): Promise<number | undefined> {
+    return undefined;
   }
 }
 

@@ -7,3 +7,6 @@
 
 **Learning:** In highly trafficked routes like `getMovieStatus()` and `findSeriesByImdbId()`, repeatedly calling `.find()` on the entire dataset leads to severe performance regressions because it triggers an O(N) traversal on every request for each item.
 **Action:** Caching an array is not enough; additionally populate a mapped `Map<string, Record>` index by `imdbId` which guarantees O(1) lookups on status lookups. Ensure `invalidateCache()` invalidates the array and the Map index together to avoid drift.
+
+**Learning:** Having separate caching layers for arrays and their mapped indexes (`moviesCache` vs `moviesByImdbIdCache`) leads to eventual synchronization drift.
+**Action:** Combine them into a single `Snapshot` object (`{ movies, byImdbId }`) and cache that object under a single key. This guarantees atomic invalidation.
