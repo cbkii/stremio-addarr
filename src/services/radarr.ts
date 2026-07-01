@@ -1,7 +1,8 @@
 import type { AppConfig } from '../config.js';
-import { AsyncTtlCache, TtlCache } from '../lib/cache.js';
+import { AsyncTtlCache } from '../lib/cache.js';
 import { HttpError, HttpTimeoutError, JsonHttpClient } from '../lib/http.js';
 import { createLogger } from '../logger.js';
+import type { TmdbLookup } from './tmdb.js';
 import type {
   AddActionResult,
   ArrMovieStatus,
@@ -26,7 +27,7 @@ export class RadarrClient {
   constructor(
     private readonly config: AppConfig,
     injectedHttp?: JsonHttpClient,
-    private readonly tmdbLookup?: import('./tmdb.js').TmdbLookup
+    private readonly tmdbLookup?: TmdbLookup
   ) {
     this.logger = createLogger(config.logLevel);
     this.http =
@@ -437,8 +438,14 @@ export class RadarrClient {
     if (typeof globalThis.fetch !== 'function') {
       return undefined;
     }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
+
     try {
-      const response = await fetch(`https://v3-cinemeta.strem.io/meta/movie/${encodeURIComponent(imdbId)}.json`);
+      const response = await globalThis.fetch(`https://v3-cinemeta.strem.io/meta/movie/${encodeURIComponent(imdbId)}.json`, {
+        signal: controller.signal
+      });
       if (!response.ok) return undefined;
       const data = await response.json();
       const meta = data?.meta;
@@ -452,6 +459,8 @@ export class RadarrClient {
       }
     } catch {
       return undefined;
+    } finally {
+      clearTimeout(timeout);
     }
     return undefined;
   }

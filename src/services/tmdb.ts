@@ -1,4 +1,4 @@
-import { TtlCache } from '../lib/cache.js';
+import { AsyncTtlCache, TtlCache } from '../lib/cache.js';
 
 const TMDB_DEFAULT_API_BASE_URL = 'https://api.themoviedb.org';
 const DEFAULT_TIMEOUT_MS = 4_000;
@@ -32,6 +32,7 @@ interface TmdbEpisodeDetailsResponse {
 
 export class TmdbApiLookup implements TmdbLookup {
   private readonly cache = new TtlCache<CachedDate>(CACHE_TTL_MS);
+  private readonly findCache = new AsyncTtlCache<TmdbFindResponse | null>(CACHE_TTL_MS);
 
   constructor(
     private readonly authToken: string,
@@ -39,8 +40,14 @@ export class TmdbApiLookup implements TmdbLookup {
     private readonly region = 'US'
   ) {}
 
+  private async getFindResponse(imdbId: string): Promise<TmdbFindResponse | null> {
+    return this.findCache.getOrSet(`find:${imdbId}`, async () => {
+      return this.apiGet<TmdbFindResponse>(`/3/find/${encodeURIComponent(imdbId)}?external_source=imdb_id`);
+    });
+  }
+
   async getMovieTmdbId(imdbId: string): Promise<number | undefined> {
-    const find = await this.apiGet<TmdbFindResponse>(`/3/find/${encodeURIComponent(imdbId)}?external_source=imdb_id`);
+    const find = await this.getFindResponse(imdbId);
     return find?.movie_results?.find((row) => typeof row.id === 'number')?.id;
   }
 
@@ -49,7 +56,7 @@ export class TmdbApiLookup implements TmdbLookup {
     const cached = this.cache.get(key);
     if (cached !== undefined) return cached.value;
 
-    const find = await this.apiGet<TmdbFindResponse>(`/3/find/${encodeURIComponent(imdbId)}?external_source=imdb_id`);
+    const find = await this.getFindResponse(imdbId);
     const movie = find?.movie_results?.find((row) => typeof row.id === 'number');
     if (!movie?.id) {
       this.cache.set(key, { value: undefined });

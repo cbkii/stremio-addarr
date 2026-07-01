@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config.js';
-import { AsyncTtlCache, TtlCache } from '../lib/cache.js';
+import { AsyncTtlCache } from '../lib/cache.js';
 import { HttpError, HttpTimeoutError, JsonHttpClient } from '../lib/http.js';
 import { createLogger } from '../logger.js';
 import type {

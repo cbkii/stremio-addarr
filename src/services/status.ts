@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config.js';
-import { TtlCache } from '../lib/cache.js';
+import { AsyncTtlCache } from '../lib/cache.js';
 import { buildFileToken } from '../lib/file-tokens.js';
 import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
@@ -112,8 +112,6 @@ function watchedLine(watched: boolean, borderFallback: boolean): string {
 function desc(...lines: string[]): string {
   return lines.filter(Boolean).join('\n');
 }
-
-import { AsyncTtlCache } from '../lib/cache.js';
 
 export class ArrStatusService {
   private readonly radarr: RadarrClient;
