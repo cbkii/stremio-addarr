@@ -436,6 +436,35 @@ test('listRecentMovieImports honors offset paging across pages', async () => {
   assert.deepEqual(records.map((record) => record.movieId), [53, 54, 55, 56, 57]);
 });
 
+test('addMovieByImdbId passes tags to add payload', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarr.tags = [5, 9];
+  let capturedBody: Record<string, unknown> | undefined;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/movie') return [] as T;
+      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
+      if (path.startsWith('/api/v3/movie/lookup/imdb')) {
+        return { title: 'Tag Movie', imdbId: 'tt101', tmdbId: 101 } as T;
+      }
+      return [] as T;
+    },
+    async post(path: string, body: Record<string, unknown>): Promise<void> {
+      if (path === '/api/v3/movie') {
+        capturedBody = body;
+      }
+    },
+    async put(): Promise<void> {},
+    async delete(): Promise<void> {}
+  };
+  const client = new RadarrClient(cfg, http as any);
+  const result = await client.addMovieByImdbId('tt101');
+  assert.equal(result.ok, true);
+  assert.ok(capturedBody, 'POST body should be captured');
+  assert.deepEqual(capturedBody.tags, [5, 9]);
+});
+
 test('addMovieByImdbId handles single-object lookup response from Radarr API', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;

@@ -52,6 +52,7 @@ export interface AppConfig {
     minimumAvailability: string;
     tags: number[];
     searchOnAdd: boolean;
+    strictImdbMatch: boolean;
   };
   sonarr: {
     enabled: boolean;
@@ -176,7 +177,10 @@ function readNumber(name: string, fallback: number): number {
 function readBoolean(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
   if (!raw) return fallback;
-  return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase());
+  const val = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(val)) return true;
+  if (['0', 'false', 'no', 'off'].includes(val)) return false;
+  throw new Error(`Environment variable ${name} must be a boolean.`);
 }
 
 function readString(name: string, fallback = ''): string {
@@ -190,7 +194,7 @@ function readStringList(name: string): string[] {
     .filter(Boolean);
 }
 
-function readNumberList(name: string): number[] {
+function readIntegerListEnv(name: string): number[] {
   return readString(name)
     .split(',')
     .map((item) => item.trim())
@@ -453,8 +457,9 @@ export function loadConfig(): AppConfig {
       rootFolderPath: readString('RADARR_ROOT_FOLDER_PATH'),
       qualityProfileId: readNumber('RADARR_QUALITY_PROFILE_ID', 1),
       minimumAvailability: readString('RADARR_MINIMUM_AVAILABILITY', 'announced'),
-      tags: readNumberList('RADARR_TAGS'),
-      searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true)
+      tags: readIntegerListEnv('RADARR_TAGS'),
+      searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true),
+      strictImdbMatch: readBoolean('RADARR_STRICT_IMDB_MATCH', false)
     },
     sonarr: (() => {
       const sonarrEnabled = readBoolean('SONARR_ENABLED', false);
@@ -478,7 +483,7 @@ export function loadConfig(): AppConfig {
         epCount: parseEpCount(readString('EP_COUNT', '2')),
         epCountPast: parseEpCountPast(readString('EP_COUNT_PAST', '8')),
         epCountMod: parseEpCountMod(readString('EP_COUNT_MOD', 'epfuture')),
-        tags: readNumberList('SONARR_TAGS'),
+        tags: readIntegerListEnv('SONARR_TAGS'),
         searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
       };
     })(),

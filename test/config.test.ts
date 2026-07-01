@@ -443,3 +443,53 @@ test('trakt sync mins is clamped to 40 when env is <=40', () => {
   const config = loadConfig();
   assert.equal(config.traktSync.syncMins, 40);
 });
+
+test('RADARR_TAGS and SONARR_TAGS parse empty correctly', () => {
+  process.env.RADARR_TAGS = '';
+  process.env.SONARR_TAGS = '   ';
+  const config = loadConfig();
+  assert.deepEqual(config.radarr.tags, []);
+  assert.deepEqual(config.sonarr.tags, []);
+});
+
+test('RADARR_TAGS and SONARR_TAGS parse comma-separated integers correctly with whitespace', () => {
+  process.env.RADARR_TAGS = '1, 3, 5';
+  process.env.SONARR_TAGS = '2,  4 ,  ';
+  const config = loadConfig();
+  assert.deepEqual(config.radarr.tags, [1, 3, 5]);
+  assert.deepEqual(config.sonarr.tags, [2, 4]);
+});
+
+test('RADARR_TAGS validation rejects non-integer strings', () => {
+  process.env.RADARR_TAGS = '1,foo,3';
+  assert.throws(() => loadConfig(), /RADARR_TAGS/);
+});
+
+test('SONARR_TAGS validation rejects float strings', () => {
+  process.env.SONARR_TAGS = '1.5';
+  assert.throws(() => loadConfig(), /SONARR_TAGS/);
+});
+
+test('RADARR_STRICT_IMDB_MATCH defaults to false when unset', () => {
+  delete process.env.RADARR_STRICT_IMDB_MATCH;
+
+  const config = loadConfig();
+
+  assert.strictEqual(config.radarr.strictImdbMatch, false);
+});
+
+test('RADARR_STRICT_IMDB_MATCH parses "true" and "false" correctly', () => {
+  process.env.RADARR_STRICT_IMDB_MATCH = 'true';
+  let config = loadConfig();
+  assert.strictEqual(config.radarr.strictImdbMatch, true);
+
+  process.env.RADARR_STRICT_IMDB_MATCH = 'false';
+  config = loadConfig();
+  assert.strictEqual(config.radarr.strictImdbMatch, false);
+});
+
+test('RADARR_STRICT_IMDB_MATCH validation rejects invalid values', () => {
+  process.env.RADARR_STRICT_IMDB_MATCH = 'not-a-boolean';
+
+  assert.throws(() => loadConfig(), /RADARR_STRICT_IMDB_MATCH/);
+});

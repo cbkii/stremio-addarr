@@ -838,6 +838,34 @@ test('listRecentSeriesImports honors offset paging across pages', async () => {
   assert.deepEqual(records.map((record) => record.seriesId), [53, 54, 55, 56, 57]);
 });
 
+test('addSeriesByImdbId passes tags to add payload', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.tags = [7, 8];
+  let capturedBody: Record<string, unknown> | undefined;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') return [] as T;
+      if (path.startsWith('/api/v3/series/lookup')) {
+        return [{ title: 'TagShow', imdbId: 'tt1001', tvdbId: 1001 }] as T;
+      }
+      return [] as T;
+    },
+    async post(path: string, body: Record<string, unknown>): Promise<void> {
+      if (path === '/api/v3/series') {
+        capturedBody = body;
+      }
+    },
+    async put(): Promise<void> {},
+    async delete(): Promise<void> {}
+  };
+  const client = new SonarrClient(cfg, http as any);
+  const result = await client.addSeriesByImdbId('tt1001');
+  assert.equal(result.ok, true);
+  assert.ok(capturedBody, 'POST body should be captured');
+  assert.deepEqual(capturedBody.tags, [7, 8]);
+});
+
 test('addSeriesByImdbId sends addOptions.monitor in payload', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
