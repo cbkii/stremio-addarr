@@ -177,7 +177,10 @@ function readNumber(name: string, fallback: number): number {
 function readBoolean(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
   if (!raw) return fallback;
-  return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase());
+  const val = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(val)) return true;
+  if (['0', 'false', 'no', 'off'].includes(val)) return false;
+  throw new Error(`Environment variable ${name} must be a boolean.`);
 }
 
 function readString(name: string, fallback = ''): string {

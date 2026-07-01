@@ -469,3 +469,27 @@ test('SONARR_TAGS validation rejects float strings', () => {
   process.env.SONARR_TAGS = '1.5';
   assert.throws(() => loadConfig(), /SONARR_TAGS/);
 });
+
+test('RADARR_STRICT_IMDB_MATCH defaults to false when unset', () => {
+  delete process.env.RADARR_STRICT_IMDB_MATCH;
+
+  const config = loadConfig();
+
+  assert.strictEqual(config.radarr.strictImdbMatch, false);
+});
+
+test('RADARR_STRICT_IMDB_MATCH parses "true" and "false" correctly', () => {
+  process.env.RADARR_STRICT_IMDB_MATCH = 'true';
+  let config = loadConfig();
+  assert.strictEqual(config.radarr.strictImdbMatch, true);
+
+  process.env.RADARR_STRICT_IMDB_MATCH = 'false';
+  config = loadConfig();
+  assert.strictEqual(config.radarr.strictImdbMatch, false);
+});
+
+test('RADARR_STRICT_IMDB_MATCH validation rejects invalid values', () => {
+  process.env.RADARR_STRICT_IMDB_MATCH = 'not-a-boolean';
+
+  assert.throws(() => loadConfig(), /RADARR_STRICT_IMDB_MATCH/);
+});

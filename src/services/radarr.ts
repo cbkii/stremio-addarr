@@ -160,7 +160,8 @@ export class RadarrClient {
 
     if (!match && !this.config.radarr.strictImdbMatch) {
       const expected = await this.fetchStremioCinemetaMovie(imdbId);
-      if (expected?.title && expected.year != null) {
+      const hasExpectedYear = expected?.year != null && Number.isFinite(expected.year);
+      if (expected?.title && hasExpectedYear) {
         const normExpTitle = this.normalizeTitle(expected.title);
         const titleMatch = candidates.find((entry) =>
           entry.year === expected.year && this.normalizeTitle(entry.title) === normExpTitle
@@ -433,15 +434,20 @@ export class RadarrClient {
   }
 
   private async fetchStremioCinemetaMovie(imdbId: string): Promise<{ title: string; year?: number } | undefined> {
+    if (typeof globalThis.fetch !== 'function') {
+      return undefined;
+    }
     try {
       const response = await fetch(`https://v3-cinemeta.strem.io/meta/movie/${encodeURIComponent(imdbId)}.json`);
       if (!response.ok) return undefined;
       const data = await response.json();
       const meta = data?.meta;
       if (meta?.name) {
+        const parsedYear = meta.year ? parseInt(String(meta.year), 10) : undefined;
+        const year = Number.isFinite(parsedYear) ? parsedYear : undefined;
         return {
           title: meta.name,
-          year: meta.year ? parseInt(meta.year, 10) : undefined
+          year
         };
       }
     } catch {

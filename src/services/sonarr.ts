@@ -641,12 +641,11 @@ export class SonarrClient {
     const lookup = await this.lookupSeries(imdbId);
     if (!lookup) return undefined;
 
-    const series = await this.listSeries();
     if (lookup.tvdbId != null) {
-      return series.find((item) => item.tvdbId === lookup.tvdbId);
+      return snapshot.series.find((item) => item.tvdbId === lookup.tvdbId);
     }
     if (lookup.title && lookup.year != null) {
-      return series.find(
+      return snapshot.series.find(
         (item) => item.title.toLowerCase() === lookup.title.toLowerCase() && item.year === lookup.year
       );
     }

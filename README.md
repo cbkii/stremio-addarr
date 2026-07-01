@@ -154,7 +154,7 @@ Notes:
   - `EP_COUNT <= 1` disables the auto-upgrade.
   - Because Stremio add-on requests are anonymous, this heuristic currently uses Sonarr-known downloaded episodes (not user watch-history from Stremio/Trakt).
 - `SONARR_EPISODE_READY_TIMEOUT_MS` and `SONARR_EPISODE_READY_POLL_MS` tune how long the addon waits for Sonarr episode metadata to become ready after series add.
-- `RADARR_TAGS` and `SONARR_TAGS` accept comma-separated integer tag IDs (e.g. `1,3`). Find IDs via Arr → Settings → Tags. These tags are only applied when newly adding a movie or series via the Stremio add-on, they are not retroactively applied to existing entries.
+- `RADARR_TAGS` and `SONARR_TAGS` accept comma-separated integer tag IDs (e.g. `1,3`). Find IDs via Arr → Settings → Tags. These tags are only applied when newly adding a movie or series via the Stremio add-on. They are not retroactively applied to existing entries.
 - Catalog cache variables are optional tuning knobs; defaults are production-safe for Pi/LAN use.
 - `RADARR_CATALOG_WATCHED_KEEP_COUNT` (default `1`) keeps a small number of watched movies visible in filtered Radarr catalogs; set `0` to hide watched movies entirely or raise it to keep more.
 - `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
