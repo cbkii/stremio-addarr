@@ -136,3 +136,25 @@ test('Radarr matching: title+year fallback rejects similar title with different 
   const res = await client.addMovieByImdbId('tt123');
   assert.equal(res.ok, false);
 });
+
+test('Radarr matching: title+year fallback rejects different normalised title with same year', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarr.strictImdbMatch = false;
+  const http = {
+    async get(path: string) {
+      if (path === '/api/v3/movie') return [];
+      if (path.startsWith('/api/v3/queue')) return { records: [] };
+      if (path.startsWith('/api/v3/movie/lookup')) {
+        return [{ imdbId: 'ttWRONG', title: 'A Different Movie', year: 1999, tmdbId: 777 }];
+      }
+      return [];
+    },
+    async post() { throw new Error('should not post'); }
+  };
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ meta: { name: 'The Matrix', year: '1999' } }) }) as any;
+
+  const client = new RadarrClient(cfg, http as any);
+  const res = await client.addMovieByImdbId('tt123');
+  assert.equal(res.ok, false);
+});
