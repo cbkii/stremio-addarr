@@ -122,7 +122,7 @@ function shouldPreferDownloading(candidate: CatalogItem, existing: CatalogItem):
   return ck[3] < ek[3];
 }
 
-export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
+function mergeCatalogItems(items: CatalogItem[]): CatalogItem[] {
   const bestByImdb = new Map<string, CatalogItem>();
   for (const item of items) {
     const current = bestByImdb.get(item.imdbId);
@@ -171,53 +171,12 @@ export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
   return [...downloading.map(d => d.item), ...imported];
 }
 
+export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
+  return mergeCatalogItems(items);
+}
+
 export function mergeSeriesItems(items: CatalogItem[]): CatalogItem[] {
-  const byImdb = new Map<string, CatalogItem>();
-  for (const item of items) {
-    const current = byImdb.get(item.imdbId);
-    if (!current) {
-      byImdb.set(item.imdbId, item);
-      continue;
-    }
-    if (!current.poster && item.poster) {
-      current.poster = item.poster;
-    }
-    if (current.status === 'imported' && item.status === 'downloading') {
-      byImdb.set(item.imdbId, item);
-      continue;
-    }
-    if (current.status === 'downloading' && item.status === 'downloading') {
-      if (shouldPreferDownloading(item, current)) {
-        byImdb.set(item.imdbId, item);
-      }
-      continue;
-    }
-    if (current.status === item.status && item.timestamp > current.timestamp) {
-      byImdb.set(item.imdbId, item);
-    }
-  }
-
-  const downloading: { item: CatalogItem; key: [number, number, number, string] }[] = [];
-  const imported: CatalogItem[] = [];
-
-  for (const item of byImdb.values()) {
-    if (item.status === 'downloading') {
-      downloading.push({ item, key: downloadingSortKey(item) });
-    } else if (item.status === 'imported') {
-      imported.push(item);
-    }
-  }
-
-  downloading.sort((a, b) => {
-    const ak = a.key;
-    const bk = b.key;
-    return ak[0] - bk[0] || ak[1] - bk[1] || ak[2] - bk[2] || ak[3].localeCompare(bk[3]);
-  });
-  imported.sort((a, b) => {
-    return (b.timestamp - a.timestamp) || ((b.addedTimestamp ?? 0) - (a.addedTimestamp ?? 0));
-  });
-
-  return [...downloading.map(d => d.item), ...imported];
+  return mergeCatalogItems(items);
 }
 
 interface CatalogMetaPreview {
@@ -296,16 +255,40 @@ export class CatalogService {
     const progressKey = `radarr-recent:${filter ?? 'default'}:${keepWatchedCount}:${revision}`;
     const progress = this.filteredRadarrProgressCache.get(progressKey) ?? { accepted: [], scannedIndex: 0, keptWatched: 0 };
 
+    // Use batch processing if the lookup supports it
+    const batchSize = Math.max(limit, 50);
+
     while (progress.accepted.length < targetAccepted && progress.scannedIndex < items.length) {
-      const item = items[progress.scannedIndex++];
-      const watched = await this.watchedLookup.isMovieWatched(item.imdbId);
-      if (!watched) {
-        progress.accepted.push(item);
-        continue;
-      }
-      if (progress.keptWatched < keepWatchedCount) {
-        progress.keptWatched += 1;
-        progress.accepted.push(item);
+      if (this.watchedLookup.areMoviesWatched) {
+        const batchEnd = Math.min(items.length, progress.scannedIndex + batchSize);
+        const batch = items.slice(progress.scannedIndex, batchEnd);
+        const batchIds = batch.map(i => i.imdbId);
+        const watchedMap = await this.watchedLookup.areMoviesWatched(batchIds);
+
+        for (const item of batch) {
+          if (progress.accepted.length >= targetAccepted) break;
+          const watched = watchedMap.get(item.imdbId) ?? false;
+          progress.scannedIndex++;
+          if (!watched) {
+            progress.accepted.push(item);
+            continue;
+          }
+          if (progress.keptWatched < keepWatchedCount) {
+            progress.keptWatched += 1;
+            progress.accepted.push(item);
+          }
+        }
+      } else {
+        const item = items[progress.scannedIndex++];
+        const watched = await this.watchedLookup.isMovieWatched(item.imdbId);
+        if (!watched) {
+          progress.accepted.push(item);
+          continue;
+        }
+        if (progress.keptWatched < keepWatchedCount) {
+          progress.keptWatched += 1;
+          progress.accepted.push(item);
+        }
       }
     }
 

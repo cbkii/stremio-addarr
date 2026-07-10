@@ -72,6 +72,51 @@ test('downloading fallback release info can omit progress and eta', () => {
   assert.equal(downloadingReleaseInfo(undefined, undefined, false), 'Downloading • ETA unknown');
 });
 
+class TrackingWatchedLookup implements WatchedLookup {
+  public batchCalls = 0;
+  public singleCalls = 0;
+  constructor(private readonly watchedIds: Set<string>) {}
+  async isMovieWatched(imdbId: string): Promise<boolean> {
+    this.singleCalls++;
+    return this.watchedIds.has(imdbId);
+  }
+  async areMoviesWatched(imdbIds: readonly string[]): Promise<Map<string, boolean>> {
+    this.batchCalls++;
+    const m = new Map<string, boolean>();
+    for (const id of imdbIds) m.set(id, this.watchedIds.has(id));
+    return m;
+  }
+  async isEpisodeWatched(): Promise<boolean> { return false; }
+}
+
+test('catalog service uses batch lookup for pagination filtering', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarrCatalogWatchedKeepCount = 0;
+
+  const fakeRadarr = {
+    async listMovies() {
+      // Return 60 movies so that at least two batches of 50 are needed to find enough un-watched
+      return Array.from({ length: 60 }, (_, i) => ({ id: i + 1, title: `Movie ${i}`, imdbId: `tt${i}` }));
+    },
+    async listMovieQueueDetails() { return []; },
+    async listRecentMovieImports() { return []; }
+  };
+
+  const lookup = new TrackingWatchedLookup(new Set(['tt0', 'tt1', 'tt2'])); // first three watched
+
+  const service = new CatalogService(cfg, {
+    radarr: fakeRadarr as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never,
+    watchedLookup: lookup
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 50, 'unwatched');
+  assert.equal(result.metas.length, 50);
+  assert.ok(lookup.batchCalls >= 1, 'should have used batch lookup');
+  assert.equal(lookup.singleCalls, 0, 'should not have fallen back to single lookup');
+});
+
 test('catalog service uses injectable clock for deterministic imported relative text', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;

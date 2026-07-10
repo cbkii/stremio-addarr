@@ -10,3 +10,4 @@
 
 **Learning:** Having separate caching layers for arrays and their mapped indexes (`moviesCache` vs `moviesByImdbIdCache`) leads to eventual synchronization drift.
 **Action:** Combine them into a single `Snapshot` object (`{ movies, byImdbId }`) and cache that object under a single key. This guarantees atomic invalidation.
+## 2024-07-10\n\n- Performance Optimization Conventions: Avoid N+1 sequential awaits in loops by extracting processing into batch-oriented APIs (e.g., look up items in chunks). For cache rebuilds, always populate new memory structures and use atomic swaps rather than clearing live state sets to avoid exposing partial/empty states to concurrent requests.

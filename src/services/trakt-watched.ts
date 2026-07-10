@@ -33,8 +33,8 @@ const TRAKT_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 export class TraktWatchedLookup implements WatchedLookup {
   private readonly syncMs: number;
   private readonly stateFile: string;
-  private readonly movieWatched = new Set<string>();
-  private readonly episodeWatched = new Set<string>();
+  private movieWatched = new Set<string>();
+  private episodeWatched = new Set<string>();
   private readonly lookupCache = new TtlCache<boolean>(60_000);
   private accessToken = '';
   private tokenExpiresAt = 0;
@@ -66,6 +66,27 @@ export class TraktWatchedLookup implements WatchedLookup {
     const watched = this.movieWatched.has(imdbId);
     this.lookupCache.set(cacheKey, watched);
     return watched;
+  }
+
+  async areMoviesWatched(imdbIds: readonly string[]): Promise<Map<string, boolean>> {
+    const result = new Map<string, boolean>();
+    if (!this.config.traktSync.enabled) {
+      for (const id of imdbIds) result.set(id, false);
+      return result;
+    }
+    await this.ensureSynced(false);
+    for (const imdbId of imdbIds) {
+      const cacheKey = `movie:${imdbId}`;
+      const cached = this.lookupCache.get(cacheKey);
+      if (cached != null) {
+        result.set(imdbId, cached);
+      } else {
+        const watched = this.movieWatched.has(imdbId);
+        this.lookupCache.set(cacheKey, watched);
+        result.set(imdbId, watched);
+      }
+    }
+    return result;
   }
 
   async isEpisodeWatched(imdbId: string, season?: number, episode?: number): Promise<boolean> {
@@ -117,11 +138,11 @@ export class TraktWatchedLookup implements WatchedLookup {
         this.traktGet<TraktWatchedMovie[]>('/sync/watched/movies'),
         this.traktGet<TraktWatchedShow[]>('/sync/watched/shows')
       ]);
-      this.movieWatched.clear();
-      this.episodeWatched.clear();
+      const nextMovieWatched = new Set<string>();
+      const nextEpisodeWatched = new Set<string>();
       for (const item of movies) {
         const imdb = item.movie?.ids?.imdb?.trim();
-        if (imdb) this.movieWatched.add(imdb);
+        if (imdb) nextMovieWatched.add(imdb);
       }
       for (const item of shows) {
         const imdb = item.show?.ids?.imdb?.trim();
@@ -132,13 +153,16 @@ export class TraktWatchedLookup implements WatchedLookup {
           for (const ep of season.episodes ?? []) {
             const episodeNumber = ep.number;
             if (episodeNumber == null) continue;
-            this.episodeWatched.add(this.episodeKey(imdb, seasonNumber, episodeNumber));
+            nextEpisodeWatched.add(this.episodeKey(imdb, seasonNumber, episodeNumber));
           }
         }
       }
+
+      this.movieWatched = nextMovieWatched;
+      this.episodeWatched = nextEpisodeWatched;
+      this.lookupCache.clear();
       this.lastSyncAt = Date.now();
       this.lastSyncError = undefined;
-      this.lookupCache.clear();
       await this.persistState();
       this.logger.info('trakt sync complete', {
         durationMs: Date.now() - startedAt,
