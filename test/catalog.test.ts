@@ -75,16 +75,19 @@ test('downloading fallback release info can omit progress and eta', () => {
 class TrackingWatchedLookup implements WatchedLookup {
   public batchCalls = 0;
   public singleCalls = 0;
-  constructor(private readonly watchedIds: Set<string>) {}
+  constructor(private readonly watchedIds: Set<string>, private readonly omitBatchMethod = false) {}
   async isMovieWatched(imdbId: string): Promise<boolean> {
     this.singleCalls++;
     return this.watchedIds.has(imdbId);
   }
-  async areMoviesWatched(imdbIds: readonly string[]): Promise<Map<string, boolean>> {
-    this.batchCalls++;
-    const m = new Map<string, boolean>();
-    for (const id of imdbIds) m.set(id, this.watchedIds.has(id));
-    return m;
+  get areMoviesWatched() {
+    if (this.omitBatchMethod) return undefined;
+    return async (imdbIds: readonly string[]): Promise<Map<string, boolean>> => {
+      this.batchCalls++;
+      const m = new Map<string, boolean>();
+      for (const id of imdbIds) m.set(id, this.watchedIds.has(id));
+      return m;
+    };
   }
   async isEpisodeWatched(): Promise<boolean> { return false; }
 }
@@ -115,6 +118,34 @@ test('catalog service uses batch lookup for pagination filtering', async () => {
   assert.equal(result.metas.length, 50);
   assert.ok(lookup.batchCalls >= 1, 'should have used batch lookup');
   assert.equal(lookup.singleCalls, 0, 'should not have fallen back to single lookup');
+});
+
+test('catalog service falls back to single lookup when batch method is absent', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarrCatalogWatchedKeepCount = 0;
+
+  const fakeRadarr = {
+    async listMovies() {
+      return Array.from({ length: 10 }, (_, i) => ({ id: i + 1, title: `Movie ${i}`, imdbId: `tt${i}` }));
+    },
+    async listMovieQueueDetails() { return []; },
+    async listRecentMovieImports() { return []; }
+  };
+
+  const lookup = new TrackingWatchedLookup(new Set(['tt0', 'tt1']), true);
+
+  const service = new CatalogService(cfg, {
+    radarr: fakeRadarr as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never,
+    watchedLookup: lookup
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, 5, 'unwatched');
+  assert.equal(result.metas.length, 5);
+  // Skipped tt0 and tt1 so to get 5 metas, it needs to scan exactly 7 items
+  assert.equal(lookup.singleCalls, 7, 'should have fallen back exactly to single lookups per scan');
+  assert.equal(lookup.batchCalls, 0, 'should not have used absent batch logic');
 });
 
 test('catalog service concurrency lock prevents overlapping pagination duplicate calls', async () => {
