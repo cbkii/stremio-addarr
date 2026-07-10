@@ -104,12 +104,18 @@ test('sync lock avoids overlapping sync runs', async () => {
   cfg.traktSync.refreshToken = 'refresh';
   cfg.traktSync.stateFilePath = path.join(os.tmpdir(), `trakt-sync-${Date.now()}-4.json`);
 
+  let resolveTokenCall: () => void;
+  const tokenCallGated = new Promise<void>(resolve => resolveTokenCall = resolve);
+  let resolveTokenRelease: () => void;
+  const tokenReleaseGate = new Promise<void>(resolve => resolveTokenRelease = resolve);
+
   let tokenCalls = 0;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith('/oauth/token')) {
       tokenCalls++;
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      resolveTokenCall();
+      await tokenReleaseGate;
       return new Response('{"access_token":"a","refresh_token":"r2"}', { status: 200 });
     }
     if (url.endsWith('/sync/watched/movies')) return new Response('[]', { status: 200 });
@@ -119,8 +125,17 @@ test('sync lock avoids overlapping sync runs', async () => {
 
   const lookup = new TraktWatchedLookup(cfg, createLogger('none'));
   await lookup.init();
-  await Promise.all([lookup.triggerSync(), lookup.triggerSync()]);
-  assert.equal(tokenCalls, 1);
+
+  const sync1 = lookup.triggerSync();
+  await tokenCallGated;
+
+  const sync2 = lookup.triggerSync();
+
+  resolveTokenRelease!();
+
+  await Promise.all([sync1, sync2]);
+
+  assert.equal(tokenCalls, 1, 'Only one sync token refresh call should execute simultaneously due to active sync caching locks');
 });
 
 test('cache rebuild performs atomic swap and does not expose empty state during sync', async () => {
@@ -178,7 +193,7 @@ test('cache rebuild performs atomic swap and does not expose empty state during 
   assert.equal(finalResult.get('tt2000'), true, 'final read should see new state');
 });
 
-test('failed sync preserves the previous known-good state', async () => {
+test('failed sync preserves the previous known-good state across both movies and episodes endpoints seamlessly', async () => {
   const cfg = baseConfig();
   cfg.traktSync.enabled = true;
   cfg.traktSync.syncMins = 360;
@@ -191,10 +206,10 @@ test('failed sync preserves the previous known-good state', async () => {
     const url = String(input);
     if (url.endsWith('/oauth/token')) return new Response('{"access_token":"a","refresh_token":"r2"}', { status: 200 });
     if (url.endsWith('/sync/watched/movies')) {
-      return new Response('', { status: 500 });
+      return new Response('[{"movie":{"ids":{"imdb":"tt2000"}}}]', { status: 200 });
     }
     if (url.endsWith('/sync/watched/shows')) {
-      return new Response('[]', { status: 200 });
+      return new Response('', { status: 500 });
     }
     return new Response('{}', { status: 404 });
   }) as typeof fetch;
@@ -202,12 +217,19 @@ test('failed sync preserves the previous known-good state', async () => {
   const lookup = new TraktWatchedLookup(cfg, createLogger('none'));
   await lookup.init();
   lookup['movieWatched'] = new Set(['tt1000']);
+  lookup['episodeWatched'] = new Set(['tt1000:1:1']);
   lookup['snapshotReady'] = true;
 
   await lookup.triggerSync();
 
   const finalResult = await lookup.areMoviesWatched(['tt1000']);
-  assert.equal(finalResult.get('tt1000'), true, 'old state should be preserved on sync failure');
+  assert.equal(finalResult.get('tt1000'), true, 'old movie state should be preserved on sync failure');
+
+  const finalEpResult = await lookup.isEpisodeWatched('tt1000', 1, 1);
+  assert.equal(finalEpResult, true, 'old episode state should be preserved on sync failure');
+
+  const fetchedMovieCheck = await lookup.isMovieWatched('tt2000');
+  assert.equal(fetchedMovieCheck, false, 'partially fetched movie payloads must be discarded avoiding incomplete state publishing securely');
 });
 
 test('snapshot state remains unwatched when fresh process starts despite valid lastSyncAt cache', async () => {
@@ -257,7 +279,11 @@ test('failed persistence does not wipe the active synced memory snapshot', async
   cfg.traktSync.clientId = 'id';
   cfg.traktSync.clientSecret = 'secret';
   cfg.traktSync.refreshToken = 'refresh';
-  cfg.traktSync.stateFilePath = '/invalid/directory/path/trakt-sync-fail.json';
+
+  // Create a directory, then specify that directory name as the file path to explicitly block persistence with an EISDIR failure portably natively.
+  const tempDir = path.join(os.tmpdir(), `trakt-sync-fail-${Date.now()}`);
+  await fs.mkdir(tempDir, { recursive: true });
+  cfg.traktSync.stateFilePath = tempDir;
 
   let fetchCalled = false;
   globalThis.fetch = (async (input: RequestInfo | URL) => {

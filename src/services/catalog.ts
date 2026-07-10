@@ -134,7 +134,8 @@ function mergeCatalogItems(items: CatalogItem[]): CatalogItem[] {
       continue;
     }
     if (!current.poster && item.poster) {
-      current.poster = item.poster;
+      bestByImdb.set(item.imdbId, { ...current, poster: item.poster });
+      continue;
     }
     if (current.status === 'imported' && item.status === 'downloading') {
       replaceWithPreservedPoster(item, current);

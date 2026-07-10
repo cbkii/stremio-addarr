@@ -89,6 +89,17 @@ test('mergeCatalogItems securely retains original poster metadata when candidate
 
   assert.equal(merged2[0].poster, 'https://existing.poster');
   assert.equal(originalMissingPosterItem.poster, undefined, 'Input objects must remain purely immutable retaining undef properties natively');
+
+  // Verify backfill when the existing item has NO poster, but the incoming item HAS a poster
+  const originalItemNoPoster = movieItem({ imdbId: 'tt30', status: 'imported', timestamp: 10, poster: undefined });
+  const incomingItemWithPoster = movieItem({ imdbId: 'tt30', status: 'downloading', timestamp: 5, poster: 'https://incoming.poster' });
+  const merged3 = mergeMovieItems([
+    originalItemNoPoster,
+    incomingItemWithPoster
+  ]);
+
+  assert.equal(merged3[0].poster, 'https://incoming.poster');
+  assert.equal(originalItemNoPoster.poster, undefined, 'The existing object should not be mutated when cloning a newer poster.');
 });
 
 test('downloading fallback release info can omit progress and eta', () => {
@@ -219,13 +230,15 @@ test('catalog service progress tracking ignores single lookup exceptions complet
     async listRecentMovieImports() { return []; }
   };
 
-  let calls = 0;
+  let rejectNext = false;
   const lookup = new TrackingWatchedLookup(new Set([]), true);
-  // Stubbing manual error throwing during the 3rd iteration
+
   const rawMethod = lookup.isMovieWatched.bind(lookup);
   lookup.isMovieWatched = async (id: string) => {
-    calls++;
-    if (calls === 3) throw new Error('Simulated Transient Network Exception');
+    if (rejectNext) {
+      rejectNext = false;
+      throw new Error('Simulated Transient Network Exception');
+    }
     return await rawMethod(id);
   };
 
@@ -235,20 +248,79 @@ test('catalog service progress tracking ignores single lookup exceptions complet
     watchedLookup: lookup
   });
 
+  // Seed existing valid progress. Fetch exactly 2 items.
+  const initialResult = await service.buildCatalog('radarr-recent', 0, 2, 'unwatched');
+  assert.equal(initialResult.metas.length, 2);
+  assert.deepEqual(initialResult.metas.map(m => m.id), ['tt0', 'tt1']);
+
+  // Fetch the next 2. Stub the lookup to fail for 'tt2' so the whole operation rejects.
+  rejectNext = true;
   try {
-    await service.buildCatalog('radarr-recent', 0, 5, 'unwatched');
-    assert.fail('first execution must throw');
+    await service.buildCatalog('radarr-recent', 2, 2, 'unwatched');
+    assert.fail('second execution must throw');
   } catch (err) {
     // Expected exception
   }
 
-  // The 3rd item was tt2. Because it rejected, the scannedIndex tracking shouldn't have advanced past 2 (it crashed on index 2).
-  // The next retry should resume at index 2 correctly finding 'tt2' natively.
-  const retryResult = await service.buildCatalog('radarr-recent', 0, 5, 'unwatched');
+  // The 3rd item was tt2. Because it rejected, the scannedIndex tracking shouldn't have advanced past 2, and previously successfully cached `accepted` array (`tt0`, `tt1`) shouldn't have been mutated.
+  // The next retry should resume at index 2 correctly finding 'tt2' and 'tt3'.
+  const retryResult = await service.buildCatalog('radarr-recent', 2, 2, 'unwatched');
 
-  // Since 2 successfully processed previously, 3 remaining (tt2, tt3, tt4).
-  // It shouldn't skip `tt2`.
-  assert.equal(retryResult.metas.map(m => m.id).includes('tt2'), true, 'tt2 should not have been permanently skipped by the crash');
+  assert.deepEqual(retryResult.metas.map(m => m.id), ['tt2', 'tt3'], 'tt2 should not have been permanently skipped by the crash, and earlier results should not duplicate');
+});
+
+test('catalog service progress tracking ignores batch lookup exceptions securely leaving cache unaltered', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarrCatalogWatchedKeepCount = 0;
+
+  const fakeRadarr = {
+    async listMovies() {
+      return Array.from({ length: 15 }, (_, i) => ({ id: i + 1, title: `Movie ${i}`, imdbId: `tt${i}` }));
+    },
+    async listMovieQueueDetails() { return []; },
+    async listRecentMovieImports() { return []; }
+  };
+
+  let rejectNext = false;
+  const lookup = new TrackingWatchedLookup(new Set([]));
+  const rawMethod = lookup.areMoviesWatched!.bind(lookup);
+
+  Object.defineProperty(lookup, 'areMoviesWatched', {
+    get: function() {
+      return async (ids: readonly string[]) => {
+        if (rejectNext) {
+          rejectNext = false;
+          throw new Error('Simulated Batch Rejection');
+        }
+        return await rawMethod(ids);
+      };
+    }
+  });
+
+  const service = new CatalogService(cfg, {
+    radarr: fakeRadarr as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never,
+    watchedLookup: lookup
+  });
+
+  // Seed cache. Returns up to limit (3 items) using batch lookup
+  const r1 = await service.buildCatalog('radarr-recent', 0, 3, 'unwatched');
+  assert.deepEqual(r1.metas.map(m => m.id), ['tt0', 'tt1', 'tt2']);
+
+  rejectNext = true;
+  try {
+    await service.buildCatalog('radarr-recent', 3, 3, 'unwatched');
+    assert.fail('should throw');
+  } catch (err) {}
+
+  // Next request shouldn't skip items. Should return 3 items continuing from index 3.
+  const r2 = await service.buildCatalog('radarr-recent', 3, 3, 'unwatched');
+  assert.deepEqual(r2.metas.map(m => m.id), ['tt3', 'tt4', 'tt5']);
+
+  // Page 0 should still return correctly indicating cache state array index stability
+  const r3 = await service.buildCatalog('radarr-recent', 0, 3, 'unwatched');
+  assert.deepEqual(r3.metas.map(m => m.id), ['tt0', 'tt1', 'tt2']);
 });
 
 test('catalog service gracefully bounds invalid or infinity limits during pagination across endpoints', async () => {
