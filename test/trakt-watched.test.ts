@@ -314,6 +314,102 @@ test('Trakt queries immediately return false and bypass network fetches when pro
   assert.equal(fetchCalled, false, 'Fetch was incorrectly executed despite inputs strictly failing normalisation blocks.');
 });
 
+test('areMoviesWatched returns same keys exactly mapped correctly validating whitespaces and mixed case canonization', async () => {
+  const cfg = baseConfig();
+  cfg.traktSync.enabled = true;
+  cfg.traktSync.syncMins = 360;
+  cfg.traktSync.clientId = 'id';
+  cfg.traktSync.clientSecret = 'secret';
+  cfg.traktSync.refreshToken = 'refresh';
+  cfg.traktSync.stateFilePath = path.join(os.tmpdir(), `trakt-sync-${Date.now()}-canon.json`);
+
+  let fetchCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/oauth/token')) return new Response('{"access_token":"a","refresh_token":"r2"}', { status: 200 });
+    if (url.endsWith('/sync/watched/movies')) {
+      fetchCalls++;
+      // Return tt1 and tt2 as watched natively
+      return new Response('[{"movie":{"ids":{"imdb":"tt1"}}},{"movie":{"ids":{"imdb":"tt2"}}}]', { status: 200 });
+    }
+    if (url.endsWith('/sync/watched/shows')) {
+      return new Response('[]', { status: 200 });
+    }
+    return new Response('{}', { status: 404 });
+  }) as typeof fetch;
+
+  const lookup = new TraktWatchedLookup(cfg, createLogger('none'));
+  await lookup.init();
+
+  const batchIds = [
+    'tt1',            // canonical
+    'TT1',            // uppercase
+    ' tt1 ',          // whitespace
+    'tt2',            // unwatched natively
+    'tt3',            // missing
+    'invalid',        // malformed
+    ''                // empty
+  ] as const;
+
+  const result = await lookup.areMoviesWatched(batchIds);
+
+  // Verify exact original strings are used as map keys
+  for (const id of batchIds) {
+    assert.ok(result.has(id), `Map must contain the exact original requested key string: '${id}'`);
+  }
+
+  // Exact outputs mapping to canon normalized states
+  assert.equal(result.get('tt1'), true);
+  assert.equal(result.get('TT1'), true);
+  assert.equal(result.get(' tt1 '), true);
+
+  assert.equal(result.get('tt2'), true);
+  assert.equal(result.get('tt3'), false);
+  assert.equal(result.get('invalid'), false);
+  assert.equal(result.get(''), false);
+
+  // Validate only one single fetch was used for the entire normalized batch
+  assert.equal(fetchCalls, 1);
+
+  // Validate single lookup equality on uppercase
+  const singleUpperCase = await lookup.isMovieWatched('TT1');
+  assert.equal(singleUpperCase, true);
+});
+
+test('Trakt queries bypass network returning false completely on disabled provider status mapping original keys', async () => {
+  const cfg = baseConfig();
+  cfg.traktSync.enabled = false;
+  cfg.traktSync.clientId = 'id';
+  cfg.traktSync.clientSecret = 'secret';
+  cfg.traktSync.refreshToken = 'refresh';
+  cfg.traktSync.stateFilePath = path.join(os.tmpdir(), `trakt-sync-${Date.now()}-disabled.json`);
+
+  let fetchCalled = false;
+  globalThis.fetch = (async (_input: RequestInfo | URL) => {
+    fetchCalled = true;
+    return new Response('[]', { status: 200 });
+  }) as typeof fetch;
+
+  const lookup = new TraktWatchedLookup(cfg, createLogger('none'));
+  await lookup.init();
+
+  const m1 = await lookup.isMovieWatched('tt1');
+  assert.equal(m1, false);
+
+  const batchIds = ['tt1', 'TT1', 'invalid', ' tt2 '];
+  const m2 = await lookup.areMoviesWatched(batchIds);
+  assert.equal(m2.size, 4);
+
+  for (const id of batchIds) {
+    assert.equal(m2.get(id), false, 'disabled provider must map exact string back to false');
+  }
+
+  const ep = await lookup.isEpisodeWatched('tt2', 1, 1);
+  assert.equal(ep, false);
+
+  assert.equal(fetchCalled, false, 'Fetch was incorrectly executed on disabled provider.');
+});
+
 test('token expiry uses expires_in from response when present', async () => {
   const cfg = baseConfig();
   cfg.traktSync.enabled = true;

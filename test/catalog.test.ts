@@ -68,6 +68,29 @@ test('stalled downloading release info string is preserved', () => {
   assert.equal(downloadingReleaseInfo(50, 1200, true), 'Downloading • Stalled');
 });
 
+test('mergeCatalogItems securely retains original poster metadata when candidate replaces an imported or queued asset', () => {
+  // Test scenario where an existing imported item HAS a poster, and a downloading candidate WITHOUT a poster supersedes it.
+  const merged = mergeMovieItems([
+    movieItem({ imdbId: 'tt10', status: 'imported', timestamp: 10, poster: 'https://existing.poster' }),
+    movieItem({ imdbId: 'tt10', status: 'downloading', timestamp: 5 })
+  ]);
+
+  // Best match should be downloading, but its poster property should have inherited the 'https://existing.poster'
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].status, 'downloading');
+  assert.equal(merged[0].poster, 'https://existing.poster', 'Downloading supersede missing poster must backfill using discarded entity poster');
+
+  // Verify pure items don't mutate parameters themselves
+  const originalMissingPosterItem = movieItem({ imdbId: 'tt20', status: 'downloading', timestamp: 5 });
+  const merged2 = mergeMovieItems([
+    movieItem({ imdbId: 'tt20', status: 'imported', timestamp: 10, poster: 'https://existing.poster' }),
+    originalMissingPosterItem
+  ]);
+
+  assert.equal(merged2[0].poster, 'https://existing.poster');
+  assert.equal(originalMissingPosterItem.poster, undefined, 'Input objects must remain purely immutable retaining undef properties natively');
+});
+
 test('downloading fallback release info can omit progress and eta', () => {
   assert.equal(downloadingReleaseInfo(undefined, undefined, false), 'Downloading • ETA unknown');
 });
@@ -183,20 +206,28 @@ test('catalog service concurrency lock prevents overlapping pagination duplicate
   assert.equal(lookup.batchCalls, 1, 'only one request should perform the batch lookup due to the promise lock');
 });
 
-test('catalog service gracefully bounds invalid or infinity limits during pagination', async () => {
+test('catalog service progress tracking ignores single lookup exceptions completely, allowing later successful retries without skipping entries internally', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
   cfg.radarrCatalogWatchedKeepCount = 0;
 
   const fakeRadarr = {
     async listMovies() {
-      return Array.from({ length: 25 }, (_, i) => ({ id: i + 1, title: `Movie ${i}`, imdbId: `tt${i}` }));
+      return Array.from({ length: 5 }, (_, i) => ({ id: i + 1, title: `Movie ${i}`, imdbId: `tt${i}` }));
     },
     async listMovieQueueDetails() { return []; },
     async listRecentMovieImports() { return []; }
   };
 
-  const lookup = new TrackingWatchedLookup(new Set([]));
+  let calls = 0;
+  const lookup = new TrackingWatchedLookup(new Set([]), true);
+  // Stubbing manual error throwing during the 3rd iteration
+  const rawMethod = lookup.isMovieWatched.bind(lookup);
+  lookup.isMovieWatched = async (id: string) => {
+    calls++;
+    if (calls === 3) throw new Error('Simulated Transient Network Exception');
+    return await rawMethod(id);
+  };
 
   const service = new CatalogService(cfg, {
     radarr: fakeRadarr as never,
@@ -204,9 +235,85 @@ test('catalog service gracefully bounds invalid or infinity limits during pagina
     watchedLookup: lookup
   });
 
-  const result = await service.buildCatalog('radarr-recent', 0, NaN as never, 'unwatched');
+  try {
+    await service.buildCatalog('radarr-recent', 0, 5, 'unwatched');
+    assert.fail('first execution must throw');
+  } catch (err) {
+    // Expected exception
+  }
 
-  assert.equal(result.metas.length, 25, 'should have gracefully bounded NaN to the full list safely');
+  // The 3rd item was tt2. Because it rejected, the scannedIndex tracking shouldn't have advanced past 2 (it crashed on index 2).
+  // The next retry should resume at index 2 correctly finding 'tt2' natively.
+  const retryResult = await service.buildCatalog('radarr-recent', 0, 5, 'unwatched');
+
+  // Since 2 successfully processed previously, 3 remaining (tt2, tt3, tt4).
+  // It shouldn't skip `tt2`.
+  assert.equal(retryResult.metas.map(m => m.id).includes('tt2'), true, 'tt2 should not have been permanently skipped by the crash');
+});
+
+test('catalog service gracefully bounds invalid or infinity limits during pagination across endpoints', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.sonarr.enabled = true;
+  cfg.radarrCatalogWatchedKeepCount = 0;
+
+  const fakeRadarr = {
+    async listMovies() {
+      return Array.from({ length: 150 }, (_, i) => ({ id: i + 1, title: `Movie ${i}`, imdbId: `tt${i}` }));
+    },
+    async listMovieQueueDetails() { return []; },
+    async listRecentMovieImports() { return []; }
+  };
+
+  const fakeSonarr = {
+    async listSeries() {
+      return Array.from({ length: 150 }, (_, i) => ({ id: i + 1, title: `Series ${i}`, imdbId: `tt${i + 200}` }));
+    },
+    async listSeriesQueueDetails() { return []; },
+    async listRecentSeriesImports() { return []; }
+  };
+
+  const lookup = new TrackingWatchedLookup(new Set([]));
+
+  const service = new CatalogService(cfg, {
+    radarr: fakeRadarr as never,
+    sonarr: fakeSonarr as never,
+    watchedLookup: lookup
+  });
+
+  const boundaries = [
+    // [skip, limit, expected length, expected first ID]
+    [NaN, NaN, 100, 'tt0'],
+    [Infinity, Infinity, 100, 'tt0'],
+    [-1, -1, 0, undefined],
+    [0.5, 0.5, 0, undefined],
+    [0.5, 1.5, 1, 'tt0'],
+    [100, 200, 50, 'tt100'],
+    [-5, 50, 50, 'tt0'],
+    [5, -50, 0, undefined],
+    [10, 0, 0, undefined]
+  ] as const;
+
+  for (const [skip, limit, expectedLength, expectedFirst] of boundaries) {
+    const resUnwatched = await service.buildCatalog('radarr-recent', skip as never, limit as never, 'unwatched');
+    assert.equal(resUnwatched.metas.length, expectedLength, `radarr unwatched length failed for skip ${skip}, limit ${limit}`);
+    if (expectedLength > 0) assert.equal(resUnwatched.metas[0].id, expectedFirst, `radarr unwatched first item failed for skip ${skip}, limit ${limit}`);
+
+    const resRecent = await service.buildCatalog('radarr-recent', skip as never, limit as never, 'recent');
+    assert.equal(resRecent.metas.length, expectedLength, `radarr recent length failed for skip ${skip}, limit ${limit}`);
+    if (expectedLength > 0) assert.equal(resRecent.metas[0].id, expectedFirst, `radarr recent first item failed for skip ${skip}, limit ${limit}`);
+
+    const sonarrRecent = await service.buildCatalog('sonarr-recent', skip as never, limit as never);
+    assert.equal(sonarrRecent.metas.length, expectedLength, `sonarr recent length failed for skip ${skip}, limit ${limit}`);
+    if (expectedLength > 0) {
+      // expectedFirst is 'tt0' for skip=0, which corresponds to index 0.
+      // For Sonarr, index 0 has imdbId `tt${0 + 200}` = 'tt200'.
+      // If skip=100, expectedFirst is 'tt100' (index 100).
+      // For Sonarr, index 100 has imdbId `tt${100 + 200}` = 'tt300'.
+      const expectedSonarrId = expectedFirst?.replace(/^tt(\d+)$/, (_, num) => `tt${parseInt(num, 10) + 200}`);
+      assert.equal(sonarrRecent.metas[0].id, expectedSonarrId, `sonarr recent first item failed for skip ${skip}, limit ${limit}`);
+    }
+  }
 });
 
 test('catalog service uses injectable clock for deterministic imported relative text', async () => {

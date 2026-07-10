@@ -230,8 +230,15 @@ export class CatalogService {
   }
 
   async buildCatalog(catalogId: string, skip: number, limit: number, filter?: CatalogFilter): Promise<{ metas: CatalogMetaPreview[] }> {
-    const safeLimit = (typeof limit === 'number' && Number.isFinite(limit) && limit >= 0) ? Math.min(Math.floor(limit), 100) : 100;
-    const safeSkip = (typeof skip === 'number' && Number.isFinite(skip) && skip >= 0) ? Math.floor(skip) : 0;
+    let safeLimit = 100;
+    if (typeof limit === 'number' && Number.isFinite(limit)) {
+      safeLimit = limit <= 0 ? 0 : Math.min(Math.floor(limit), 100);
+    }
+
+    let safeSkip = 0;
+    if (typeof skip === 'number' && Number.isFinite(skip) && skip > 0) {
+      safeSkip = Math.floor(skip);
+    }
 
     if (safeLimit === 0) {
       return { metas: [] };
@@ -275,7 +282,10 @@ export class CatalogService {
     this.activePageFilters.set(progressKey, activePromise);
 
     try {
-      const progress = this.filteredRadarrProgressCache.get(progressKey) ?? { accepted: [], scannedIndex: 0, keptWatched: 0 };
+      const cached = this.filteredRadarrProgressCache.get(progressKey);
+      const progress = cached
+        ? { accepted: [...cached.accepted], scannedIndex: cached.scannedIndex, keptWatched: cached.keptWatched }
+        : { accepted: [], scannedIndex: 0, keptWatched: 0 };
 
       // Bounded batch sizing to avoid excessive allocation on malformed huge limits
       const batchSize = Math.max(1, Math.min(safeLimit || 50, 100));

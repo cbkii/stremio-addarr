@@ -20,15 +20,8 @@
 **Learning:** A standard cache implementation (`TtlCache`) storing `boolean` variables that maps to a local native Set is redundant, consumes excess memory, and creates unneeded invalidation boundaries.
 **Action:** Replaced boolean lookup caches with direct `Set.has()` lookups combined with Atomic swap assignments during cache hydration to ensure concurrent connections never read partial sync states.
 ## 2026-07-10 - Deferred execution locks, cache transactionality, and API payload normalization
-**Learning:** Promise rejections during sequential cache pagination (e.g. hitting rate-limits) can leave mutable cache tracker structures (like ) corrupted and incremented prematurely, causing downstream handlers to permanently skip entities.
-**Action:** Re-ordered operations making progress caches transactional: await the remote validation payload first, verify its success, and only then commit the updated indices to the referenced cache object.
+**Learning:** Promise rejections during sequential cache pagination, such as rate-limit failures, can leave mutable progress fields such as `scannedIndex` incremented prematurely, causing later requests to skip catalogue entries.
+**Action:** Reordered progress updates so remote watched-status validation completes successfully before the corresponding scan and accepted-item state is committed.
 
-**Learning:** Duplicate API validation checks and normalization fallbacks (e.g. IMDb formatting) scattered across modules creates inconsistent internal ID states leading to split cache failures and missed matching dependencies.
-**Action:** Extracted static validation and normalization patterns into a shared standalone  module reducing boilerplate and standardizing cache keys dynamically without hardcoded fallback overrides.
-
-## 2026-07-10 - Deferred execution locks, cache transactionality, and API payload normalization
-**Learning:** Promise rejections during sequential cache pagination (e.g. hitting rate-limits) can leave mutable cache tracker structures (like `scannedIndex`) corrupted and incremented prematurely, causing downstream handlers to permanently skip entities.
-**Action:** Re-ordered operations making progress caches transactional: await the remote validation payload first, verify its success, and only then commit the updated indices to the referenced cache object.
-
-**Learning:** Duplicate API validation checks and normalization fallbacks (e.g. IMDb formatting) scattered across modules creates inconsistent internal ID states leading to split cache failures and missed matching dependencies.
-**Action:** Extracted static validation and normalization patterns into a shared standalone `lib` module reducing boilerplate and standardizing cache keys dynamically without hardcoded fallback overrides.
+**Learning:** Duplicated IMDb validation and normalisation logic across modules can create inconsistent cache keys and missed matches.
+**Action:** Extracted IMDb validation and normalisation into the shared `src/lib/imdb.ts` module, removing raw-ID fallback behaviour and standardising internal keys.
