@@ -1,6 +1,7 @@
 import type { AppConfig } from '../config.js';
 import { AsyncTtlCache, TtlCache } from '../lib/cache.js';
 import { systemClock, type Clock } from '../lib/clock.js';
+import { normalizeImdbId } from '../lib/imdb.js';
 import type {
   CatalogItem,
   RadarrHistoryRecord,
@@ -17,13 +18,6 @@ import { NoopWatchedLookup, type WatchedLookup } from './watched.js';
 export type CatalogFilter = 'recent' | 'unwatched';
 
 const DAY_MS = 86_400_000;
-const IMDB_ID_PATTERN = /^tt\d+$/i;
-
-function normalizeImdbId(value?: string): string | undefined {
-  const trimmed = value?.trim();
-  if (!trimmed || !IMDB_ID_PATTERN.test(trimmed)) return undefined;
-  return `tt${trimmed.slice(2)}`;
-}
 
 function toTimestamp(value?: string): number {
   if (!value) return 0;
@@ -124,6 +118,15 @@ function shouldPreferDownloading(candidate: CatalogItem, existing: CatalogItem):
 
 function mergeCatalogItems(items: CatalogItem[]): CatalogItem[] {
   const bestByImdb = new Map<string, CatalogItem>();
+
+  const replaceWithPreservedPoster = (candidate: CatalogItem, existing: CatalogItem) => {
+    if (existing.poster && !candidate.poster) {
+      bestByImdb.set(candidate.imdbId, { ...candidate, poster: existing.poster });
+    } else {
+      bestByImdb.set(candidate.imdbId, candidate);
+    }
+  };
+
   for (const item of items) {
     const current = bestByImdb.get(item.imdbId);
     if (!current) {
@@ -134,17 +137,17 @@ function mergeCatalogItems(items: CatalogItem[]): CatalogItem[] {
       current.poster = item.poster;
     }
     if (current.status === 'imported' && item.status === 'downloading') {
-      bestByImdb.set(item.imdbId, item);
+      replaceWithPreservedPoster(item, current);
       continue;
     }
     if (current.status === 'downloading' && item.status === 'downloading') {
       if (shouldPreferDownloading(item, current)) {
-        bestByImdb.set(item.imdbId, item);
+        replaceWithPreservedPoster(item, current);
       }
       continue;
     }
     if (current.status === item.status && item.timestamp > current.timestamp) {
-      bestByImdb.set(item.imdbId, item);
+      replaceWithPreservedPoster(item, current);
     }
   }
 
@@ -227,6 +230,13 @@ export class CatalogService {
   }
 
   async buildCatalog(catalogId: string, skip: number, limit: number, filter?: CatalogFilter): Promise<{ metas: CatalogMetaPreview[] }> {
+    const safeLimit = (typeof limit === 'number' && Number.isFinite(limit) && limit >= 0) ? Math.min(Math.floor(limit), 100) : 100;
+    const safeSkip = (typeof skip === 'number' && Number.isFinite(skip) && skip >= 0) ? Math.floor(skip) : 0;
+
+    if (safeLimit === 0) {
+      return { metas: [] };
+    }
+
     const cacheKey = `${catalogId}:all`;
     const allItems = await this.mergedCache.getOrSet(cacheKey, async () => {
       let items: CatalogItem[] = [];
@@ -242,17 +252,14 @@ export class CatalogService {
     // Apply watched filtering only for movie items (radarr-recent).
     // No filter (homepage default) and filter=unwatched keep only a small recent watched allowance.
     if (catalogId === 'radarr-recent' && filter !== 'recent') {
-      const items = await this.filterRadarrMoviesPage(allItems, skip, limit, filter);
+      const items = await this.filterRadarrMoviesPage(allItems, safeSkip, safeLimit, filter);
       return { metas: items.map(toMeta) };
     }
 
-    return { metas: allItems.slice(skip, skip + limit).map(toMeta) };
+    return { metas: allItems.slice(safeSkip, safeSkip + safeLimit).map(toMeta) };
   }
 
-  private async filterRadarrMoviesPage(items: CatalogItem[], skip: number, limit: number, filter?: CatalogFilter): Promise<CatalogItem[]> {
-    const safeLimit = (typeof limit === 'number' && Number.isFinite(limit) && limit >= 0) ? limit : 100;
-    const safeSkip = (typeof skip === 'number' && Number.isFinite(skip) && skip >= 0) ? skip : 0;
-
+  private async filterRadarrMoviesPage(items: CatalogItem[], safeSkip: number, safeLimit: number, filter?: CatalogFilter): Promise<CatalogItem[]> {
     const targetAccepted = safeSkip + safeLimit;
     const keepWatchedCount = this.config.radarrCatalogWatchedKeepCount;
     const revision = this.allItemsRevision.get('radarr-recent') ?? 0;
@@ -296,8 +303,12 @@ export class CatalogService {
             }
           }
         } else {
-          const item = items[progress.scannedIndex++];
+          const itemIndex = progress.scannedIndex;
+          const item = items[itemIndex];
           const watched = await this.watchedLookup.isMovieWatched(item.imdbId);
+
+          progress.scannedIndex = itemIndex + 1;
+
           if (!watched) {
             progress.accepted.push(item);
             continue;

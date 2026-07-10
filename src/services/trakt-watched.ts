@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Logger } from '../logger.js';
 import type { AppConfig } from '../config.js';
 import type { WatchedLookup, WatchedLookupDiagnostics } from './watched.js';
+import { normalizeImdbId } from '../lib/imdb.js';
 
 interface TraktTokenResponse {
   access_token?: string;
@@ -28,13 +29,6 @@ interface TraktWatchedShow {
 
 // Trakt access tokens expire after 90 days.
 const TRAKT_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
-const IMDB_ID_PATTERN = /^tt\d+$/i;
-
-function normalizeImdbId(value?: string): string | undefined {
-  const trimmed = value?.trim();
-  if (!trimmed || !IMDB_ID_PATTERN.test(trimmed)) return undefined;
-  return `tt${trimmed.slice(2)}`;
-}
 
 export class TraktWatchedLookup implements WatchedLookup {
   private readonly syncMs: number;
@@ -65,13 +59,8 @@ export class TraktWatchedLookup implements WatchedLookup {
 
   async isMovieWatched(imdbId: string): Promise<boolean> {
     if (!this.config.traktSync.enabled) return false;
-    // We do not normalize input lookup IDs here;
-    // The previous implementation checked the un-normalized ID,
-    // and tests expect non-'tt' prepended IDs if they are seeded artificially.
-    // However, if we do normalize, we must seed tests with valid format ('tt...').
-    // Since some tests bypass the API mock and manually seed invalid IDs like 'ttold' vs 'old',
-    // let's ensure normalization is consistent by updating test seed sets instead of disabling it.
-    const normalized = normalizeImdbId(imdbId) || imdbId;
+    const normalized = normalizeImdbId(imdbId);
+    if (!normalized) return false;
     await this.ensureSynced(false);
     return this.movieWatched.has(normalized);
   }
@@ -85,8 +74,8 @@ export class TraktWatchedLookup implements WatchedLookup {
     }
     await this.ensureSynced(false);
     for (const imdbId of imdbIds) {
-      const normalized = normalizeImdbId(imdbId) || imdbId;
-      result.set(imdbId, this.movieWatched.has(normalized));
+      const normalized = normalizeImdbId(imdbId);
+      result.set(imdbId, normalized ? this.movieWatched.has(normalized) : false);
     }
     return result;
   }

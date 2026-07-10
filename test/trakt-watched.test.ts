@@ -132,7 +132,8 @@ test('cache rebuild performs atomic swap and does not expose empty state during 
   cfg.traktSync.refreshToken = 'refresh';
   cfg.traktSync.stateFilePath = path.join(os.tmpdir(), `trakt-sync-${Date.now()}-5.json`);
 
-  let inSync = false;
+  let resolveSyncEntered: () => void;
+  const syncEnteredPromise = new Promise<void>(r => resolveSyncEntered = r);
 
   let resolveMoviesSync: () => void;
   const syncBlockedPromise = new Promise<void>(r => resolveMoviesSync = r);
@@ -141,7 +142,7 @@ test('cache rebuild performs atomic swap and does not expose empty state during 
     const url = String(input);
     if (url.endsWith('/oauth/token')) return new Response('{"access_token":"a","refresh_token":"r2"}', { status: 200 });
     if (url.endsWith('/sync/watched/movies')) {
-      inSync = true;
+      resolveSyncEntered();
       await syncBlockedPromise;
       return new Response('[{"movie":{"ids":{"imdb":"tt2000"}}}]', { status: 200 });
     }
@@ -161,9 +162,7 @@ test('cache rebuild performs atomic swap and does not expose empty state during 
   const syncPromise = lookup.triggerSync();
 
   // Wait until we are inside the sync HTTP call
-  while (!inSync) {
-    await new Promise(r => setTimeout(r, 5));
-  }
+  await syncEnteredPromise;
 
   // Because `areMoviesWatched` calls `ensureSynced`, which blocks on the running sync,
   // we check the state manually bypassing the block to verify atomic swap while pending.
