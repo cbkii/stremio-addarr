@@ -21,6 +21,7 @@ export class NoopWatchedLookup implements WatchedLookup {
 
   async areMoviesWatched(imdbIds: readonly string[]): Promise<Map<string, boolean>> {
     const result = new Map<string, boolean>();
+    if (imdbIds.length === 0) return result;
     for (const id of imdbIds) {
       result.set(id, false);
     }

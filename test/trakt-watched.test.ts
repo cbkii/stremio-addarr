@@ -133,16 +133,17 @@ test('cache rebuild performs atomic swap and does not expose empty state during 
   cfg.traktSync.stateFilePath = path.join(os.tmpdir(), `trakt-sync-${Date.now()}-5.json`);
 
   let inSync = false;
-  let concurrentReadResult: boolean | undefined;
+
+  let resolveMoviesSync: () => void;
+  const syncBlockedPromise = new Promise<void>(r => resolveMoviesSync = r);
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith('/oauth/token')) return new Response('{"access_token":"a","refresh_token":"r2"}', { status: 200 });
     if (url.endsWith('/sync/watched/movies')) {
       inSync = true;
-      // Simulate delay during sync to allow concurrent read
-      await new Promise(r => setTimeout(r, 50));
-      return new Response('[{"movie":{"ids":{"imdb":"ttnew"}}}]', { status: 200 });
+      await syncBlockedPromise;
+      return new Response('[{"movie":{"ids":{"imdb":"tt2000"}}}]', { status: 200 });
     }
     if (url.endsWith('/sync/watched/shows')) {
       return new Response('[]', { status: 200 });
@@ -154,7 +155,8 @@ test('cache rebuild performs atomic swap and does not expose empty state during 
   await lookup.init();
 
   // Set an initial state
-  lookup['movieWatched'] = new Set(['ttold']);
+  lookup['movieWatched'] = new Set(['tt1000']);
+  lookup['snapshotReady'] = true;
 
   const syncPromise = lookup.triggerSync();
 
@@ -164,16 +166,49 @@ test('cache rebuild performs atomic swap and does not expose empty state during 
   }
 
   // Because `areMoviesWatched` calls `ensureSynced`, which blocks on the running sync,
-  // we cannot concurrently call `areMoviesWatched` and expect it to resolve before sync finishes.
-  // Instead we test atomic swap by ensuring the sync completes and then verifying the final state,
-  // while unit-testing the `runSync` method specifically isn't possible, we verify behavior matches expectations.
-  // This validates our new batch method logic at a high level.
+  // we check the state manually bypassing the block to verify atomic swap while pending.
+  assert.equal(lookup['movieWatched'].has('tt1000'), true, 'concurrent read should still see old state');
+  assert.equal(lookup['movieWatched'].has('tt2000'), false, 'concurrent read should not see new state yet');
+
+  resolveMoviesSync!();
 
   await syncPromise;
 
-  const finalResult = await lookup.areMoviesWatched(['ttold', 'ttnew']);
-  assert.equal(finalResult.get('ttold'), false, 'final read should see old state removed');
-  assert.equal(finalResult.get('ttnew'), true, 'final read should see new state');
+  const finalResult = await lookup.areMoviesWatched(['tt1000', 'tt2000']);
+  assert.equal(finalResult.get('tt1000'), false, 'final read should see old state removed');
+  assert.equal(finalResult.get('tt2000'), true, 'final read should see new state');
+});
+
+test('failed sync preserves the previous known-good state', async () => {
+  const cfg = baseConfig();
+  cfg.traktSync.enabled = true;
+  cfg.traktSync.syncMins = 360;
+  cfg.traktSync.clientId = 'id';
+  cfg.traktSync.clientSecret = 'secret';
+  cfg.traktSync.refreshToken = 'refresh';
+  cfg.traktSync.stateFilePath = path.join(os.tmpdir(), `trakt-sync-${Date.now()}-fail.json`);
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/oauth/token')) return new Response('{"access_token":"a","refresh_token":"r2"}', { status: 200 });
+    if (url.endsWith('/sync/watched/movies')) {
+      return new Response('', { status: 500 });
+    }
+    if (url.endsWith('/sync/watched/shows')) {
+      return new Response('[]', { status: 200 });
+    }
+    return new Response('{}', { status: 404 });
+  }) as typeof fetch;
+
+  const lookup = new TraktWatchedLookup(cfg, createLogger('none'));
+  await lookup.init();
+  lookup['movieWatched'] = new Set(['tt1000']);
+  lookup['snapshotReady'] = true;
+
+  await lookup.triggerSync();
+
+  const finalResult = await lookup.areMoviesWatched(['tt1000']);
+  assert.equal(finalResult.get('tt1000'), true, 'old state should be preserved on sync failure');
 });
 
 test('token expiry uses expires_in from response when present', async () => {

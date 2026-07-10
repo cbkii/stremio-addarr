@@ -10,4 +10,12 @@
 
 **Learning:** Having separate caching layers for arrays and their mapped indexes (`moviesCache` vs `moviesByImdbIdCache`) leads to eventual synchronization drift.
 **Action:** Combine them into a single `Snapshot` object (`{ movies, byImdbId }`) and cache that object under a single key. This guarantees atomic invalidation.
-## 2024-07-10\n\n- Performance Optimization Conventions: Avoid N+1 sequential awaits in loops by extracting processing into batch-oriented APIs (e.g., look up items in chunks). For cache rebuilds, always populate new memory structures and use atomic swaps rather than clearing live state sets to avoid exposing partial/empty states to concurrent requests.
+## 2026-07-10 - Resilient pagination parsing and Atomic Caching for Arr services
+**Learning:** Malformed pagination limits (`NaN`, `Infinity`) passed via user request payload can cause non-progressing infinite loops during sequential chunking.
+**Action:** Use `typeof limit === 'number' && Number.isFinite(limit)` along with `Math.min/max` constraints to ensure pagination variables are finite integers. Add fallback invariants (e.g. `progress.scannedIndex <= startScannedIndex`) to break stalled loops.
+
+**Learning:** Relying solely on persisted timestamps (like `lastSyncAt`) for sync intervals can leave in-memory caches empty upon process restart, leading to false negatives until the interval elapses.
+**Action:** Introduced a transient boolean flag (`snapshotReady`) that must be `true` alongside valid TTL before allowing the cache freshness shortcut to return successfully.
+
+**Learning:** A standard cache implementation (`TtlCache`) storing `boolean` variables that maps to a local native Set is redundant, consumes excess memory, and creates unneeded invalidation boundaries.
+**Action:** Replaced boolean lookup caches with direct `Set.has()` lookups combined with Atomic swap assignments during cache hydration to ensure concurrent connections never read partial sync states.

@@ -212,6 +212,7 @@ export class CatalogService {
   private readonly mergedCache: AsyncTtlCache<CatalogItem[]>;
   private readonly filteredRadarrProgressCache: TtlCache<{ accepted: CatalogItem[]; scannedIndex: number; keptWatched: number }>;
   private readonly allItemsRevision = new Map<string, number>();
+  private readonly activePageFilters = new Map<string, Promise<void>>();
 
   constructor(
     private readonly config: AppConfig,
@@ -249,26 +250,54 @@ export class CatalogService {
   }
 
   private async filterRadarrMoviesPage(items: CatalogItem[], skip: number, limit: number, filter?: CatalogFilter): Promise<CatalogItem[]> {
-    const targetAccepted = skip + limit;
+    const safeLimit = (typeof limit === 'number' && Number.isFinite(limit) && limit >= 0) ? limit : 100;
+    const safeSkip = (typeof skip === 'number' && Number.isFinite(skip) && skip >= 0) ? skip : 0;
+
+    const targetAccepted = safeSkip + safeLimit;
     const keepWatchedCount = this.config.radarrCatalogWatchedKeepCount;
     const revision = this.allItemsRevision.get('radarr-recent') ?? 0;
     const progressKey = `radarr-recent:${filter ?? 'default'}:${keepWatchedCount}:${revision}`;
-    const progress = this.filteredRadarrProgressCache.get(progressKey) ?? { accepted: [], scannedIndex: 0, keptWatched: 0 };
 
-    // Use batch processing if the lookup supports it
-    const batchSize = Math.max(limit, 50);
+    // Await any in-flight requests that are mutating this same progress key to prevent races.
+    while (this.activePageFilters.has(progressKey)) {
+      await this.activePageFilters.get(progressKey);
+    }
 
-    while (progress.accepted.length < targetAccepted && progress.scannedIndex < items.length) {
-      if (this.watchedLookup.areMoviesWatched) {
-        const batchEnd = Math.min(items.length, progress.scannedIndex + batchSize);
-        const batch = items.slice(progress.scannedIndex, batchEnd);
-        const batchIds = batch.map(i => i.imdbId);
-        const watchedMap = await this.watchedLookup.areMoviesWatched(batchIds);
+    let resolveActive: () => void;
+    const activePromise = new Promise<void>((resolve) => resolveActive = resolve);
+    this.activePageFilters.set(progressKey, activePromise);
 
-        for (const item of batch) {
-          if (progress.accepted.length >= targetAccepted) break;
-          const watched = watchedMap.get(item.imdbId) ?? false;
-          progress.scannedIndex++;
+    try {
+      const progress = this.filteredRadarrProgressCache.get(progressKey) ?? { accepted: [], scannedIndex: 0, keptWatched: 0 };
+
+      // Bounded batch sizing to avoid excessive allocation on malformed huge limits
+      const batchSize = Math.max(1, Math.min(safeLimit || 50, 100));
+
+      while (progress.accepted.length < targetAccepted && progress.scannedIndex < items.length) {
+        const startScannedIndex = progress.scannedIndex;
+
+        if (this.watchedLookup.areMoviesWatched) {
+          const batchEnd = Math.min(items.length, progress.scannedIndex + batchSize);
+          const batch = items.slice(progress.scannedIndex, batchEnd);
+          const batchIds = batch.map(i => i.imdbId);
+          const watchedMap = await this.watchedLookup.areMoviesWatched(batchIds);
+
+          for (const item of batch) {
+            if (progress.accepted.length >= targetAccepted) break;
+            const watched = watchedMap.get(item.imdbId) ?? false;
+            progress.scannedIndex++;
+            if (!watched) {
+              progress.accepted.push(item);
+              continue;
+            }
+            if (progress.keptWatched < keepWatchedCount) {
+              progress.keptWatched += 1;
+              progress.accepted.push(item);
+            }
+          }
+        } else {
+          const item = items[progress.scannedIndex++];
+          const watched = await this.watchedLookup.isMovieWatched(item.imdbId);
           if (!watched) {
             progress.accepted.push(item);
             continue;
@@ -278,22 +307,17 @@ export class CatalogService {
             progress.accepted.push(item);
           }
         }
-      } else {
-        const item = items[progress.scannedIndex++];
-        const watched = await this.watchedLookup.isMovieWatched(item.imdbId);
-        if (!watched) {
-          progress.accepted.push(item);
-          continue;
-        }
-        if (progress.keptWatched < keepWatchedCount) {
-          progress.keptWatched += 1;
-          progress.accepted.push(item);
-        }
-      }
-    }
 
-    this.filteredRadarrProgressCache.set(progressKey, progress);
-    return progress.accepted.slice(skip, skip + limit);
+        // Fallback safeguard against non-progressing loops.
+        if (progress.scannedIndex <= startScannedIndex) break;
+      }
+
+      this.filteredRadarrProgressCache.set(progressKey, progress);
+      return progress.accepted.slice(safeSkip, safeSkip + safeLimit);
+    } finally {
+      this.activePageFilters.delete(progressKey);
+      resolveActive!();
+    }
   }
 
   private async buildAllRadarrItems(): Promise<CatalogItem[]> {

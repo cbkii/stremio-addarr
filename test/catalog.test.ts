@@ -117,6 +117,67 @@ test('catalog service uses batch lookup for pagination filtering', async () => {
   assert.equal(lookup.singleCalls, 0, 'should not have fallen back to single lookup');
 });
 
+test('catalog service concurrency lock prevents overlapping pagination duplicate calls', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarrCatalogWatchedKeepCount = 0;
+
+  const fakeRadarr = {
+    async listMovies() {
+      return Array.from({ length: 60 }, (_, i) => ({ id: i + 1, title: `Movie ${i}`, imdbId: `tt${i}` }));
+    },
+    async listMovieQueueDetails() { return []; },
+    async listRecentMovieImports() { return []; }
+  };
+
+  const lookup = new TrackingWatchedLookup(new Set([]));
+
+  const service = new CatalogService(cfg, {
+    radarr: fakeRadarr as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never,
+    watchedLookup: lookup
+  });
+
+  // Execute two identical requests concurrently
+  const [res1, res2] = await Promise.all([
+    service.buildCatalog('radarr-recent', 0, 50, 'unwatched'),
+    service.buildCatalog('radarr-recent', 0, 50, 'unwatched')
+  ]);
+
+  assert.equal(res1.metas.length, 50);
+  assert.equal(res2.metas.length, 50);
+  assert.deepEqual(res1.metas, res2.metas, 'concurrent requests should return same array');
+
+  // They should not have duplicated the work / scanned into 100+
+  assert.equal(lookup.batchCalls, 1, 'only one request should perform the batch lookup due to the promise lock');
+});
+
+test('catalog service gracefully bounds invalid or infinity limits during pagination', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarrCatalogWatchedKeepCount = 0;
+
+  const fakeRadarr = {
+    async listMovies() {
+      return Array.from({ length: 25 }, (_, i) => ({ id: i + 1, title: `Movie ${i}`, imdbId: `tt${i}` }));
+    },
+    async listMovieQueueDetails() { return []; },
+    async listRecentMovieImports() { return []; }
+  };
+
+  const lookup = new TrackingWatchedLookup(new Set([]));
+
+  const service = new CatalogService(cfg, {
+    radarr: fakeRadarr as never,
+    sonarr: { async listSeries() { return []; }, async listSeriesQueueDetails() { return []; }, async listRecentSeriesImports() { return []; } } as never,
+    watchedLookup: lookup
+  });
+
+  const result = await service.buildCatalog('radarr-recent', 0, NaN as never, 'unwatched');
+
+  assert.equal(result.metas.length, 25, 'should have gracefully bounded NaN to the full list safely');
+});
+
 test('catalog service uses injectable clock for deterministic imported relative text', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
