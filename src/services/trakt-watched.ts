@@ -72,10 +72,16 @@ export class TraktWatchedLookup implements WatchedLookup {
       for (const id of imdbIds) result.set(id, false);
       return result;
     }
+
+    const normalizedIds = imdbIds.map(id => ({ original: id, normalized: normalizeImdbId(id) }));
+    if (normalizedIds.every(id => !id.normalized)) {
+      for (const id of imdbIds) result.set(id, false);
+      return result;
+    }
+
     await this.ensureSynced(false);
-    for (const imdbId of imdbIds) {
-      const normalized = normalizeImdbId(imdbId);
-      result.set(imdbId, normalized ? this.movieWatched.has(normalized) : false);
+    for (const { original, normalized } of normalizedIds) {
+      result.set(original, normalized ? this.movieWatched.has(normalized) : false);
     }
     return result;
   }
@@ -84,8 +90,8 @@ export class TraktWatchedLookup implements WatchedLookup {
     if (!this.config.traktSync.enabled) return false;
     const normalized = normalizeImdbId(imdbId);
     if (!normalized) return false;
-    await this.ensureSynced(false);
     if (season == null || episode == null) return false;
+    await this.ensureSynced(false);
     const key = this.episodeKey(normalized, season, episode);
     return this.episodeWatched.has(key);
   }
@@ -151,7 +157,15 @@ export class TraktWatchedLookup implements WatchedLookup {
       this.lastSyncAt = Date.now();
       this.lastSyncError = undefined;
       this.snapshotReady = true;
-      await this.persistState();
+
+      try {
+        await this.persistState();
+      } catch (err) {
+        this.logger.warn('trakt sync metadata persistence failed (snapshot valid in-memory)', {
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+
       this.logger.info('trakt sync complete', {
         durationMs: Date.now() - startedAt,
         movieCount: this.movieWatched.size,
@@ -182,7 +196,14 @@ export class TraktWatchedLookup implements WatchedLookup {
     this.accessToken = response.access_token;
     this.refreshToken = response.refresh_token;
     this.tokenExpiresAt = Date.now() + (response.expires_in ?? TRAKT_TOKEN_TTL_MS / 1000) * 1000;
-    await this.persistState();
+
+    try {
+      await this.persistState();
+    } catch (err) {
+      this.logger.warn('trakt token refresh persistence failed', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
   }
 
   private async traktGet<T>(endpoint: string): Promise<T> {

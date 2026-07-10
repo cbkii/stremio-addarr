@@ -210,6 +210,110 @@ test('failed sync preserves the previous known-good state', async () => {
   assert.equal(finalResult.get('tt1000'), true, 'old state should be preserved on sync failure');
 });
 
+test('snapshot state remains unwatched when fresh process starts despite valid lastSyncAt cache', async () => {
+  const cfg = baseConfig();
+  cfg.traktSync.enabled = true;
+  cfg.traktSync.syncMins = 360;
+  cfg.traktSync.clientId = 'id';
+  cfg.traktSync.clientSecret = 'secret';
+  cfg.traktSync.refreshToken = 'refresh';
+  cfg.traktSync.stateFilePath = path.join(os.tmpdir(), `trakt-sync-${Date.now()}-restart.json`);
+
+  // Write a state file indicating a recent sync
+  await fs.mkdir(path.dirname(cfg.traktSync.stateFilePath), { recursive: true });
+  await fs.writeFile(cfg.traktSync.stateFilePath, JSON.stringify({
+    lastSyncAt: Date.now() - 5000,
+    refreshToken: 'refresh',
+    accessToken: 'access',
+    tokenExpiresAt: Date.now() + 3600000
+  }), 'utf8');
+
+  let fetchCalled = false;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/oauth/token')) return new Response('{"access_token":"a","refresh_token":"r2"}', { status: 200 });
+    if (url.endsWith('/sync/watched/movies')) {
+      fetchCalled = true;
+      return new Response('[{"movie":{"ids":{"imdb":"tt2000"}}}]', { status: 200 });
+    }
+    if (url.endsWith('/sync/watched/shows')) {
+      return new Response('[]', { status: 200 });
+    }
+    return new Response('{}', { status: 404 });
+  }) as typeof fetch;
+
+  const lookup = new TraktWatchedLookup(cfg, createLogger('none'));
+  await lookup.init();
+
+  const finalResult = await lookup.areMoviesWatched(['tt2000']);
+  assert.equal(fetchCalled, true, 'sync should occur because in-memory snapshot was not ready');
+  assert.equal(finalResult.get('tt2000'), true, 'sync completed successfully serving valid memory cache');
+});
+
+test('failed persistence does not wipe the active synced memory snapshot', async () => {
+  const cfg = baseConfig();
+  cfg.traktSync.enabled = true;
+  cfg.traktSync.syncMins = 360;
+  cfg.traktSync.clientId = 'id';
+  cfg.traktSync.clientSecret = 'secret';
+  cfg.traktSync.refreshToken = 'refresh';
+  cfg.traktSync.stateFilePath = '/invalid/directory/path/trakt-sync-fail.json';
+
+  let fetchCalled = false;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/oauth/token')) return new Response('{"access_token":"a","refresh_token":"r2"}', { status: 200 });
+    if (url.endsWith('/sync/watched/movies')) {
+      fetchCalled = true;
+      return new Response('[{"movie":{"ids":{"imdb":"tt2000"}}}]', { status: 200 });
+    }
+    if (url.endsWith('/sync/watched/shows')) {
+      return new Response('[]', { status: 200 });
+    }
+    return new Response('{}', { status: 404 });
+  }) as typeof fetch;
+
+  const lookup = new TraktWatchedLookup(cfg, createLogger('none'));
+  await lookup.init();
+
+  await lookup.triggerSync();
+  assert.equal(fetchCalled, true, 'sync triggered');
+  const finalResult = await lookup.areMoviesWatched(['tt2000']);
+  assert.equal(finalResult.get('tt2000'), true, 'sync valid locally despite file-system IO rejection');
+});
+
+test('Trakt queries immediately return false and bypass network fetches when provided malformed inputs', async () => {
+  const cfg = baseConfig();
+  cfg.traktSync.enabled = true;
+  cfg.traktSync.clientId = 'id';
+  cfg.traktSync.clientSecret = 'secret';
+  cfg.traktSync.refreshToken = 'refresh';
+  cfg.traktSync.stateFilePath = path.join(os.tmpdir(), `trakt-sync-${Date.now()}-malformed.json`);
+
+  let fetchCalled = false;
+  globalThis.fetch = (async (_input: RequestInfo | URL) => {
+    fetchCalled = true;
+    return new Response('[]', { status: 200 });
+  }) as typeof fetch;
+
+  const lookup = new TraktWatchedLookup(cfg, createLogger('none'));
+  await lookup.init();
+
+  const m1 = await lookup.isMovieWatched('invalid');
+  assert.equal(m1, false);
+
+  const m2 = await lookup.areMoviesWatched([]);
+  assert.equal(m2.size, 0);
+
+  const m3 = await lookup.areMoviesWatched(['badID']);
+  assert.equal(m3.get('badID'), false);
+
+  const ep = await lookup.isEpisodeWatched('tt2000', undefined, undefined);
+  assert.equal(ep, false);
+
+  assert.equal(fetchCalled, false, 'Fetch was incorrectly executed despite inputs strictly failing normalisation blocks.');
+});
+
 test('token expiry uses expires_in from response when present', async () => {
   const cfg = baseConfig();
   cfg.traktSync.enabled = true;
