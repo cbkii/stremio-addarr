@@ -1,6 +1,7 @@
 import type { AppConfig } from '../config.js';
 import { AsyncTtlCache, TtlCache } from '../lib/cache.js';
 import { systemClock, type Clock } from '../lib/clock.js';
+import { normalizeImdbId } from '../lib/imdb.js';
 import type {
   CatalogItem,
   RadarrHistoryRecord,
@@ -17,13 +18,6 @@ import { NoopWatchedLookup, type WatchedLookup } from './watched.js';
 export type CatalogFilter = 'recent' | 'unwatched';
 
 const DAY_MS = 86_400_000;
-const IMDB_ID_PATTERN = /^tt\d+$/i;
-
-function normalizeImdbId(value?: string): string | undefined {
-  const trimmed = value?.trim();
-  if (!trimmed || !IMDB_ID_PATTERN.test(trimmed)) return undefined;
-  return `tt${trimmed.slice(2)}`;
-}
 
 function toTimestamp(value?: string): number {
   if (!value) return 0;
@@ -122,8 +116,17 @@ function shouldPreferDownloading(candidate: CatalogItem, existing: CatalogItem):
   return ck[3] < ek[3];
 }
 
-export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
+function mergeCatalogItems(items: CatalogItem[]): CatalogItem[] {
   const bestByImdb = new Map<string, CatalogItem>();
+
+  const replaceWithPreservedPoster = (candidate: CatalogItem, existing: CatalogItem) => {
+    if (existing.poster && !candidate.poster) {
+      bestByImdb.set(candidate.imdbId, { ...candidate, poster: existing.poster });
+    } else {
+      bestByImdb.set(candidate.imdbId, candidate);
+    }
+  };
+
   for (const item of items) {
     const current = bestByImdb.get(item.imdbId);
     if (!current) {
@@ -131,20 +134,21 @@ export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
       continue;
     }
     if (!current.poster && item.poster) {
-      current.poster = item.poster;
+      bestByImdb.set(item.imdbId, { ...current, poster: item.poster });
+      continue;
     }
     if (current.status === 'imported' && item.status === 'downloading') {
-      bestByImdb.set(item.imdbId, item);
+      replaceWithPreservedPoster(item, current);
       continue;
     }
     if (current.status === 'downloading' && item.status === 'downloading') {
       if (shouldPreferDownloading(item, current)) {
-        bestByImdb.set(item.imdbId, item);
+        replaceWithPreservedPoster(item, current);
       }
       continue;
     }
     if (current.status === item.status && item.timestamp > current.timestamp) {
-      bestByImdb.set(item.imdbId, item);
+      replaceWithPreservedPoster(item, current);
     }
   }
 
@@ -171,53 +175,12 @@ export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
   return [...downloading.map(d => d.item), ...imported];
 }
 
+export function mergeMovieItems(items: CatalogItem[]): CatalogItem[] {
+  return mergeCatalogItems(items);
+}
+
 export function mergeSeriesItems(items: CatalogItem[]): CatalogItem[] {
-  const byImdb = new Map<string, CatalogItem>();
-  for (const item of items) {
-    const current = byImdb.get(item.imdbId);
-    if (!current) {
-      byImdb.set(item.imdbId, item);
-      continue;
-    }
-    if (!current.poster && item.poster) {
-      current.poster = item.poster;
-    }
-    if (current.status === 'imported' && item.status === 'downloading') {
-      byImdb.set(item.imdbId, item);
-      continue;
-    }
-    if (current.status === 'downloading' && item.status === 'downloading') {
-      if (shouldPreferDownloading(item, current)) {
-        byImdb.set(item.imdbId, item);
-      }
-      continue;
-    }
-    if (current.status === item.status && item.timestamp > current.timestamp) {
-      byImdb.set(item.imdbId, item);
-    }
-  }
-
-  const downloading: { item: CatalogItem; key: [number, number, number, string] }[] = [];
-  const imported: CatalogItem[] = [];
-
-  for (const item of byImdb.values()) {
-    if (item.status === 'downloading') {
-      downloading.push({ item, key: downloadingSortKey(item) });
-    } else if (item.status === 'imported') {
-      imported.push(item);
-    }
-  }
-
-  downloading.sort((a, b) => {
-    const ak = a.key;
-    const bk = b.key;
-    return ak[0] - bk[0] || ak[1] - bk[1] || ak[2] - bk[2] || ak[3].localeCompare(bk[3]);
-  });
-  imported.sort((a, b) => {
-    return (b.timestamp - a.timestamp) || ((b.addedTimestamp ?? 0) - (a.addedTimestamp ?? 0));
-  });
-
-  return [...downloading.map(d => d.item), ...imported];
+  return mergeCatalogItems(items);
 }
 
 interface CatalogMetaPreview {
@@ -253,6 +216,7 @@ export class CatalogService {
   private readonly mergedCache: AsyncTtlCache<CatalogItem[]>;
   private readonly filteredRadarrProgressCache: TtlCache<{ accepted: CatalogItem[]; scannedIndex: number; keptWatched: number }>;
   private readonly allItemsRevision = new Map<string, number>();
+  private readonly activePageFilters = new Map<string, Promise<void>>();
 
   constructor(
     private readonly config: AppConfig,
@@ -267,6 +231,20 @@ export class CatalogService {
   }
 
   async buildCatalog(catalogId: string, skip: number, limit: number, filter?: CatalogFilter): Promise<{ metas: CatalogMetaPreview[] }> {
+    let safeLimit = 100;
+    if (typeof limit === 'number' && Number.isFinite(limit)) {
+      safeLimit = limit <= 0 ? 0 : Math.min(Math.floor(limit), 100);
+    }
+
+    let safeSkip = 0;
+    if (typeof skip === 'number' && Number.isFinite(skip) && skip > 0) {
+      safeSkip = Math.floor(skip);
+    }
+
+    if (safeLimit === 0) {
+      return { metas: [] };
+    }
+
     const cacheKey = `${catalogId}:all`;
     const allItems = await this.mergedCache.getOrSet(cacheKey, async () => {
       let items: CatalogItem[] = [];
@@ -282,35 +260,86 @@ export class CatalogService {
     // Apply watched filtering only for movie items (radarr-recent).
     // No filter (homepage default) and filter=unwatched keep only a small recent watched allowance.
     if (catalogId === 'radarr-recent' && filter !== 'recent') {
-      const items = await this.filterRadarrMoviesPage(allItems, skip, limit, filter);
+      const items = await this.filterRadarrMoviesPage(allItems, safeSkip, safeLimit, filter);
       return { metas: items.map(toMeta) };
     }
 
-    return { metas: allItems.slice(skip, skip + limit).map(toMeta) };
+    return { metas: allItems.slice(safeSkip, safeSkip + safeLimit).map(toMeta) };
   }
 
-  private async filterRadarrMoviesPage(items: CatalogItem[], skip: number, limit: number, filter?: CatalogFilter): Promise<CatalogItem[]> {
-    const targetAccepted = skip + limit;
+  private async filterRadarrMoviesPage(items: CatalogItem[], safeSkip: number, safeLimit: number, filter?: CatalogFilter): Promise<CatalogItem[]> {
+    const targetAccepted = safeSkip + safeLimit;
     const keepWatchedCount = this.config.radarrCatalogWatchedKeepCount;
     const revision = this.allItemsRevision.get('radarr-recent') ?? 0;
     const progressKey = `radarr-recent:${filter ?? 'default'}:${keepWatchedCount}:${revision}`;
-    const progress = this.filteredRadarrProgressCache.get(progressKey) ?? { accepted: [], scannedIndex: 0, keptWatched: 0 };
 
-    while (progress.accepted.length < targetAccepted && progress.scannedIndex < items.length) {
-      const item = items[progress.scannedIndex++];
-      const watched = await this.watchedLookup.isMovieWatched(item.imdbId);
-      if (!watched) {
-        progress.accepted.push(item);
-        continue;
-      }
-      if (progress.keptWatched < keepWatchedCount) {
-        progress.keptWatched += 1;
-        progress.accepted.push(item);
-      }
+    // Await any in-flight requests that are mutating this same progress key to prevent races.
+    while (this.activePageFilters.has(progressKey)) {
+      await this.activePageFilters.get(progressKey);
     }
 
-    this.filteredRadarrProgressCache.set(progressKey, progress);
-    return progress.accepted.slice(skip, skip + limit);
+    let resolveActive: () => void;
+    const activePromise = new Promise<void>((resolve) => resolveActive = resolve);
+    this.activePageFilters.set(progressKey, activePromise);
+
+    try {
+      const cached = this.filteredRadarrProgressCache.get(progressKey);
+      const progress = cached
+        ? { accepted: [...cached.accepted], scannedIndex: cached.scannedIndex, keptWatched: cached.keptWatched }
+        : { accepted: [], scannedIndex: 0, keptWatched: 0 };
+
+      // Bounded batch sizing to avoid excessive allocation on malformed huge limits
+      const batchSize = Math.max(1, Math.min(safeLimit || 50, 100));
+
+      while (progress.accepted.length < targetAccepted && progress.scannedIndex < items.length) {
+        const startScannedIndex = progress.scannedIndex;
+
+        if (this.watchedLookup.areMoviesWatched) {
+          const batchEnd = Math.min(items.length, progress.scannedIndex + batchSize);
+          const batch = items.slice(progress.scannedIndex, batchEnd);
+          const batchIds = batch.map(i => i.imdbId);
+          const watchedMap = await this.watchedLookup.areMoviesWatched(batchIds);
+
+          for (const item of batch) {
+            if (progress.accepted.length >= targetAccepted) break;
+            const watched = watchedMap.get(item.imdbId) ?? false;
+            progress.scannedIndex++;
+            if (!watched) {
+              progress.accepted.push(item);
+              continue;
+            }
+            if (progress.keptWatched < keepWatchedCount) {
+              progress.keptWatched += 1;
+              progress.accepted.push(item);
+            }
+          }
+        } else {
+          const itemIndex = progress.scannedIndex;
+          const item = items[itemIndex];
+          const watched = await this.watchedLookup.isMovieWatched(item.imdbId);
+
+          progress.scannedIndex = itemIndex + 1;
+
+          if (!watched) {
+            progress.accepted.push(item);
+            continue;
+          }
+          if (progress.keptWatched < keepWatchedCount) {
+            progress.keptWatched += 1;
+            progress.accepted.push(item);
+          }
+        }
+
+        // Fallback safeguard against non-progressing loops.
+        if (progress.scannedIndex <= startScannedIndex) break;
+      }
+
+      this.filteredRadarrProgressCache.set(progressKey, progress);
+      return progress.accepted.slice(safeSkip, safeSkip + safeLimit);
+    } finally {
+      this.activePageFilters.delete(progressKey);
+      resolveActive!();
+    }
   }
 
   private async buildAllRadarrItems(): Promise<CatalogItem[]> {

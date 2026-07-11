@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Logger } from '../logger.js';
-import { TtlCache } from '../lib/cache.js';
 import type { AppConfig } from '../config.js';
 import type { WatchedLookup, WatchedLookupDiagnostics } from './watched.js';
+import { normalizeImdbId } from '../lib/imdb.js';
 
 interface TraktTokenResponse {
   access_token?: string;
@@ -33,15 +33,15 @@ const TRAKT_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 export class TraktWatchedLookup implements WatchedLookup {
   private readonly syncMs: number;
   private readonly stateFile: string;
-  private readonly movieWatched = new Set<string>();
-  private readonly episodeWatched = new Set<string>();
-  private readonly lookupCache = new TtlCache<boolean>(60_000);
+  private movieWatched = new Set<string>();
+  private episodeWatched = new Set<string>();
   private accessToken = '';
   private tokenExpiresAt = 0;
   private refreshToken: string;
   private lastSyncAt = 0;
   private lastSyncError?: string;
   private runningSync: Promise<void> | null = null;
+  private snapshotReady = false;
 
   constructor(private readonly config: AppConfig, private readonly logger: Logger) {
     this.syncMs = config.traktSync.syncMins * 60_000;
@@ -59,26 +59,41 @@ export class TraktWatchedLookup implements WatchedLookup {
 
   async isMovieWatched(imdbId: string): Promise<boolean> {
     if (!this.config.traktSync.enabled) return false;
+    const normalized = normalizeImdbId(imdbId);
+    if (!normalized) return false;
     await this.ensureSynced(false);
-    const cacheKey = `movie:${imdbId}`;
-    const cached = this.lookupCache.get(cacheKey);
-    if (cached != null) return cached;
-    const watched = this.movieWatched.has(imdbId);
-    this.lookupCache.set(cacheKey, watched);
-    return watched;
+    return this.movieWatched.has(normalized);
+  }
+
+  async areMoviesWatched(imdbIds: readonly string[]): Promise<Map<string, boolean>> {
+    const result = new Map<string, boolean>();
+    if (imdbIds.length === 0) return result;
+    if (!this.config.traktSync.enabled) {
+      for (const id of imdbIds) result.set(id, false);
+      return result;
+    }
+
+    const normalizedIds = imdbIds.map(id => ({ original: id, normalized: normalizeImdbId(id) }));
+    if (normalizedIds.every(id => !id.normalized)) {
+      for (const id of imdbIds) result.set(id, false);
+      return result;
+    }
+
+    await this.ensureSynced(false);
+    for (const { original, normalized } of normalizedIds) {
+      result.set(original, normalized ? this.movieWatched.has(normalized) : false);
+    }
+    return result;
   }
 
   async isEpisodeWatched(imdbId: string, season?: number, episode?: number): Promise<boolean> {
     if (!this.config.traktSync.enabled) return false;
-    await this.ensureSynced(false);
+    const normalized = normalizeImdbId(imdbId);
+    if (!normalized) return false;
     if (season == null || episode == null) return false;
-    const key = this.episodeKey(imdbId, season, episode);
-    const cacheKey = `episode:${key}`;
-    const cached = this.lookupCache.get(cacheKey);
-    if (cached != null) return cached;
-    const watched = this.episodeWatched.has(key);
-    this.lookupCache.set(cacheKey, watched);
-    return watched;
+    await this.ensureSynced(false);
+    const key = this.episodeKey(normalized, season, episode);
+    return this.episodeWatched.has(key);
   }
 
   getDiagnostics(): WatchedLookupDiagnostics {
@@ -96,7 +111,7 @@ export class TraktWatchedLookup implements WatchedLookup {
   private async ensureSynced(force: boolean): Promise<void> {
     if (!this.config.traktSync.enabled) return;
     const now = Date.now();
-    if (!force && this.lastSyncAt > 0 && (now - this.lastSyncAt) < this.syncMs) return;
+    if (!force && this.snapshotReady && this.lastSyncAt > 0 && (now - this.lastSyncAt) < this.syncMs) return;
     if (this.runningSync) return this.runningSync;
     this.runningSync = this.runSync();
     try {
@@ -117,14 +132,14 @@ export class TraktWatchedLookup implements WatchedLookup {
         this.traktGet<TraktWatchedMovie[]>('/sync/watched/movies'),
         this.traktGet<TraktWatchedShow[]>('/sync/watched/shows')
       ]);
-      this.movieWatched.clear();
-      this.episodeWatched.clear();
+      const nextMovieWatched = new Set<string>();
+      const nextEpisodeWatched = new Set<string>();
       for (const item of movies) {
-        const imdb = item.movie?.ids?.imdb?.trim();
-        if (imdb) this.movieWatched.add(imdb);
+        const imdb = normalizeImdbId(item.movie?.ids?.imdb);
+        if (imdb) nextMovieWatched.add(imdb);
       }
       for (const item of shows) {
-        const imdb = item.show?.ids?.imdb?.trim();
+        const imdb = normalizeImdbId(item.show?.ids?.imdb);
         if (!imdb) continue;
         for (const season of item.seasons ?? []) {
           const seasonNumber = season.number;
@@ -132,14 +147,25 @@ export class TraktWatchedLookup implements WatchedLookup {
           for (const ep of season.episodes ?? []) {
             const episodeNumber = ep.number;
             if (episodeNumber == null) continue;
-            this.episodeWatched.add(this.episodeKey(imdb, seasonNumber, episodeNumber));
+            nextEpisodeWatched.add(this.episodeKey(imdb, seasonNumber, episodeNumber));
           }
         }
       }
+
+      this.movieWatched = nextMovieWatched;
+      this.episodeWatched = nextEpisodeWatched;
       this.lastSyncAt = Date.now();
       this.lastSyncError = undefined;
-      this.lookupCache.clear();
-      await this.persistState();
+      this.snapshotReady = true;
+
+      try {
+        await this.persistState();
+      } catch (err) {
+        this.logger.warn('trakt sync metadata persistence failed (snapshot valid in-memory)', {
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+
       this.logger.info('trakt sync complete', {
         durationMs: Date.now() - startedAt,
         movieCount: this.movieWatched.size,
@@ -170,7 +196,14 @@ export class TraktWatchedLookup implements WatchedLookup {
     this.accessToken = response.access_token;
     this.refreshToken = response.refresh_token;
     this.tokenExpiresAt = Date.now() + (response.expires_in ?? TRAKT_TOKEN_TTL_MS / 1000) * 1000;
-    await this.persistState();
+
+    try {
+      await this.persistState();
+    } catch (err) {
+      this.logger.warn('trakt token refresh persistence failed', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
   }
 
   private async traktGet<T>(endpoint: string): Promise<T> {
