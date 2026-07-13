@@ -25,7 +25,8 @@ export function createLogger(level: LogLevel, writer?: LogWriter) {
     return Object.fromEntries(
       Object.entries(extra).map(([key, value]) => {
         const normalized = key.toLowerCase();
-        if (normalized.includes('apikey') || normalized.includes('api_key')) {
+        const sensitiveKeys = ['apikey', 'api_key', 'secret', 'token', 'password'];
+        if (sensitiveKeys.some(k => normalized.includes(k))) {
           return [key, '[redacted]'];
         }
         if (typeof value === 'string' && /^https?:\/\//.test(value)) {
