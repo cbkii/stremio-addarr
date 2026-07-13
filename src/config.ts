@@ -330,11 +330,10 @@ function resolveVersion(): string {
   return readVersionFromPackageJson() ?? '0.1.0';
 }
 
-export function loadConfig(): AppConfig {
-  const packageVersion = resolveVersion();
+
+function loadCoreRuntimeConfig(packageVersion: string, publicBaseUrl: string) {
   const host = readString('HOST', '127.0.0.1');
   const port = readNumber('PORT', 7010);
-  const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
   const manifestLogoEnv = readString('MANIFEST_LOGO_URL', 'local');
   const normalizedManifestLogo = manifestLogoEnv.toLowerCase();
   const manifestLogoUrl = normalizedManifestLogo === 'none'
@@ -347,6 +346,31 @@ export function loadConfig(): AppConfig {
   const requestTimeoutMs = readNumber('REQUEST_TIMEOUT_MS', 5000);
   const gracefulShutdownTimeoutMs = readNumber('GRACEFUL_SHUTDOWN_TIMEOUT_MS', 10_000);
   const forcedShutdownExitCodeRaw = readNumber('FORCED_SHUTDOWN_EXIT_CODE', 0);
+
+  if (requestTimeoutMs < 1000) throw new Error('REQUEST_TIMEOUT_MS must be at least 1000.');
+  if (gracefulShutdownTimeoutMs < 1000) throw new Error('GRACEFUL_SHUTDOWN_TIMEOUT_MS must be at least 1000.');
+  if (forcedShutdownExitCodeRaw !== 0 && forcedShutdownExitCodeRaw !== 1) {
+    throw new Error('FORCED_SHUTDOWN_EXIT_CODE must be 0 or 1.');
+  }
+  const logLevelRaw = readString('LOG_LEVEL', 'info') as LogLevel;
+  if (!LOG_LEVELS.has(logLevelRaw)) {
+    throw new Error('LOG_LEVEL must be one of: debug, info, warn, error, none.');
+  }
+
+  return {
+    host,
+    port,
+    manifestLogoUrl,
+    targetClient,
+    timeZone,
+    requestTimeoutMs,
+    gracefulShutdownTimeoutMs,
+    forcedShutdownExitCode: forcedShutdownExitCodeRaw as 0 | 1,
+    logLevel: logLevelRaw
+  };
+}
+
+function loadCacheConfig() {
   const statusCacheTtlMs = readNumber('STATUS_CACHE_TTL_MS', 30000);
   const serviceHealthCacheTtlMs = readNumber('SERVICE_HEALTH_CACHE_TTL_MS', 10000);
   const streamCacheMaxAgeSec = readNumber('STREAM_CACHE_MAX_AGE', 2);
@@ -358,11 +382,6 @@ export function loadConfig(): AppConfig {
   const catalogStaleRevalidateSec = readNumber('CATALOG_STALE_REVALIDATE_SEC', 60);
   const catalogStaleErrorSec = readNumber('CATALOG_STALE_ERROR_SEC', 120);
 
-  if (requestTimeoutMs < 1000) throw new Error('REQUEST_TIMEOUT_MS must be at least 1000.');
-  if (gracefulShutdownTimeoutMs < 1000) throw new Error('GRACEFUL_SHUTDOWN_TIMEOUT_MS must be at least 1000.');
-  if (forcedShutdownExitCodeRaw !== 0 && forcedShutdownExitCodeRaw !== 1) {
-    throw new Error('FORCED_SHUTDOWN_EXIT_CODE must be 0 or 1.');
-  }
   if (statusCacheTtlMs < 1000) throw new Error('STATUS_CACHE_TTL_MS must be at least 1000.');
   if (serviceHealthCacheTtlMs < 1000) {
     throw new Error('SERVICE_HEALTH_CACHE_TTL_MS must be at least 1000.');
@@ -390,46 +409,7 @@ export function loadConfig(): AppConfig {
     throw new Error('CATALOG_STALE_ERROR_SEC must be at least 0.');
   }
 
-  const logLevelRaw = readString('LOG_LEVEL', 'info') as LogLevel;
-  if (!LOG_LEVELS.has(logLevelRaw)) {
-    throw new Error('LOG_LEVEL must be one of: debug, info, warn, error, none.');
-  }
-
-  const fileStreamingEnabled = readBoolean('FILE_STREAMING_ENABLED', false);
-  const fileStreamingSecret = readString('FILE_STREAMING_SECRET');
-  const fileStreamingPlaybackMode = parseFileStreamingPlaybackMode(
-    readString('FILE_STREAMING_PLAYBACK_MODE', fileStreamingEnabled ? 'direct' : 'kodi')
-  );
-  if (fileStreamingEnabled && !fileStreamingSecret) {
-    throw new Error('FILE_STREAMING_SECRET is required when FILE_STREAMING_ENABLED=true.');
-  }
-
-  const traktSyncEnabled = readBoolean('TRAKT_SYNC_ENABLED', false);
-  const traktSyncMinsRaw = Math.floor(readNumber('TRAKT_SYNC_MINS', 360));
-  const traktSyncMins = traktSyncMinsRaw <= 40 ? 40 : traktSyncMinsRaw;
-  const traktApiBaseUrl = ensureHttpUrl('TRAKT_API_BASE_URL', readString('TRAKT_API_BASE_URL', 'https://api.trakt.tv'));
-  const traktClientId = readString('TRAKT_CLIENT_ID');
-  const traktClientSecret = readString('TRAKT_CLIENT_SECRET');
-  const traktRefreshToken = readString('TRAKT_REFRESH_TOKEN');
-  const traktRedirectUri = readString('TRAKT_REDIRECT_URI', 'urn:ietf:wg:oauth:2.0:oob');
-  const traktStateFilePath = readString('TRAKT_SYNC_STATE_FILE', path.resolve(process.cwd(), 'data/trakt-sync-state.json'));
-  const tmdbApiBaseUrl = ensureHttpUrl('TMDB_API_BASE_URL', readString('TMDB_API_BASE_URL', 'https://api.themoviedb.org'));
-  const tmdbAuthToken = readString('TMDB_API_READ_ACCESS_TOKEN') || readString('TMDB_API_KEY');
-  const tmdbRegion = readString('TMDB_RELEASE_REGION', 'US').toUpperCase();
-
-  const config: AppConfig = {
-    appName: 'stremio-addarr',
-    version: packageVersion,
-    host,
-    port,
-    publicBaseUrl,
-    manifestLogoUrl,
-    targetClient,
-    timeZone,
-    logLevel: logLevelRaw,
-    requestTimeoutMs,
-    gracefulShutdownTimeoutMs,
-    forcedShutdownExitCode: forcedShutdownExitCodeRaw as 0 | 1,
+  return {
     statusCacheTtlMs,
     serviceHealthCacheTtlMs,
     streamCacheMaxAgeSec,
@@ -439,109 +419,141 @@ export function loadConfig(): AppConfig {
     catalogCacheTtlMs,
     catalogCacheMaxAgeSec,
     catalogStaleRevalidateSec,
-    catalogStaleErrorSec,
-    fileStreaming: {
-      enabled: fileStreamingEnabled,
-      secret: fileStreamingSecret,
-      playbackMode: fileStreamingPlaybackMode
-    },
-    kodi: {
-      enabled: readBoolean('KODI_ENABLED', false),
-      packageName: readString('KODI_PACKAGE', 'org.xbmc.kodi')
-    },
-    radarr: {
-      enabled: readBoolean('RADARR_ENABLED', false),
-      baseUrl: stripTrailingSlash(readString('RADARR_BASE_URL')),
-      cardUrl: stripTrailingSlash(readString('RADARR_CARD_URL')),
-      apiKey: readString('RADARR_API_KEY'),
-      rootFolderPath: readString('RADARR_ROOT_FOLDER_PATH'),
-      qualityProfileId: readNumber('RADARR_QUALITY_PROFILE_ID', 1),
-      minimumAvailability: readString('RADARR_MINIMUM_AVAILABILITY', 'announced'),
-      tags: readIntegerListEnv('RADARR_TAGS'),
-      searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true),
-      strictImdbMatch: readBoolean('RADARR_STRICT_IMDB_MATCH', false)
-    },
-    sonarr: (() => {
-      const sonarrEnabled = readBoolean('SONARR_ENABLED', false);
-      return {
-        enabled: sonarrEnabled,
-        baseUrl: stripTrailingSlash(readString('SONARR_BASE_URL')),
-        cardUrl: stripTrailingSlash(readString('SONARR_CARD_URL')),
-        apiKey: readString('SONARR_API_KEY'),
-        rootFolderPath: readString('SONARR_ROOT_FOLDER_PATH'),
-        qualityProfileId: readNumber('SONARR_QUALITY_PROFILE_ID', 1),
-        languageProfileId: (() => {
-          const raw = readNumber('SONARR_LANGUAGE_PROFILE_ID', 0);
-          return raw > 0 ? raw : null;
-        })(),
-        seriesMonitor: sonarrEnabled
-          ? parseSonarrSeriesMonitor(readString('SONARR_SERIES_MONITOR', 'all'))
-          : 'all',
-        monitorNewItems: parseSonarrMonitorNewItems(readString('SONARR_MONITOR_NEW_ITEMS', 'auto')),
-        episodeReadyTimeoutMs: Math.max(1000, Math.floor(readNumber('SONARR_EPISODE_READY_TIMEOUT_MS', 60000))),
-        episodeReadyPollMs: Math.max(250, Math.floor(readNumber('SONARR_EPISODE_READY_POLL_MS', 1500))),
-        epCount: parseEpCount(readString('EP_COUNT', '2')),
-        epCountPast: parseEpCountPast(readString('EP_COUNT_PAST', '8')),
-        epCountMod: parseEpCountMod(readString('EP_COUNT_MOD', 'epfuture')),
-        tags: readIntegerListEnv('SONARR_TAGS'),
-        searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
-      };
-    })(),
-    traktSync: {
-      enabled: traktSyncEnabled,
-      syncMins: traktSyncMins,
-      apiBaseUrl: traktApiBaseUrl,
-      clientId: traktClientId,
-      clientSecret: traktClientSecret,
-      refreshToken: traktRefreshToken,
-      redirectUri: traktRedirectUri,
-      stateFilePath: traktStateFilePath
-    },
-    tmdb: {
-      apiBaseUrl: tmdbApiBaseUrl,
-      authToken: tmdbAuthToken,
-      region: tmdbRegion
-    }
+    catalogStaleErrorSec
+  };
+}
+
+function loadFileStreamingConfig(): AppConfig['fileStreaming'] {
+  const fileStreamingEnabled = readBoolean('FILE_STREAMING_ENABLED', false);
+  const fileStreamingSecret = readString('FILE_STREAMING_SECRET');
+  const fileStreamingPlaybackMode = parseFileStreamingPlaybackMode(
+    readString('FILE_STREAMING_PLAYBACK_MODE', fileStreamingEnabled ? 'direct' : 'kodi')
+  );
+  if (fileStreamingEnabled && !fileStreamingSecret) {
+    throw new Error('FILE_STREAMING_SECRET is required when FILE_STREAMING_ENABLED=true.');
+  }
+  return {
+    enabled: fileStreamingEnabled,
+    secret: fileStreamingSecret,
+    playbackMode: fileStreamingPlaybackMode
+  };
+}
+
+function loadKodiConfig(): AppConfig['kodi'] {
+  const enabled = readBoolean('KODI_ENABLED', false);
+  const packageName = readString('KODI_PACKAGE', 'org.xbmc.kodi');
+  if (enabled && !packageName) {
+    throw new Error('KODI_PACKAGE must not be empty.');
+  }
+  return { enabled, packageName };
+}
+
+function loadRadarrConfig(): AppConfig['radarr'] {
+  const config = {
+    enabled: readBoolean('RADARR_ENABLED', false),
+    baseUrl: stripTrailingSlash(readString('RADARR_BASE_URL')),
+    cardUrl: stripTrailingSlash(readString('RADARR_CARD_URL')),
+    apiKey: readString('RADARR_API_KEY'),
+    rootFolderPath: readString('RADARR_ROOT_FOLDER_PATH'),
+    qualityProfileId: readNumber('RADARR_QUALITY_PROFILE_ID', 1),
+    minimumAvailability: readString('RADARR_MINIMUM_AVAILABILITY', 'announced'),
+    tags: readIntegerListEnv('RADARR_TAGS'),
+    searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true),
+    strictImdbMatch: readBoolean('RADARR_STRICT_IMDB_MATCH', false)
   };
 
-  if (config.radarr.enabled && (!config.radarr.baseUrl || !config.radarr.apiKey)) {
+  if (config.enabled && (!config.baseUrl || !config.apiKey)) {
     readRequiredString('RADARR_BASE_URL');
     readRequiredString('RADARR_API_KEY');
   }
 
-  if (config.sonarr.enabled && (!config.sonarr.baseUrl || !config.sonarr.apiKey)) {
-    readRequiredString('SONARR_BASE_URL');
-    readRequiredString('SONARR_API_KEY');
-  }
-
-  if (config.radarr.enabled) {
+  if (config.enabled) {
     readRequiredString('RADARR_ROOT_FOLDER_PATH');
-    if (config.radarr.qualityProfileId <= 0) {
+    if (config.qualityProfileId <= 0) {
       throw new Error('RADARR_QUALITY_PROFILE_ID must be greater than 0.');
     }
   }
 
-  if (config.sonarr.enabled) {
+  return config;
+}
+
+function loadSonarrConfig(): AppConfig['sonarr'] {
+  const sonarrEnabled = readBoolean('SONARR_ENABLED', false);
+  const config: AppConfig['sonarr'] = {
+    enabled: sonarrEnabled,
+    baseUrl: stripTrailingSlash(readString('SONARR_BASE_URL')),
+    cardUrl: stripTrailingSlash(readString('SONARR_CARD_URL')),
+    apiKey: readString('SONARR_API_KEY'),
+    rootFolderPath: readString('SONARR_ROOT_FOLDER_PATH'),
+    qualityProfileId: readNumber('SONARR_QUALITY_PROFILE_ID', 1),
+    languageProfileId: (() => {
+      const raw = readNumber('SONARR_LANGUAGE_PROFILE_ID', 0);
+      return raw > 0 ? raw : null;
+    })(),
+    seriesMonitor: sonarrEnabled
+      ? parseSonarrSeriesMonitor(readString('SONARR_SERIES_MONITOR', 'all'))
+      : 'all',
+    monitorNewItems: parseSonarrMonitorNewItems(readString('SONARR_MONITOR_NEW_ITEMS', 'auto')),
+    episodeReadyTimeoutMs: Math.max(1000, Math.floor(readNumber('SONARR_EPISODE_READY_TIMEOUT_MS', 60000))),
+    episodeReadyPollMs: Math.max(250, Math.floor(readNumber('SONARR_EPISODE_READY_POLL_MS', 1500))),
+    epCount: parseEpCount(readString('EP_COUNT', '2')),
+    epCountPast: parseEpCountPast(readString('EP_COUNT_PAST', '8')),
+    epCountMod: parseEpCountMod(readString('EP_COUNT_MOD', 'epfuture')),
+    tags: readIntegerListEnv('SONARR_TAGS'),
+    searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
+  };
+
+  if (config.enabled && (!config.baseUrl || !config.apiKey)) {
+    readRequiredString('SONARR_BASE_URL');
+    readRequiredString('SONARR_API_KEY');
+  }
+
+  if (config.enabled) {
     readRequiredString('SONARR_ROOT_FOLDER_PATH');
-    if (config.sonarr.qualityProfileId <= 0) {
+    if (config.qualityProfileId <= 0) {
       throw new Error('SONARR_QUALITY_PROFILE_ID must be greater than 0.');
     }
-    if (config.sonarr.episodeReadyPollMs > config.sonarr.episodeReadyTimeoutMs) {
+    if (config.episodeReadyPollMs > config.episodeReadyTimeoutMs) {
       throw new Error('SONARR_EPISODE_READY_POLL_MS must be less than or equal to SONARR_EPISODE_READY_TIMEOUT_MS.');
     }
   }
 
-  if (config.kodi.enabled && !config.kodi.packageName) {
-    throw new Error('KODI_PACKAGE must not be empty.');
-  }
+  return config;
+}
 
-  if (config.traktSync.enabled) {
+function loadTraktSyncConfig(): AppConfig['traktSync'] {
+  const traktSyncEnabled = readBoolean('TRAKT_SYNC_ENABLED', false);
+  const traktSyncMinsRaw = Math.floor(readNumber('TRAKT_SYNC_MINS', 360));
+  const config = {
+    enabled: traktSyncEnabled,
+    syncMins: traktSyncMinsRaw,
+    apiBaseUrl: ensureHttpUrl('TRAKT_API_BASE_URL', readString('TRAKT_API_BASE_URL', 'https://api.trakt.tv')),
+    clientId: readString('TRAKT_CLIENT_ID'),
+    clientSecret: readString('TRAKT_CLIENT_SECRET'),
+    refreshToken: readString('TRAKT_REFRESH_TOKEN'),
+    redirectUri: readString('TRAKT_REDIRECT_URI', 'urn:ietf:wg:oauth:2.0:oob'),
+    stateFilePath: readString('TRAKT_SYNC_STATE_FILE', path.resolve(process.cwd(), 'data/trakt-sync-state.json'))
+  };
+
+  if (config.enabled) {
     readRequiredString('TRAKT_CLIENT_ID');
     readRequiredString('TRAKT_CLIENT_SECRET');
     readRequiredString('TRAKT_REFRESH_TOKEN');
-    if (config.traktSync.syncMins < 40) throw new Error('TRAKT_SYNC_MINS must be at least 40.');
+    if (config.syncMins < 40) throw new Error('TRAKT_SYNC_MINS must be at least 40.');
   }
 
+  return config;
+}
+
+function loadTmdbConfig(): AppConfig['tmdb'] {
+  return {
+    apiBaseUrl: ensureHttpUrl('TMDB_API_BASE_URL', readString('TMDB_API_BASE_URL', 'https://api.themoviedb.org')),
+    authToken: readString('TMDB_API_READ_ACCESS_TOKEN') || readString('TMDB_API_KEY'),
+    region: readString('TMDB_RELEASE_REGION', 'US').toUpperCase()
+  };
+}
+
+function normaliseEnabledServiceUrls(config: AppConfig) {
   if (config.radarr.enabled) {
     config.radarr.baseUrl = ensureHttpUrl('RADARR_BASE_URL', config.radarr.baseUrl);
     if (config.radarr.cardUrl) {
@@ -558,6 +570,36 @@ export function loadConfig(): AppConfig {
       config.sonarr.cardUrl = config.sonarr.baseUrl;
     }
   }
+}
+
+export function loadConfig(): AppConfig {
+  const packageVersion = resolveVersion();
+  const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
+
+  const coreRuntime = loadCoreRuntimeConfig(packageVersion, publicBaseUrl);
+  const cacheConfig = loadCacheConfig();
+  const fileStreaming = loadFileStreamingConfig();
+  const kodi = loadKodiConfig();
+  const radarr = loadRadarrConfig();
+  const sonarr = loadSonarrConfig();
+  const traktSync = loadTraktSyncConfig();
+  const tmdb = loadTmdbConfig();
+
+  const config: AppConfig = {
+    appName: 'stremio-addarr',
+    version: packageVersion,
+    publicBaseUrl,
+    ...coreRuntime,
+    ...cacheConfig,
+    fileStreaming,
+    kodi,
+    radarr,
+    sonarr,
+    traktSync,
+    tmdb
+  };
+
+  normaliseEnabledServiceUrls(config);
 
   return config;
 }
