@@ -100,6 +100,22 @@ test('logger sanitizes api_key variant', () => {
   assert.equal(parsed['api_key'], '[redacted]');
 });
 
+test('logger sanitizes additional sensitive keys (secret, token, password)', () => {
+  const { writer, stdout } = makeCapture();
+  const logger = createLogger('info', writer);
+  logger.info('check', {
+    mySecret: 'foo',
+    accessToken: 'bar',
+    dbPassword: 'baz',
+    normalKey: 'ok'
+  });
+  const parsed = JSON.parse(stdout[0]) as Record<string, unknown>;
+  assert.equal(parsed['mySecret'], '[redacted]');
+  assert.equal(parsed['accessToken'], '[redacted]');
+  assert.equal(parsed['dbPassword'], '[redacted]');
+  assert.equal(parsed['normalKey'], 'ok');
+});
+
 test('logger sanitizes URLs with embedded credentials', () => {
   const { writer, stdout } = makeCapture();
   const logger = createLogger('info', writer);
