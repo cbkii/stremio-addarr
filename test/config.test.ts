@@ -434,14 +434,13 @@ test('trakt sync accepts explicit configuration', () => {
   assert.equal(config.traktSync.clientId, 'client-id');
 });
 
-test('trakt sync mins is clamped to 40 when env is <=40', () => {
+test('trakt sync fails validation when sync mins is < 40', () => {
   process.env.TRAKT_SYNC_ENABLED = 'true';
   process.env.TRAKT_SYNC_MINS = '1';
   process.env.TRAKT_CLIENT_ID = 'client-id';
   process.env.TRAKT_CLIENT_SECRET = 'client-secret';
   process.env.TRAKT_REFRESH_TOKEN = 'refresh-token';
-  const config = loadConfig();
-  assert.equal(config.traktSync.syncMins, 40);
+  assert.throws(() => loadConfig(), /TRAKT_SYNC_MINS must be at least 40/);
 });
 
 test('RADARR_TAGS and SONARR_TAGS parse empty correctly', () => {

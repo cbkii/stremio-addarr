@@ -524,10 +524,9 @@ function loadSonarrConfig(): AppConfig['sonarr'] {
 function loadTraktSyncConfig(): AppConfig['traktSync'] {
   const traktSyncEnabled = readBoolean('TRAKT_SYNC_ENABLED', false);
   const traktSyncMinsRaw = Math.floor(readNumber('TRAKT_SYNC_MINS', 360));
-  const traktSyncMins = traktSyncMinsRaw <= 40 ? 40 : traktSyncMinsRaw;
   const config = {
     enabled: traktSyncEnabled,
-    syncMins: traktSyncMins,
+    syncMins: traktSyncMinsRaw,
     apiBaseUrl: ensureHttpUrl('TRAKT_API_BASE_URL', readString('TRAKT_API_BASE_URL', 'https://api.trakt.tv')),
     clientId: readString('TRAKT_CLIENT_ID'),
     clientSecret: readString('TRAKT_CLIENT_SECRET'),
