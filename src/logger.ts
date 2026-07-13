@@ -22,10 +22,10 @@ export function createLogger(level: LogLevel, writer?: LogWriter) {
 
   function sanitize(extra?: Record<string, unknown>): Record<string, unknown> | undefined {
     if (!extra) return undefined;
+    const sensitiveKeys = ['apikey', 'api_key', 'secret', 'token', 'password'];
     return Object.fromEntries(
       Object.entries(extra).map(([key, value]) => {
         const normalized = key.toLowerCase();
-        const sensitiveKeys = ['apikey', 'api_key', 'secret', 'token', 'password'];
         if (sensitiveKeys.some(k => normalized.includes(k))) {
           return [key, '[redacted]'];
         }
