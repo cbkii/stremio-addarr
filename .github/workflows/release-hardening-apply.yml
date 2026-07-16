@@ -44,6 +44,19 @@ jobs:
         run: |
           set -o pipefail
           npm install --package-lock-only --ignore-scripts 2>&1 | tee dependency-refresh.log
+      - name: Install exact dependencies
+        run: npm ci
+      - name: Validate diff
+        run: git diff --check
+      - name: Run complete CI
+        run: |
+          set -o pipefail
+          npm run ci 2>&1 | tee ci.log
+      - name: Build release archive smoke test
+        run: |
+          set -o pipefail
+          npm run package:release 2>&1 | tee package-release.log
+          rm -rf release
       - name: Upload implementation diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -52,22 +65,14 @@ jobs:
           path: |
             release-hardening.log
             dependency-refresh.log
+            ci.log
+            package-release.log
             scripts/release-hardening-apply.mjs
           if-no-files-found: warn
-      - name: Install exact dependencies
-        run: npm ci
-      - name: Validate diff
-        run: git diff --check
-      - name: Run complete CI
-        run: npm run ci
-      - name: Build release archive smoke test
-        run: |
-          npm run package:release
-          rm -rf release
       - name: Commit validated implementation
         run: |
           rm -rf scripts/.release-hardening scripts/.release-hardening-gz scripts/.release-hardening-gz2 scripts/.release-hardening-gz-fixed
-          rm -f scripts/release-hardening-apply.mjs scripts/fix-release-hardening-patch.py release-hardening.log dependency-refresh.log
+          rm -f scripts/release-hardening-apply.mjs scripts/fix-release-hardening-patch.py release-hardening.log dependency-refresh.log ci.log package-release.log
           rm -f .github/workflows/release-hardening-apply.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
