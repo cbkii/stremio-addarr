@@ -110,6 +110,7 @@ During the guided `.env` review gate, ensure required values are set:
 HOST=127.0.0.1
 PORT=7010
 PUBLIC_BASE_URL=https://YOUR_HOSTNAME
+ADDON_ACCESS_TOKEN=replace-with-32-plus-url-safe-random-characters
 TARGET_CLIENT=android-tv
 GRACEFUL_SHUTDOWN_TIMEOUT_MS=10000
 FORCED_SHUTDOWN_EXIT_CODE=0
@@ -128,7 +129,7 @@ SONARR_QUALITY_PROFILE_ID=1
 SONARR_LANGUAGE_PROFILE_ID=1
 SONARR_SERIES_MONITOR=all
 
-CATALOG_PAGE_SIZE=35
+CATALOG_PAGE_SIZE=100
 RADARR_CATALOG_WATCHED_KEEP_COUNT=1
 CATALOG_CACHE_TTL_MS=5000
 CATALOG_CACHE_MAX_AGE_SEC=15
@@ -137,7 +138,7 @@ CATALOG_STALE_ERROR_SEC=120
 ```
 
 Notes:
-- `MANIFEST_LOGO_URL` defaults to `https://img.icons8.com/?size=100&id=43669&format=png&color=000000`. With this default, Stremio clients will fetch the logo from `img.icons8.com`, which can leak client IPs to that third party and makes logo availability depend on that external service. For privacy-sensitive deployments, set `MANIFEST_LOGO_URL=none` to hide the logo, or set `MANIFEST_LOGO_URL` to a self-hosted HTTPS logo URL (query parameters are allowed, e.g. `https://example.com/logo.png?v=2`).
+- `MANIFEST_LOGO_URL` defaults to `local`, serving the bundled logo from the add-on HTTPS origin. Set it to `none` to omit the logo, or to an explicit HTTPS URL when a separately hosted image is required.
 - `SONARR_SERIES_MONITOR` maps directly to Sonarr's `addOptions.monitor` field and accepts: `all`, `future`, `missing`, `existing`, `firstSeason`, `lastSeason`, `latestSeason`, `pilot`, `recent`, `monitorSpecials`, `unmonitorSpecials`, `none`, `skip`, `ep`, `epfuture`, or `epseason`.
 - `SONARR_SERIES_MONITOR` is parsed case-insensitively (`ALL`, `All`, `none` all work).
 - Episode-scoped custom values in `SONARR_SERIES_MONITOR`:
@@ -160,7 +161,7 @@ Notes:
 - `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
 
 Optional tuning:
-- `CATALOG_PAGE_SIZE` (default `35`, max effective `50`): how many cards each catalog page returns.
+- `CATALOG_PAGE_SIZE` is normalised to `100` to match Stremio pagination. Legacy lower values are accepted during upgrade but do not reduce the public page size.
 - `RADARR_CATALOG_WATCHED_KEEP_COUNT` (default `1`): how many watched movies remain visible in filtered Radarr catalog views.
 - `CATALOG_CACHE_TTL_MS` (default `5000`): short in-memory cache for merged Arr queue+history results and progressive Radarr watched-filter pagination state.
 - `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint sent to Stremio for catalog responses.

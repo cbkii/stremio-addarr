@@ -120,8 +120,8 @@ Tests use the server's existing request timeout and never return the submitted A
 The Overview page provides both:
 
 ```text
-stremio://YOUR_HOST/manifest.json
-https://YOUR_HOST/manifest.json
+stremio://YOUR_HOST/OPAQUE_INSTALL_TOKEN/manifest.json
+https://YOUR_HOST/OPAQUE_INSTALL_TOKEN/manifest.json
 ```
 
 The custom-protocol link returns to Stremio. The HTTPS URL is suitable for copying into Stremio manually when custom-protocol handling is unavailable.

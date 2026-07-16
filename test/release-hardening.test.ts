@@ -1,12 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp } from '../src/index.js';
+import { createApp, redactAddonRequestPath } from '../src/index.js';
 import { streamFromTile } from '../src/addon.js';
 import { buildActionToken, verifyActionToken } from '../src/lib/action-tokens.js';
 import { addonBasePath } from '../src/lib/addon-access.js';
 import { buildFileToken, verifyFileToken } from '../src/lib/file-tokens.js';
 import { SlidingWindowRateLimiter } from '../src/lib/rate-limiter.js';
 import { baseConfig, withServer } from './_helpers.js';
+
+test('request logging redacts the opaque add-on path token', () => {
+  assert.equal(
+    redactAddonRequestPath('/secret-install-token/stream/movie/tt123.json', '/secret-install-token'),
+    '/<protected>/stream/movie/tt123.json'
+  );
+  assert.equal(redactAddonRequestPath('/healthz', '/secret-install-token'), '/healthz');
+});
 
 test('stream adapter rejects protocol-invalid source-less streams', () => {
   assert.throws(() => streamFromTile({ name: 'status only' }), /without a Stremio stream source/);

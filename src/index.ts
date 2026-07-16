@@ -61,6 +61,12 @@ function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+export function redactAddonRequestPath(requestPath: string, addonPrefix: string): string {
+  return requestPath === addonPrefix || requestPath.startsWith(`${addonPrefix}/`)
+    ? `/<protected>${requestPath.slice(addonPrefix.length)}`
+    : requestPath;
+}
+
 export function createApp(config: AppConfig) {
   const getRouter = (sdk as { getRouter: (addonInterface: unknown) => import('express').RequestHandler }).getRouter;
   const logger = createLogger(config.logLevel);
@@ -121,7 +127,7 @@ export function createApp(config: AppConfig) {
       logger.info('request', {
         reqId,
         method: req.method,
-        path: req.path,
+        path: redactAddonRequestPath(req.path, addonPrefix),
         status: res.statusCode,
         durationMs: Date.now() - start
       });
