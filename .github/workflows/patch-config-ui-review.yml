@@ -24,33 +24,29 @@ jobs:
 
           source = Path('src/config-ui.ts')
           text = source.read_text()
+          changes = 0
 
-          replacements = {
-              """    const key = item.slice(0, separator).trim();
-    const value = item.slice(separator + 1).trim();
-    if (key) result.set(key, decodeURIComponent(value));""":
-              """    const key = item.slice(0, separator).trim();
-    const value = item.slice(separator + 1).trim();
-    if (!key) continue;
+          cookie_old = "if (key) result.set(key, decodeURIComponent(value));"
+          cookie_new = """if (!key) continue;
     try {
       result.set(key, decodeURIComponent(value));
     } catch {
       // A malformed user-controlled Cookie header must not crash the route.
       result.set(key, value);
-    }""",
-              """function normalizeTags(value: unknown, label: string): string {
-  const parts = Array.isArray(value)
-    ? value
-    : (typeof value === 'string' ? value.split(',') : []);
-  const tags = parts
-    .map((item) => typeof item === 'number' ? item : Number(String(item).trim()))
-    .filter((item) => Number.isFinite(item));
-  if (parts.length !== tags.length || tags.some((item) => !Number.isInteger(item) || item < 0)) {
-    throw new Error(`${label} must be a comma-separated list of non-negative integer IDs.`);
-  }
-  return tags.join(',');
-}""":
-              """function normalizeTags(value: unknown, label: string): string {
+    }"""
+          if cookie_old in text:
+              text = text.replace(cookie_old, cookie_new, 1)
+              changes += 1
+
+          start_marker = 'function normalizeTags(value: unknown, label: string): string {'
+          end_marker = '\n}\n\nfunction parseBoolean('
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('could not locate normalizeTags function boundaries')
+          current_tags = text[start:end + 2]
+          if "value.trim() === ''" not in current_tags:
+              replacement_tags = """function normalizeTags(value: unknown, label: string): string {
   if (value == null || (typeof value === 'string' && value.trim() === '')) return '';
   const parts = Array.isArray(value)
     ? value
@@ -63,15 +59,20 @@ jobs:
     throw new Error(`${label} must be a comma-separated list of non-negative integer IDs.`);
   }
   return tags.join(',');
-}""",
-              "const remote = req.ip ?? req.socket.remoteAddress ?? 'unknown';":
-              "const remote = req.ip ?? req.socket?.remoteAddress ?? 'unknown';",
-          }
+}"""
+              text = text[:start] + replacement_tags + text[end + 2:]
+              changes += 1
 
-          for old, new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f'missing expected source fragment: {old[:60]}')
-              text = text.replace(old, new)
+          remote_old = "const remote = req.ip ?? req.socket.remoteAddress ?? 'unknown';"
+          if remote_old in text:
+              text = text.replace(remote_old, "const remote = req.ip ?? req.socket?.remoteAddress ?? 'unknown';", 1)
+              changes += 1
+
+          if changes != 3:
+              Path('config-ui-patch-diagnostic.txt').write_text(
+                  f'expected 3 source changes but applied {changes}\n'
+              )
+              raise SystemExit(f'expected 3 source changes but applied {changes}')
 
           source.write_text(text)
           PY
