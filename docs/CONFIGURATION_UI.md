@@ -1,6 +1,6 @@
 # In-Stremio configuration UI
 
-When `CONFIG_UI_ENABLED=true`, `stremio-addarr` advertises Stremio's standard `configurable` behaviour hint. The **Configure** action opens:
+When `CONFIG_UI_ENABLED=true`, When `CONFIG_UI_ENABLED=true`, `stremio-addarr` advertises Stremio's standard `configurable` behaviour hint. The **Configure** action opens:
 
 ```text
 https://YOUR_PUBLIC_BASE_URL/configure
@@ -18,6 +18,7 @@ sudoedit /opt/stremio-addarr/.env
 ```
 
 ```dotenv
+CONFIG_UI_ENABLED=true
 CONFIG_UI_ENABLED=true
 CONFIG_UI_TOKEN=replace-with-the-generated-value
 CONFIG_UI_ENV_FILE=/opt/stremio-addarr/.env

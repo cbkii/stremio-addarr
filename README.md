@@ -326,7 +326,7 @@ Each HTTP request gets a unique `reqId`. Find the Stremio stream request and tra
 ```bash
 # Find the stream request for a specific title/id
 sudo journalctl -u stremio-addarr -n 500 --no-pager -o cat \
-  | jq 'select(.path and (.path | startswith("/stream/")))'
+  | jq 'select(.path and (.path | startswith("/<protected>/stream/")))'
 
 # Example output:
 # {"time":"...","level":"info","message":"request","reqId":"abc-123","method":"GET","path":"/<protected>/stream/movie/tt1234567","status":200,"durationMs":55}
