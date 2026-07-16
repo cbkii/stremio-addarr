@@ -47,6 +47,7 @@ replace_if_present('README.md', '$PUBLIC_BASE_URL/manifest.json', '$PUBLIC_BASE_
 replace_if_present('README.md', 'https://YOUR_HOSTNAME/manifest.json', 'https://YOUR_HOSTNAME/OPAQUE_INSTALL_TOKEN/manifest.json')
 replace_if_present('README.md', '"https://$PUBLIC_BASE_URL/status.json"', '"$PUBLIC_BASE_URL/status.json"')
 replace_if_present('README.md', '"path":"/stream/movie/tt1234567"', '"path":"/<protected>/stream/movie/tt1234567"')
+replace_if_present('README.md', 'startswith("/stream/")', 'startswith("/<protected>/stream/")')
 
 p = Path('docs/CONFIGURATION_UI.md')
 text = p.read_text()
