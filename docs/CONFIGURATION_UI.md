@@ -1,6 +1,6 @@
 # In-Stremio configuration UI
 
-`stremio-addarr` advertises Stremio's standard `configurable` behaviour hint. The **Configure** action opens:
+When `CONFIG_UI_ENABLED=true`, `stremio-addarr` advertises Stremio's standard `configurable` behaviour hint. The **Configure** action opens:
 
 ```text
 https://YOUR_PUBLIC_BASE_URL/configure
@@ -18,6 +18,7 @@ sudoedit /opt/stremio-addarr/.env
 ```
 
 ```dotenv
+CONFIG_UI_ENABLED=true
 CONFIG_UI_TOKEN=replace-with-the-generated-value
 CONFIG_UI_ENV_FILE=/opt/stremio-addarr/.env
 ```
@@ -28,7 +29,7 @@ Then restart:
 sudo systemctl restart stremio-addarr
 ```
 
-When `CONFIG_UI_TOKEN` is absent or shorter than 12 characters, `/configure` remains available but editing is disabled. Existing `.env` installations and manifest URLs continue to work.
+When `CONFIG_UI_ENABLED` is false, `/configure` and the Configure behaviour hint are not exposed. When enabled, `CONFIG_UI_TOKEN` must be at least 16 characters. Existing environment-managed installations remain supported, but release 1.6 requires reinstalling through the tokenised manifest URL.
 
 ## What the UI manages
 

@@ -22,7 +22,7 @@ This README is the **canonical install and upgrade guide**.
 - Stremio installs the add-on from:
 
 ```text
-https://YOUR_HOSTNAME/manifest.json
+https://YOUR_HOSTNAME/OPAQUE_INSTALL_TOKEN/manifest.json
 ```
 
 The hostname in all places must match exactly:
@@ -191,7 +191,7 @@ When finished, you must have:
 Exact URL to paste into Stremio:
 
 ```text
-$PUBLIC_BASE_URL/manifest.json
+$PUBLIC_BASE_URL/$ADDON_ACCESS_TOKEN/manifest.json
 ```
 
 ### Step 8 — Install in Stremio
@@ -200,7 +200,7 @@ On Stremio (Android TV):
 1. Open **Add-ons**.
 2. Open **Community Add-ons** (or search).
 3. Paste the manifest URL from Step 7:
-   - `https://YOUR_HOSTNAME/manifest.json`
+   - `https://YOUR_HOSTNAME/OPAQUE_INSTALL_TOKEN/manifest.json`
 4. Click **Install**.
 
 ---
@@ -237,7 +237,7 @@ If your hostname/TLS setup changed, re-run the hosting guide: [README_HOST.md](R
 sudo journalctl -u stremio-addarr -n 50 --no-pager
 curl -fsS http://127.0.0.1:7010/healthz
 source /opt/stremio-addarr/.env
-curl -fsS "https://$PUBLIC_BASE_URL/status.json"
+curl -fsS "$PUBLIC_BASE_URL/status.json"
 ```
 
 ---
@@ -250,7 +250,7 @@ All logs are structured JSON, emitted to **stdout** (info/debug/warn) and **stde
 Each line is a single JSON object with at minimum: `time`, `level`, `message`.
 
 ```json
-{"time":"2024-11-01T14:32:01.123Z","level":"info","message":"request","reqId":"a1b2c3d4-...","method":"GET","path":"/stream/movie/tt1234567","status":200,"durationMs":42}
+{"time":"2024-11-01T14:32:01.123Z","level":"info","message":"request","reqId":"a1b2c3d4-...","method":"GET","path":"/<protected>/stream/movie/tt1234567","status":200,"durationMs":42}
 {"time":"2024-11-01T14:32:01.081Z","level":"info","message":"radarr add success","imdbId":"tt1234567","title":"Example Movie","searchOnAdd":true}
 {"time":"2024-11-01T14:32:00.950Z","level":"debug","message":"arr response","service":"radarr","method":"GET","path":"/api/v3/movie","status":200,"durationMs":18}
 ```
@@ -329,7 +329,7 @@ sudo journalctl -u stremio-addarr -n 500 --no-pager -o cat \
   | jq 'select(.path and (.path | startswith("/stream/")))'
 
 # Example output:
-# {"time":"...","level":"info","message":"request","reqId":"abc-123","method":"GET","path":"/stream/movie/tt1234567","status":200,"durationMs":55}
+# {"time":"...","level":"info","message":"request","reqId":"abc-123","method":"GET","path":"/<protected>/stream/movie/tt1234567","status":200,"durationMs":55}
 # {"time":"...","level":"info","message":"stream handler complete","type":"movie","id":"tt1234567","tileCount":1,"durationMs":48}
 ```
 
@@ -424,7 +424,7 @@ Common causes and fixes:
 
 ```bash
 # Check PUBLIC_BASE_URL is HTTPS and reachable from outside
-curl -fsI https://YOUR_HOSTNAME/manifest.json
+curl -fsI https://YOUR_HOSTNAME/OPAQUE_INSTALL_TOKEN/manifest.json
 
 # Check addon status page
 curl -fsS https://YOUR_HOSTNAME/status.json | jq '{likelyAndroidTvCompatible, configIssues}'
