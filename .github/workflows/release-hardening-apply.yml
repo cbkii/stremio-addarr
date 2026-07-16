@@ -5,13 +5,13 @@ on:
     branches:
       - agent/release-hardening-v1.6.0
     paths:
-      - scripts/.release-hardening-gz/**
+      - scripts/.release-hardening-gz-fixed/**
       - .github/workflows/release-hardening-apply.yml
   pull_request:
     branches:
       - main
     paths:
-      - scripts/.release-hardening-gz/**
+      - scripts/.release-hardening-gz-fixed/**
       - .github/workflows/release-hardening-apply.yml
 
 permissions:
@@ -31,13 +31,7 @@ jobs:
           node-version: '20'
           cache: npm
       - name: Reassemble release hardening patch
-        run: cat scripts/.release-hardening-gz/part-* | base64 -d | gzip -d > scripts/release-hardening-apply.mjs
-      - name: Export reconstructed patch
-        uses: actions/upload-artifact@v4
-        with:
-          name: reconstructed-release-hardening-patch
-          path: scripts/release-hardening-apply.mjs
-          if-no-files-found: error
+        run: cat scripts/.release-hardening-gz-fixed/part-* | base64 -d | gzip -d > scripts/release-hardening-apply.mjs
       - name: Apply release hardening patch
         run: |
           set -o pipefail
@@ -54,6 +48,7 @@ jobs:
           path: |
             release-hardening.log
             dependency-refresh.log
+            scripts/release-hardening-apply.mjs
           if-no-files-found: warn
       - name: Install exact dependencies
         run: npm ci
@@ -67,7 +62,7 @@ jobs:
           rm -rf release
       - name: Commit validated implementation
         run: |
-          rm -rf scripts/.release-hardening scripts/.release-hardening-gz scripts/.release-hardening-gz2
+          rm -rf scripts/.release-hardening scripts/.release-hardening-gz scripts/.release-hardening-gz2 scripts/.release-hardening-gz-fixed
           rm -f scripts/release-hardening-apply.mjs release-hardening.log dependency-refresh.log
           rm -f .github/workflows/release-hardening-apply.yml
           git config user.name "github-actions[bot]"
