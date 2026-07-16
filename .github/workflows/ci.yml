@@ -35,3 +35,6 @@ jobs:
 
       - name: Full CI checks (typecheck, tests, build)
         run: npm run ci
+
+      - name: Release packaging smoke test
+        run: npm run package:release
