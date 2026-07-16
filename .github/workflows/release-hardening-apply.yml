@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/.release-hardening-gz/**
       - scripts/fix-release-hardening-patch.py
+      - scripts/post-release-hardening.py
       - .github/workflows/release-hardening-apply.yml
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - scripts/.release-hardening-gz/**
       - scripts/fix-release-hardening-patch.py
+      - scripts/post-release-hardening.py
       - .github/workflows/release-hardening-apply.yml
 
 permissions:
@@ -36,10 +38,11 @@ jobs:
         run: |
           cat scripts/.release-hardening-gz/part-* | base64 -d | gzip -d > scripts/release-hardening-apply.mjs
           python scripts/fix-release-hardening-patch.py
-      - name: Apply release hardening patch
+      - name: Apply release hardening and test migration
         run: |
           set -o pipefail
           node scripts/release-hardening-apply.mjs 2>&1 | tee release-hardening.log
+          python scripts/post-release-hardening.py
       - name: Refresh dependency lockfile
         run: |
           set -o pipefail
@@ -76,7 +79,7 @@ jobs:
       - name: Commit validated implementation
         run: |
           rm -rf scripts/.release-hardening scripts/.release-hardening-gz scripts/.release-hardening-gz2 scripts/.release-hardening-gz-fixed
-          rm -f scripts/release-hardening-apply.mjs scripts/fix-release-hardening-patch.py release-hardening.log dependency-refresh.log ci.log package-release.log diagnostics-snapshot.tar.gz
+          rm -f scripts/release-hardening-apply.mjs scripts/fix-release-hardening-patch.py scripts/post-release-hardening.py release-hardening.log dependency-refresh.log ci.log package-release.log diagnostics-snapshot.tar.gz
           rm -f .github/workflows/release-hardening-apply.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
