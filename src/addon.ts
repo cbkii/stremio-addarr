@@ -42,7 +42,10 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
     behaviorHints: {
-      configurable: false,
+      // Stremio opens `${addonOrigin}/configure` for configurable add-ons.
+      // Existing environment-configured installs remain valid, so configuration
+      // is offered but is not required before installation.
+      configurable: true,
       configurationRequired: false
     },
     ...(config.manifestLogoUrl ? { logo: config.manifestLogoUrl } : {})
