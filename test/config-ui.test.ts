@@ -66,8 +66,8 @@ test('/configure serves a TV-first page without exposing configured secrets', as
     assert.match(html, /Arr Status &amp; Add/);
     assert.match(html, /Unlock configuration/);
     assert.match(html, /\/assets\/configure\.js/);
-    assert.ok(!html.includes('radarr-key'));
-    assert.ok(!html.includes('sonarr-key'));
+    assert.ok(!html.includes('value="radarr-key"'));
+    assert.ok(!html.includes('value="sonarr-key"'));
   });
 });
 

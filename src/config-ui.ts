@@ -440,7 +440,7 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
   if (radarrEnabled && !radarrKeyConfigured) throw new Error('Radarr API key is required when Radarr is enabled.');
   set('RADARR_ENABLED', radarrEnabled);
   set('RADARR_BASE_URL', radarrBaseUrl);
-  set('RADARR_CARD_URL', normalizeHttpUrl(radarr['cardUrl'], 'Radarr card URL', true));
+  set('RADARR_CARD_URL', readStringField(radarr, 'cardUrl', config.radarr.cardUrl).replace(/\/+$/, ''));
   if (radarrNewKey) set('RADARR_API_KEY', radarrNewKey);
   set('RADARR_ROOT_FOLDER_PATH', radarrRoot);
   set('RADARR_QUALITY_PROFILE_ID', readIntegerField(radarr, 'qualityProfileId', config.radarr.qualityProfileId, 1));
@@ -469,7 +469,7 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
   const languageProfileId = languageProfileValue == null ? 0 : readIntegerField(sonarr, 'languageProfileId', 0, 0);
   set('SONARR_ENABLED', sonarrEnabled);
   set('SONARR_BASE_URL', sonarrBaseUrl);
-  set('SONARR_CARD_URL', normalizeHttpUrl(sonarr['cardUrl'], 'Sonarr card URL', true));
+  set('SONARR_CARD_URL', readStringField(sonarr, 'cardUrl', config.sonarr.cardUrl).replace(/\/+$/, ''));
   if (sonarrNewKey) set('SONARR_API_KEY', sonarrNewKey);
   set('SONARR_ROOT_FOLDER_PATH', sonarrRoot);
   set('SONARR_QUALITY_PROFILE_ID', readIntegerField(sonarr, 'qualityProfileId', config.sonarr.qualityProfileId, 1));
