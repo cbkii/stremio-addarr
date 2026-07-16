@@ -2,18 +2,12 @@ from pathlib import Path
 
 p = Path('scripts/release-hardening-apply.mjs')
 s = p.read_text()
-
-source = """`        return [{ name: '🛑❌\\nSonarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];`"""
-target = """`        return [{ name: '🛑❌\\nSonarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()), url: this.buildStatusStreamUrl(parsed), behaviorHints: { notWebReady: true } }];`"""
-old = f"""replaceAllExact('src/services/status.ts',
-{source},
-{target}, 2);"""
-new = f"""replaceAllExact('src/services/status.ts',
-{source},
-{target}, 1);
-replaceOnce('src/services/status.ts',
-{source},
-{target});"""
-if s.count(old) != 1:
-    raise SystemExit(f'Expected one Sonarr offline replacement block, found {s.count(old)}')
-p.write_text(s.replace(old, new, 1))
+marker = "replaceAllExact('src/services/status.ts',\n`        return [{ name: '🛑❌"
+start = s.index(marker, s.index('Sonarr DOWN') - 100)
+end = s.index('// Bound the in-process action queue', start)
+block = s[start:end]
+if 'Sonarr DOWN' not in block or not block.rstrip().endswith(', 2);'):
+    raise SystemExit('Unexpected Sonarr offline replacement block')
+first = block.replace(', 2);', ', 1);', 1)
+second = block.replace('replaceAllExact', 'replaceOnce', 1).replace(', 2);', ');', 1)
+p.write_text(s[:start] + first + second + s[end:])
