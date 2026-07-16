@@ -6,12 +6,14 @@ on:
       - agent/release-hardening-v1.6.0
     paths:
       - scripts/address-final-review.py
+      - scripts/address-review-test-followup.py
       - .github/workflows/address-final-review.yml
   pull_request:
     branches:
       - main
     paths:
       - scripts/address-final-review.py
+      - scripts/address-review-test-followup.py
       - .github/workflows/address-final-review.yml
 
 permissions:
@@ -31,7 +33,9 @@ jobs:
           node-version: '20'
           cache: npm
       - name: Apply fixes
-        run: python scripts/address-final-review.py
+        run: |
+          python scripts/address-final-review.py
+          python scripts/address-review-test-followup.py
       - name: Install
         run: npm ci
       - name: Validate
@@ -52,12 +56,13 @@ jobs:
             src/config-ui-core.ts
             assets/configure.js
             test/config-ui-hardening.test.ts
+            test/config-ui.test.ts
           if-no-files-found: warn
       - name: Commit validated fixes
         run: |
           rm -f final-review-ci.log final-review-package.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/config-ui-core.ts assets/configure.js test/config-ui-hardening.test.ts
+          git add src/config-ui-core.ts assets/configure.js test/config-ui-hardening.test.ts test/config-ui.test.ts
           git commit -m "harden configuration probes and control routes"
           git push origin HEAD:agent/release-hardening-v1.6.0
