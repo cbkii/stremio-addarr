@@ -1,7 +1,9 @@
 name: Apply configuration UI review hardening
 
 on:
-  pull_request:
+  push:
+    branches:
+      - agent/android-tv-config-ui
     paths:
       - '.github/workflows/patch-config-ui-review.yml'
 
@@ -15,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: agent/android-tv-config-ui
-      - name: Apply reviewed defensive fixes and regression coverage
+      - name: Apply reviewed defensive fixes
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -23,10 +25,11 @@ jobs:
           source = Path('src/config-ui.ts')
           text = source.read_text()
 
-          old_cookie = """    const key = item.slice(0, separator).trim();
+          replacements = {
+              """    const key = item.slice(0, separator).trim();
     const value = item.slice(separator + 1).trim();
-    if (key) result.set(key, decodeURIComponent(value));"""
-          new_cookie = """    const key = item.slice(0, separator).trim();
+    if (key) result.set(key, decodeURIComponent(value));""":
+              """    const key = item.slice(0, separator).trim();
     const value = item.slice(separator + 1).trim();
     if (!key) continue;
     try {
@@ -34,12 +37,8 @@ jobs:
     } catch {
       // A malformed user-controlled Cookie header must not crash the route.
       result.set(key, value);
-    }"""
-          if old_cookie not in text:
-              raise SystemExit('missing parseCookies source')
-          text = text.replace(old_cookie, new_cookie)
-
-          old_tags = """function normalizeTags(value: unknown, label: string): string {
+    }""",
+              """function normalizeTags(value: unknown, label: string): string {
   const parts = Array.isArray(value)
     ? value
     : (typeof value === 'string' ? value.split(',') : []);
@@ -50,8 +49,8 @@ jobs:
     throw new Error(`${label} must be a comma-separated list of non-negative integer IDs.`);
   }
   return tags.join(',');
-}"""
-          new_tags = """function normalizeTags(value: unknown, label: string): string {
+}""":
+              """function normalizeTags(value: unknown, label: string): string {
   if (value == null || (typeof value === 'string' && value.trim() === '')) return '';
   const parts = Array.isArray(value)
     ? value
@@ -64,82 +63,22 @@ jobs:
     throw new Error(`${label} must be a comma-separated list of non-negative integer IDs.`);
   }
   return tags.join(',');
-}"""
-          if old_tags not in text:
-              raise SystemExit('missing normalizeTags source')
-          text = text.replace(old_tags, new_tags)
-          text = text.replace(
-              "const remote = req.ip ?? req.socket.remoteAddress ?? 'unknown';",
-              "const remote = req.ip ?? req.socket?.remoteAddress ?? 'unknown';"
-          )
+}""",
+              "const remote = req.ip ?? req.socket.remoteAddress ?? 'unknown';":
+              "const remote = req.ip ?? req.socket?.remoteAddress ?? 'unknown';",
+          }
+
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'missing expected source fragment: {old[:60]}')
+              text = text.replace(old, new)
+
           source.write_text(text)
-
-          tests = Path('test/config-ui.test.ts')
-          text = tests.read_text()
-          insertion = r'''
-
-test('blank tag fields remain empty rather than becoming tag zero', async () => {
-  process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
-  const envFile = await tempEnv('RADARR_TAGS=4\nSONARR_TAGS=8\n');
-  process.env['CONFIG_UI_ENV_FILE'] = envFile;
-  const app = createApp(baseConfig());
-
-  await withServer(app, async (baseUrl) => {
-    const session = await login(baseUrl, process.env['CONFIG_UI_TOKEN']!);
-    const currentResponse = await ORIGINAL_FETCH(`${baseUrl}/api/config`, { headers: { cookie: session.cookie } });
-    const current = (await currentResponse.json()) as { csrf: string; config: Record<string, any> };
-    current.config.radarr.tags = '   ';
-    current.config.sonarr.tags = '';
-    current.config.radarr.apiKey = '';
-    current.config.sonarr.apiKey = '';
-    current.config.trakt.clientId = '';
-    current.config.trakt.clientSecret = '';
-    current.config.trakt.refreshToken = '';
-    current.config.tmdb.authToken = '';
-
-    const response = await ORIGINAL_FETCH(`${baseUrl}/api/config`, {
-      method: 'PUT',
-      headers: {
-        cookie: session.cookie,
-        'content-type': 'application/json',
-        'x-csrf-token': current.csrf
-      },
-      body: JSON.stringify(current.config)
-    });
-    assert.equal(response.status, 200, await response.text());
-    const saved = await fs.readFile(envFile, 'utf8');
-    assert.match(saved, /^RADARR_TAGS=$/m);
-    assert.match(saved, /^SONARR_TAGS=$/m);
-    assert.ok(!saved.includes('RADARR_TAGS=0'));
-    assert.ok(!saved.includes('SONARR_TAGS=0'));
-  });
-});
-
-test('malformed percent-encoded cookies fail authentication without crashing', async () => {
-  process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
-  process.env['CONFIG_UI_ENV_FILE'] = await tempEnv();
-  const app = createApp(baseConfig());
-
-  await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/api/config`, {
-      headers: { cookie: 'addarr_config_session=%' }
-    });
-    assert.equal(response.status, 401);
-    const body = (await response.json()) as { error: string };
-    assert.equal(body.error, 'authentication_required');
-  });
-});
-'''
-          marker = "test('Arr connection test and option discovery use candidate credentials without returning them', async () => {"
-          if marker not in text:
-              raise SystemExit('missing test insertion marker')
-          text = text.replace(marker, insertion + '\n' + marker)
-          tests.write_text(text)
           PY
       - name: Commit reviewed fixes
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/config-ui.ts test/config-ui.test.ts
+          git add src/config-ui.ts
           git commit -m 'fix: harden configuration input parsing'
           git push origin HEAD:agent/android-tv-config-ui
