@@ -5,6 +5,7 @@ import path from 'node:path';
 import express from 'express';
 import sdk from 'stremio-addon-sdk';
 import { loadConfig, validateConfig, type AppConfig } from './config.js';
+import { createConfigUiRouter } from './config-ui.js';
 import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
 import { parseStremioId } from './lib/stremio-ids.js';
@@ -32,7 +33,6 @@ function redactUrl(rawUrl: string): string {
     return '***';
   }
 }
-
 
 function resolveAssetsDir(): string {
   const candidates = [
@@ -144,6 +144,10 @@ export function createApp(config: AppConfig) {
     next();
   });
 
+  // Stremio's Configure action opens /configure on the add-on origin. Keep its
+  // authenticated API outside the wildcard-CORS Stremio route set.
+  app.use(createConfigUiRouter(config, statusService, logger));
+
   app.get('/health', async (_req, res) => {
     const serviceHealth = await statusService.getServiceHealth();
     res.json({
@@ -217,8 +221,7 @@ export function createApp(config: AppConfig) {
         detail: serviceHealth.sonarr.detail,
         baseUrl: config.sonarr.enabled ? redactUrl(config.sonarr.baseUrl) : null
       },
-      configIssues
-      ,
+      configIssues,
       watched: watchedLookup.getDiagnostics?.()
     });
   });
@@ -408,7 +411,8 @@ if (isEntryPoint) {
     logger.info('Server started', {
       host: config.host,
       port: config.port,
-      manifest: `${config.publicBaseUrl}/manifest.json`
+      manifest: `${config.publicBaseUrl}/manifest.json`,
+      configure: `${config.publicBaseUrl}/configure`
     });
   });
 
