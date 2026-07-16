@@ -1,0 +1,59 @@
+name: Validate final review fixes
+
+on:
+  push:
+    branches:
+      - agent/release-hardening-v1.6.0
+    paths:
+      - scripts/address-final-review.py
+      - .github/workflows/address-final-review.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/address-final-review.py
+      - .github/workflows/address-final-review.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/release-hardening-v1.6.0
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Apply fixes
+        run: python scripts/address-final-review.py
+      - name: Install
+        run: npm ci
+      - name: Validate
+        run: |
+          git diff --check
+          npm run ci
+          npm run package:release
+          rm -rf release
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-review-fix-diagnostics
+          path: |
+            src/config-ui-core.ts
+            assets/configure.js
+            test/config-ui-hardening.test.ts
+          if-no-files-found: error
+      - name: Commit validated fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/config-ui-core.ts assets/configure.js test/config-ui-hardening.test.ts
+          git commit -m "harden configuration probes and control routes"
+          git push origin HEAD:agent/release-hardening-v1.6.0
