@@ -1,0 +1,59 @@
+name: Apply config UI environment integrity hardening
+
+on:
+  push:
+    branches:
+      - agent/android-tv-config-ui
+    paths:
+      - '.github/workflows/patch-config-ui-env-integrity.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/android-tv-config-ui
+      - name: Patch duplicate-key handling and public HTML disclosure
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/config-ui.ts')
+          text = source.read_text()
+          replacements = {
+              "if (!match || !remaining.has(match[2])) return line;\n    const value = remaining.get(match[2]) ?? '';":
+                  "if (!match || !updates.has(match[2])) return line;\n    const value = updates.get(match[2]) ?? '';",
+              "<span>Writes <code>${escapeHtml(process.env['CONFIG_UI_ENV_FILE'] || path.resolve(process.cwd(), '.env'))}</code>; restart required.</span>":
+                  "<span>Writes the managed environment file atomically; restart required.</span>",
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'missing expected source text: {old}')
+              text = text.replace(old, new)
+          source.write_text(text)
+
+          tests = Path('test/config-ui.test.ts')
+          text = tests.read_text()
+          old = "const envFile = await tempEnv('# preserve me\\nPUBLIC_BASE_URL=https://example.invalid\\nUNRELATED_SETTING=keep-this\\n');"
+          new = "const envFile = await tempEnv('# preserve me\\nPUBLIC_BASE_URL=https://example.invalid\\nUNRELATED_SETTING=keep-this\\nRADARR_ENABLED=false\\nRADARR_ENABLED=false\\n');"
+          if old not in text:
+              raise SystemExit('missing expected save-test fixture')
+          text = text.replace(old, new)
+          marker = "assert.match(saved, /RADARR_ENABLED=true/);"
+          replacement = "assert.equal((saved.match(/^RADARR_ENABLED=true$/gm) ?? []).length, 2);\n    assert.ok(!saved.includes('RADARR_ENABLED=false'));"
+          if marker not in text:
+              raise SystemExit('missing expected RADARR_ENABLED assertion')
+          text = text.replace(marker, replacement)
+          tests.write_text(text)
+          PY
+      - name: Commit hardening
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/config-ui.ts test/config-ui.test.ts
+          git commit -m 'fix: harden atomic env updates with duplicate keys'
+          git push origin HEAD:agent/android-tv-config-ui
