@@ -1,6 +1,6 @@
 {
   "name": "stremio-addarr",
-  "version": "1.5.5",
+  "version": "1.6.0",
   "private": true,
   "description": "Self-hosted Stremio add-on that shows Arr status and adds movies or series to Radarr/Sonarr.",
   "type": "module",
@@ -16,8 +16,9 @@
     "test": "tsx --test test/*.test.ts",
     "test:catalog": "tsx --test --test-name-pattern=catalog test/catalog.test.ts test/addon.test.ts",
     "test:ci": "tsx --test --test-reporter=spec test/*.test.ts",
-    "ci": "npm run typecheck && npm run test:ci && npm run build",
-    "package:release": "node scripts/package-release.mjs"
+    "ci": "npm run typecheck && npm run test:ci && npm run build && npm run lint:manifest",
+    "package:release": "node scripts/package-release.mjs",
+    "lint:manifest": "node scripts/lint-manifest.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -26,7 +27,8 @@
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "^24.6.0",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.2",
+    "stremio-addon-linter": "github:Stremio/stremio-addon-linter#b791ab42c7ea3781829fe95ed3553bf2b902c3be"
   }
 }

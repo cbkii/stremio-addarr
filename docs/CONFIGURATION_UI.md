@@ -125,3 +125,20 @@ https://YOUR_HOST/manifest.json
 ```
 
 The custom-protocol link returns to Stremio. The HTTPS URL is suitable for copying into Stremio manually when custom-protocol handling is unavailable.
+
+## Protected installation URL
+
+Release 1.6 requires `ADDON_ACCESS_TOKEN`. The Stremio manifest is served below an opaque path such as:
+
+`https://addarr.example/your-random-token/manifest.json`
+
+The configuration UI displays the complete install URL only after administrator authentication. Health and logs redact this token. Rotate it by changing the environment variable, restarting the service, and reinstalling the add-on.
+
+## Docker permissions
+
+The container runs as UID/GID 10001. Create and secure the writable configuration path before startup:
+
+`install -d -m 0700 -o 10001 -g 10001 config`
+`install -m 0600 -o 10001 -g 10001 .env config/.env`
+
+Use `CONFIG_UI_RESTART_COMMAND` to display deployment-appropriate restart instructions.

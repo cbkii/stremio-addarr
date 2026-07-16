@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import type { AppConfig } from './config.js';
+import { addonManifestUrl, stremioInstallUrl } from './lib/addon-access.js';
 import type { Logger } from './logger.js';
 import type { ArrStatusService } from './services/status.js';
 
@@ -159,7 +160,8 @@ function parseCookies(req: Request): Map<string, string> {
     if (separator <= 0) continue;
     const key = item.slice(0, separator).trim();
     const value = item.slice(separator + 1).trim();
-    if (key) result.set(key, decodeURIComponent(value));
+    if (!key) continue;
+    try { result.set(key, decodeURIComponent(value)); } catch { /* ignore malformed cookies */ }
   }
   return result;
 }
@@ -168,11 +170,6 @@ function secureEqual(actual: string, expected: string): boolean {
   const actualHash = createHash('sha256').update(actual).digest();
   const expectedHash = createHash('sha256').update(expected).digest();
   return timingSafeEqual(actualHash, expectedHash);
-}
-
-function stremioManifestUrl(publicBaseUrl: string): string {
-  const manifest = new URL('/manifest.json', `${publicBaseUrl.replace(/\/+$/, '')}/`);
-  return `stremio://${manifest.host}${manifest.pathname}${manifest.search}`;
 }
 
 function normalizeHttpUrl(value: unknown, label: string, allowEmpty = false): string {
@@ -229,6 +226,7 @@ function readIntegerField(
 }
 
 function normalizeTags(value: unknown, label: string): string {
+  if (typeof value === 'string' && value.trim() === '') return '';
   const parts = Array.isArray(value)
     ? value
     : (typeof value === 'string' ? value.split(',') : []);
@@ -323,10 +321,17 @@ async function atomicWriteEnv(envFile: string, raw: string): Promise<void> {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    await fs.writeFile(temp, raw, { encoding: 'utf8', mode: 0o600 });
-    await fs.chmod(temp, 0o600);
+    const handle = await fs.open(temp, 'w', 0o600);
+    try {
+      await handle.writeFile(raw, { encoding: 'utf8' });
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     await fs.rename(temp, envFile);
     await fs.chmod(envFile, 0o600);
+    const directoryHandle = await fs.open(directory, 'r');
+    try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
   } finally {
     await fs.rm(temp, { force: true }).catch(() => undefined);
   }
@@ -344,8 +349,8 @@ function buildViewModel(config: AppConfig, pending: Map<string, string>) {
       name: config.appName,
       version: config.version,
       publicBaseUrl: config.publicBaseUrl,
-      manifestUrl: `${config.publicBaseUrl.replace(/\/+$/, '')}/manifest.json`,
-      stremioUrl: stremioManifestUrl(config.publicBaseUrl),
+      manifestUrl: addonManifestUrl(config),
+      stremioUrl: stremioInstallUrl(config),
       restartRequiredAfterSave: true
     },
     bootstrap: {
@@ -356,7 +361,7 @@ function buildViewModel(config: AppConfig, pending: Map<string, string>) {
       envFileManaged: true
     },
     catalog: {
-      pageSize: parseInteger(pending.get('CATALOG_PAGE_SIZE'), config.catalogPageSize),
+      pageSize: 100,
       watchedKeepCount: parseInteger(pending.get('RADARR_CATALOG_WATCHED_KEEP_COUNT'), config.radarrCatalogWatchedKeepCount)
     },
     radarr: {
@@ -428,7 +433,8 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
     updates.set(key, String(value));
   };
 
-  set('CATALOG_PAGE_SIZE', readIntegerField(catalog, 'pageSize', config.catalogPageSize, 1, 50));
+  readIntegerField(catalog, 'pageSize', 100, 100, 100);
+  set('CATALOG_PAGE_SIZE', 100);
   set('RADARR_CATALOG_WATCHED_KEEP_COUNT', readIntegerField(catalog, 'watchedKeepCount', config.radarrCatalogWatchedKeepCount, 0, 50));
 
   const radarrEnabled = readBooleanField(radarr, 'enabled', config.radarr.enabled);
@@ -554,7 +560,7 @@ function asObjectArray(value: unknown): Array<Record<string, unknown>> {
 }
 
 function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusService['getServiceHealth']>>, authEnabled: boolean): string {
-  const manifestUrl = `${config.publicBaseUrl.replace(/\/+$/, '')}/manifest.json`;
+  const manifestUrl = addonManifestUrl(config);
   const radarrState = health.radarr.reachable ? 'Connected' : (health.radarr.detail === 'disabled' ? 'Disabled' : 'Needs attention');
   const sonarrState = health.sonarr.reachable ? 'Connected' : (health.sonarr.detail === 'disabled' ? 'Disabled' : 'Needs attention');
   return `<!doctype html>
@@ -610,7 +616,7 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
           <h2>Install and status</h2>
           <p>Configuration changes are written atomically to the service environment file. Restart the service to activate them.</p>
           <div class="actions">
-            <a class="button primary" id="install-link" href="${escapeHtml(stremioManifestUrl(config.publicBaseUrl))}">Install in Stremio</a>
+            <a class="button primary" id="install-link" href="${escapeHtml(stremioInstallUrl(config))}">Install in Stremio</a>
             <button type="button" id="copy-manifest">Copy manifest URL</button>
             <button type="button" id="logout">Lock dashboard</button>
           </div>
@@ -667,7 +673,8 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
 
         <section class="panel config-section" data-page="catalog" hidden>
           <h2>Stremio catalogues</h2>
-          <label for="catalog-page-size">Cards per page</label><input id="catalog-page-size" type="number" min="1" max="50">
+          <label for="catalog-page-size">Cards per page</label><input id="catalog-page-size" type="number" min="100" max="100" value="100" readonly aria-describedby="catalog-page-help">
+          <p class="muted" id="catalog-page-help">Fixed at Stremio's 100-card pagination contract.</p>
           <label for="catalog-watched-keep">Recent watched movies kept visible</label><input id="catalog-watched-keep" type="number" min="0" max="50">
           <p class="muted">Use 0 to hide watched movies in filtered Radarr catalogue views.</p>
         </section>
@@ -720,7 +727,7 @@ export function createConfigUiRouter(
   const router = express.Router();
   const envFile = path.resolve(options.envFilePath ?? process.env['CONFIG_UI_ENV_FILE'] ?? path.resolve(process.cwd(), '.env'));
   const adminToken = (options.adminToken ?? process.env['CONFIG_UI_TOKEN'] ?? '').trim();
-  const authEnabled = adminToken.length >= 12;
+  const authEnabled = config.configUiEnabled && adminToken.length >= 16;
   const secureCookie = new URL(config.publicBaseUrl).protocol === 'https:';
   const expectedOrigin = new URL(config.publicBaseUrl).origin;
   const sessions = new Map<string, Session>();
@@ -793,8 +800,8 @@ export function createConfigUiRouter(
     res.json({
       authEnabled,
       version: config.version,
-      manifestUrl: `${config.publicBaseUrl.replace(/\/+$/, '')}/manifest.json`,
-      stremioUrl: stremioManifestUrl(config.publicBaseUrl)
+      manifestUrl: addonManifestUrl(config),
+      stremioUrl: stremioInstallUrl(config)
     });
   });
 
@@ -862,7 +869,7 @@ export function createConfigUiRouter(
       res.json({
         ok: true,
         restartRequired: true,
-        restartCommand: 'sudo systemctl restart stremio-addarr',
+        restartCommand: config.configUiRestartCommand,
         backupFile: `${envFile}.bak`
       });
     } catch (error) {

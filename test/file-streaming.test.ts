@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/index.js';
 import { buildFileToken } from '../src/lib/file-tokens.js';
-import { baseConfig, withServer } from './_helpers.js';
+import { addonUrl, baseConfig, signedFileUrl, withServer } from './_helpers.js';
 
 const ORIGINAL_FETCH = globalThis.fetch;
 const FILE_SECRET = 'test-streaming-secret-32-chars-xx';
@@ -22,7 +22,7 @@ test('file route returns 404 when FILE_STREAMING_ENABLED=false', async () => {
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/42?t=sometoken`);
+    const res = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/files/movie/42?exp=${Math.floor(Date.now() / 1000) + 3600}&t=sometoken`);
     assert.equal(res.status, 404);
   });
 });
@@ -37,7 +37,7 @@ test('file route returns 400 for unsupported kind', async () => {
 
   const token = buildFileToken(FILE_SECRET, 'movie', 42);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/unknown/42?t=${token}`);
+    const res = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/files/unknown/42?exp=${Math.floor(Date.now() / 1000) + 3600}&t=${token}`);
     assert.equal(res.status, 400);
   });
 });
@@ -49,7 +49,7 @@ test('file route returns 400 for non-integer fileId', async () => {
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/abc?t=sometoken`);
+    const res = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/files/movie/abc?exp=${Math.floor(Date.now() / 1000) + 3600}&t=sometoken`);
     assert.equal(res.status, 400);
   });
 });
@@ -61,7 +61,7 @@ test('file route returns 400 for zero fileId', async () => {
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/0?t=sometoken`);
+    const res = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/files/movie/0?exp=${Math.floor(Date.now() / 1000) + 3600}&t=sometoken`);
     assert.equal(res.status, 400);
   });
 });
@@ -75,7 +75,7 @@ test('file route returns 403 for missing token', async () => {
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/42`);
+    const res = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/files/movie/42?exp=${Math.floor(Date.now() / 1000) + 3600}`);
     assert.equal(res.status, 403);
   });
 });
@@ -89,7 +89,7 @@ test('file route returns 403 for wrong token', async () => {
   const correctToken = buildFileToken(FILE_SECRET, 'movie', 42);
   const wrongToken = correctToken.replace(/.$/, correctToken.endsWith('0') ? '1' : '0');
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/42?t=${wrongToken}`);
+    const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 42, { token: wrongToken }));
     assert.equal(res.status, 403);
   });
 });
@@ -102,7 +102,7 @@ test('file route returns 403 for token from different fileId', async () => {
 
   const tokenFor99 = buildFileToken(FILE_SECRET, 'movie', 99);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/42?t=${tokenFor99}`);
+    const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 42, { tokenFileId: 99 }));
     assert.equal(res.status, 403);
   });
 });
@@ -124,7 +124,7 @@ test('file route returns 404 when Arr API returns null path', async () => {
   const app = createApp(cfg);
   const token = buildFileToken(FILE_SECRET, 'movie', 42);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/42?t=${token}`);
+    const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 42));
     assert.equal(res.status, 404);
   });
 });
@@ -144,7 +144,7 @@ test('file route returns 404 when Arr API returns HTTP error', async () => {
   const app = createApp(cfg);
   const token = buildFileToken(FILE_SECRET, 'movie', 99);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/99?t=${token}`);
+    const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 99));
     assert.equal(res.status, 404);
   });
 });
@@ -175,7 +175,7 @@ test('file route returns 403 when Arr returns path outside root folder', async (
   const app = createApp(cfg);
   const token = buildFileToken(FILE_SECRET, 'movie', 7);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/7?t=${token}`);
+    const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 7));
     assert.equal(res.status, 403);
   });
 });
@@ -206,7 +206,7 @@ test('file route allows canonicalized path when configured root is a symlink (fa
     const app = createApp(cfg);
     const token = buildFileToken(FILE_SECRET, 'movie', 88);
     await withServer(app, async (baseUrl) => {
-      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/88?t=${token}`);
+      const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 88));
       assert.equal(res.status, 200);
       assert.equal(await res.text(), 'canonical-content');
     });
@@ -243,7 +243,7 @@ test('file route rejects symlink escape outside configured root', async () => {
     const app = createApp(cfg);
     const token = buildFileToken(FILE_SECRET, 'movie', 89);
     await withServer(app, async (baseUrl) => {
-      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/89?t=${token}`);
+      const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 89));
       assert.equal(res.status, 403);
     });
   } finally {
@@ -278,7 +278,7 @@ test('file route serves movie file for valid request', async () => {
     const app = createApp(cfg);
     const token = buildFileToken(FILE_SECRET, 'movie', 42);
     await withServer(app, async (baseUrl) => {
-      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/42?t=${token}`);
+      const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 42));
       assert.equal(res.status, 200);
       const body = await res.text();
       assert.equal(body, 'fake-video-content');
@@ -312,7 +312,7 @@ test('file route serves episode file for valid series request', async () => {
     const app = createApp(cfg);
     const token = buildFileToken(FILE_SECRET, 'series', 55);
     await withServer(app, async (baseUrl) => {
-      const res = await ORIGINAL_FETCH(`${baseUrl}/files/series/55?t=${token}`);
+      const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'series', 55));
       assert.equal(res.status, 200);
       const body = await res.text();
       assert.equal(body, 'fake-episode-content');
@@ -348,7 +348,7 @@ test('file route includes CORS header for cross-origin Stremio access', async ()
     const app = createApp(cfg);
     const token = buildFileToken(FILE_SECRET, 'movie', 1);
     await withServer(app, async (baseUrl) => {
-      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/1?t=${token}`);
+      const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 1));
       assert.equal(res.headers.get('access-control-allow-origin'), '*');
     });
   } finally {
@@ -380,7 +380,7 @@ test('file route supports HTTP range requests for large video seeking', async ()
     const app = createApp(cfg);
     const token = buildFileToken(FILE_SECRET, 'movie', 3);
     await withServer(app, async (baseUrl) => {
-      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/3?t=${token}`, {
+      const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 3), {
         headers: { Range: 'bytes=0-3' }
       });
       assert.equal(res.status, 206);
@@ -416,7 +416,7 @@ test('file route returns 429 after exceeding rate limit', async () => {
     // Send 121 requests — the 121st should be rate-limited (limit is 120/min).
     let lastStatus = 0;
     for (let i = 0; i <= 120; i++) {
-      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/5?t=${token}`);
+      const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 5));
       lastStatus = res.status;
     }
     assert.equal(lastStatus, 429, 'should return 429 after limit is exceeded');
@@ -441,14 +441,14 @@ test('file route rate limiting is keyed by forwarded client IP behind trusted lo
   await withServer(app, async (baseUrl) => {
     let statusIp1 = 0;
     for (let i = 0; i <= 120; i++) {
-      const res = await ORIGINAL_FETCH(`${baseUrl}/files/movie/5?t=${token}`, {
+      const res = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 5), {
         headers: { 'X-Forwarded-For': '203.0.113.1' }
       });
       statusIp1 = res.status;
     }
     assert.equal(statusIp1, 429, 'first forwarded client should be rate limited');
 
-    const resIp2 = await ORIGINAL_FETCH(`${baseUrl}/files/movie/5?t=${token}`, {
+    const resIp2 = await ORIGINAL_FETCH(signedFileUrl(baseUrl, cfg, 'movie', 5), {
       headers: { 'X-Forwarded-For': '203.0.113.2' }
     });
     assert.notEqual(resIp2.status, 429, 'different forwarded client should not share same limiter bucket');

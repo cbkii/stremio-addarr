@@ -10,6 +10,12 @@ const ORIGINAL_TOKEN = process.env['CONFIG_UI_TOKEN'];
 const ORIGINAL_ENV_FILE = process.env['CONFIG_UI_ENV_FILE'];
 const tempDirs: string[] = [];
 
+function uiConfig() {
+  const cfg = baseConfig();
+  cfg.configUiEnabled = true;
+  return cfg;
+}
+
 async function tempEnv(initial = ''): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'addarr-config-hardening-'));
   tempDirs.push(dir);
@@ -44,7 +50,7 @@ test('blank tag fields remain empty rather than becoming tag zero', async () => 
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   const envFile = await tempEnv('RADARR_TAGS=4\nSONARR_TAGS=8\n');
   process.env['CONFIG_UI_ENV_FILE'] = envFile;
-  const app = createApp(baseConfig());
+  const app = createApp(uiConfig());
 
   await withServer(app, async (baseUrl) => {
     const session = await login(baseUrl, process.env['CONFIG_UI_TOKEN']!);
@@ -83,7 +89,7 @@ test('blank tag fields remain empty rather than becoming tag zero', async () => 
 test('malformed percent-encoded cookies fail authentication without crashing', async () => {
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   process.env['CONFIG_UI_ENV_FILE'] = await tempEnv();
-  const app = createApp(baseConfig());
+  const app = createApp(uiConfig());
 
   await withServer(app, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/config`, {

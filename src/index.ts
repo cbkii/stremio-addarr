@@ -8,8 +8,11 @@ import { loadConfig, validateConfig, type AppConfig } from './config.js';
 import { createConfigUiRouter } from './config-ui.js';
 import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
+import { addonBasePath } from './lib/addon-access.js';
+import { verifyActionToken } from './lib/action-tokens.js';
 import { parseStremioId } from './lib/stremio-ids.js';
 import { verifyFileToken } from './lib/file-tokens.js';
+import { SlidingWindowRateLimiter } from './lib/rate-limiter.js';
 import type { ParsedStremioId } from './types.js';
 import { ActionOrchestrator } from './services/action-orchestrator.js';
 import { NoopWatchedLookup } from './services/watched.js';
@@ -68,7 +71,9 @@ export function createApp(config: AppConfig) {
     void watchedLookup.init();
   }
   const { addonInterface, statusService } = createAddonInterface(config, logger, { watchedLookup });
-  const actionOrchestrator = new ActionOrchestrator(statusService, logger);
+  const actionOrchestrator = new ActionOrchestrator(statusService, logger, config.actionQueueMax);
+  const addonPrefix = addonBasePath(config);
+  const actionRateLimiter = new SlidingWindowRateLimiter(config.actionRateLimitMax, 60_000);
 
   // Simple in-memory token-bucket rate limiter for the /files route.
   // Limits each IP to at most 120 file requests per minute to deter brute-force
@@ -126,12 +131,13 @@ export function createApp(config: AppConfig) {
 
   app.use((req, res, next) => {
     const isStremioRoute =
-      req.path === '/manifest.json' ||
-      req.path.startsWith('/stream/') ||
-      req.path.startsWith('/catalog/') ||
       req.path.startsWith('/assets/') ||
-      req.path.startsWith('/action/') ||
-      req.path.startsWith('/files/');
+      req.path === `${addonPrefix}/manifest.json` ||
+      req.path.startsWith(`${addonPrefix}/stream/`) ||
+      req.path.startsWith(`${addonPrefix}/catalog/`) ||
+      req.path.startsWith(`${addonPrefix}/status/`) ||
+      req.path.startsWith(`${addonPrefix}/action/`) ||
+      req.path.startsWith(`${addonPrefix}/files/`);
     if (isStremioRoute) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
@@ -146,7 +152,9 @@ export function createApp(config: AppConfig) {
 
   // Stremio's Configure action opens /configure on the add-on origin. Keep its
   // authenticated API outside the wildcard-CORS Stremio route set.
-  app.use(createConfigUiRouter(config, statusService, logger));
+  if (config.configUiEnabled) {
+    app.use(createConfigUiRouter(config, statusService, logger));
+  }
 
   app.get('/health', async (_req, res) => {
     const serviceHealth = await statusService.getServiceHealth();
@@ -154,7 +162,7 @@ export function createApp(config: AppConfig) {
       ok: true,
       name: config.appName,
       version: config.version,
-      manifest: `${config.publicBaseUrl}/manifest.json`,
+      manifest: `${config.publicBaseUrl}/<protected>/manifest.json`,
       services: serviceHealth,
       watched: watchedLookup.getDiagnostics?.()
     });
@@ -237,7 +245,13 @@ export function createApp(config: AppConfig) {
     res.status(202).json({ ok: true, watched: watchedLookup.getDiagnostics?.() });
   });
 
-  app.get('/action/:action/:kind/:encodedId', (req, res) => {
+  app.get(`${addonPrefix}/status/:kind/:encodedId.m3u8`, (_req, res) => {
+    res.type('application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(EMPTY_HLS);
+  });
+
+  app.get(`${addonPrefix}/action/:action/:kind/:encodedId`, (req, res) => {
     const action = req.params.action;
     const kind = req.params.kind;
     const encodedId = req.params.encodedId;
@@ -259,9 +273,29 @@ export function createApp(config: AppConfig) {
       return;
     }
 
+    const expiresAtSec = Number(req.query['exp']);
+    const signature = typeof req.query['sig'] === 'string' ? req.query['sig'] : '';
+    let decodedId: string;
+    try {
+      decodedId = decodeURIComponent(encodedId);
+    } catch {
+      res.status(400).send(EMPTY_HLS);
+      return;
+    }
+    if (!verifyActionToken(config.addonAccessToken, action, kind, decodedId, expiresAtSec, signature)) {
+      logger.warn('Action request signature rejected', { reqId, action, kind });
+      res.status(403).send(EMPTY_HLS);
+      return;
+    }
+    const clientIp = (req.ips.length > 0 ? req.ips[0] : req.ip) ?? req.socket.remoteAddress ?? 'unknown';
+    if (actionRateLimiter.isLimited(clientIp)) {
+      res.status(429).send(EMPTY_HLS);
+      return;
+    }
+
     let parsed: ParsedStremioId;
     try {
-      parsed = parseStremioId(kind, decodeURIComponent(encodedId));
+      parsed = parseStremioId(kind, decodedId);
     } catch (error) {
       logger.error('Action id parse error', {
         reqId,
@@ -274,15 +308,16 @@ export function createApp(config: AppConfig) {
       return;
     }
 
-    // Respond immediately so Stremio's player is never blocked waiting on Arr
-    // API calls. The trigger runs fire-and-forget; even if Stremio drops the
-    // connection, the add/search operations still complete on the server.
+    const jobId = actionOrchestrator.enqueue(action, parsed, reqId);
+    if (!jobId) {
+      res.status(429).send(EMPTY_HLS);
+      return;
+    }
+    // Respond immediately so Stremio's player is never blocked waiting on Arr.
     res.send(EMPTY_HLS);
-
-    actionOrchestrator.enqueue(action, parsed, reqId);
   });
 
-  app.get('/files/:kind/:fileId', async (req, res) => {
+  app.get(`${addonPrefix}/files/:kind/:fileId`, async (req, res) => {
     const reqId = typeof res.locals['reqId'] === 'string' ? res.locals['reqId'] : undefined;
 
     if (!config.fileStreaming.enabled) {
@@ -298,6 +333,7 @@ export function createApp(config: AppConfig) {
 
     const { kind, fileId: fileIdRaw } = req.params;
     const token = typeof req.query['t'] === 'string' ? req.query['t'] : '';
+    const expiresAtSec = Number(req.query['exp']);
 
     if (kind !== 'movie' && kind !== 'series') {
       res.status(400).end();
@@ -310,7 +346,7 @@ export function createApp(config: AppConfig) {
       return;
     }
 
-    if (!verifyFileToken(config.fileStreaming.secret, kind, fileId, token)) {
+    if (!verifyFileToken(config.fileStreaming.secret, kind, fileId, expiresAtSec, token)) {
       logger.warn('File streaming: invalid token', { reqId, kind, fileId });
       res.status(403).end();
       return;
@@ -378,7 +414,7 @@ export function createApp(config: AppConfig) {
     res.type('text/plain').send('stremio-addarr ok\n');
   });
 
-  app.use('/', getRouter(addonInterface));
+  app.use(addonPrefix, getRouter(addonInterface));
 
   return app;
 }
@@ -411,8 +447,8 @@ if (isEntryPoint) {
     logger.info('Server started', {
       host: config.host,
       port: config.port,
-      manifest: `${config.publicBaseUrl}/manifest.json`,
-      configure: `${config.publicBaseUrl}/configure`
+      manifest: `${config.publicBaseUrl}/<protected>/manifest.json`,
+      configure: config.configUiEnabled ? `${config.publicBaseUrl}/configure` : 'disabled'
     });
   });
 

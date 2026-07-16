@@ -53,7 +53,7 @@ function populate(config) {
   currentConfig = config;
   const { catalog, radarr, sonarr, playback, trakt, tmdb } = config;
 
-  byId('catalog-page-size').value = catalog.pageSize;
+  byId('catalog-page-size').value = 100;
   byId('catalog-watched-keep').value = catalog.watchedKeepCount;
 
   byId('radarr-enabled').checked = radarr.enabled;
@@ -120,7 +120,7 @@ function readNumber(id) {
 function collect() {
   return {
     catalog: {
-      pageSize: readNumber('catalog-page-size'),
+      pageSize: 100,
       watchedKeepCount: readNumber('catalog-watched-keep')
     },
     radarr: {
@@ -317,3 +317,31 @@ document.addEventListener('keydown', (event) => {
 });
 
 loadConfiguration();
+
+function moveTvFocus(direction) {
+  const focusable = [...document.querySelectorAll('button:not([hidden]), a[href]:not([hidden]), input:not([hidden]):not([disabled]), select:not([hidden]):not([disabled]), summary')]
+    .filter((element) => element.getClientRects().length > 0);
+  const current = document.activeElement;
+  if (!(current instanceof HTMLElement) || !focusable.includes(current)) return;
+  const rect = current.getBoundingClientRect();
+  const originX = rect.left + rect.width / 2;
+  const originY = rect.top + rect.height / 2;
+  const candidates = focusable.filter((candidate) => candidate !== current).map((candidate) => {
+    const box = candidate.getBoundingClientRect();
+    const dx = box.left + box.width / 2 - originX;
+    const dy = box.top + box.height / 2 - originY;
+    const primary = direction === 'left' ? -dx : direction === 'right' ? dx : direction === 'up' ? -dy : dy;
+    const cross = direction === 'left' || direction === 'right' ? Math.abs(dy) : Math.abs(dx);
+    return { candidate, primary, score: primary * primary + cross * cross * 2 };
+  }).filter((entry) => entry.primary > 4).sort((a, b) => a.score - b.score);
+  candidates[0]?.candidate.focus();
+}
+
+document.addEventListener('keydown', (event) => {
+  const direction = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[event.key];
+  if (!direction) return;
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement && ['text', 'password', 'number'].includes(active.type)) return;
+  event.preventDefault();
+  moveTvFocus(direction);
+});

@@ -10,6 +10,13 @@ export interface AppConfig {
   host: string;
   port: number;
   publicBaseUrl: string;
+  /** Opaque URL-safe token embedded in the installed Stremio repository path. */
+  addonAccessToken: string;
+  actionTokenTtlSec: number;
+  actionRateLimitMax: number;
+  actionQueueMax: number;
+  configUiEnabled: boolean;
+  configUiRestartCommand: string;
   manifestLogoUrl: string;
   targetClient: 'android-tv' | 'generic';
   timeZone: string;
@@ -36,6 +43,7 @@ export interface AppConfig {
   fileStreaming: {
     enabled: boolean;
     secret: string;
+    tokenTtlSec: number;
     playbackMode: 'direct' | 'kodi';
   };
   kodi: {
@@ -331,7 +339,9 @@ function resolveVersion(): string {
 }
 
 
-function loadCoreRuntimeConfig(packageVersion: string, publicBaseUrl: string) {
+function loadCoreRuntimeConfig(packageVersion: string, publicBaseUrl: string): Pick<AppConfig,
+  'host' | 'port' | 'manifestLogoUrl' | 'targetClient' | 'timeZone' | 'requestTimeoutMs' |
+  'gracefulShutdownTimeoutMs' | 'forcedShutdownExitCode' | 'logLevel'> {
   const host = readString('HOST', '127.0.0.1');
   const port = readNumber('PORT', 7010);
   const manifestLogoEnv = readString('MANIFEST_LOGO_URL', 'local');
@@ -370,12 +380,21 @@ function loadCoreRuntimeConfig(packageVersion: string, publicBaseUrl: string) {
   };
 }
 
-function loadCacheConfig() {
+function loadCacheConfig(): Pick<AppConfig,
+  'statusCacheTtlMs' | 'serviceHealthCacheTtlMs' | 'streamCacheMaxAgeSec' | 'streamStaleRevalidateSec' |
+  'catalogPageSize' | 'radarrCatalogWatchedKeepCount' | 'catalogCacheTtlMs' | 'catalogCacheMaxAgeSec' |
+  'catalogStaleRevalidateSec' | 'catalogStaleErrorSec'> {
   const statusCacheTtlMs = readNumber('STATUS_CACHE_TTL_MS', 30000);
   const serviceHealthCacheTtlMs = readNumber('SERVICE_HEALTH_CACHE_TTL_MS', 10000);
   const streamCacheMaxAgeSec = readNumber('STREAM_CACHE_MAX_AGE', 2);
   const streamStaleRevalidateSec = readNumber('STREAM_STALE_REVALIDATE', 5);
-  const catalogPageSize = readNumber('CATALOG_PAGE_SIZE', 35);
+  const requestedCatalogPageSize = readNumber('CATALOG_PAGE_SIZE', 100);
+  if (!Number.isInteger(requestedCatalogPageSize) || requestedCatalogPageSize <= 0) {
+    throw new Error('CATALOG_PAGE_SIZE must be a positive integer.');
+  }
+  // Stremio requests pagination in 100-item steps and treats shorter pages as end-of-catalog.
+  // Normalise legacy values instead of breaking upgrades from earlier 35/50-card defaults.
+  const catalogPageSize = 100;
   const radarrCatalogWatchedKeepCount = readNumber('RADARR_CATALOG_WATCHED_KEEP_COUNT', 1);
   const catalogCacheTtlMs = readNumber('CATALOG_CACHE_TTL_MS', 5000);
   const catalogCacheMaxAgeSec = readNumber('CATALOG_CACHE_MAX_AGE_SEC', 15);
@@ -389,9 +408,6 @@ function loadCacheConfig() {
   if (streamCacheMaxAgeSec < 0) throw new Error('STREAM_CACHE_MAX_AGE must be at least 0.');
   if (streamStaleRevalidateSec < 0) {
     throw new Error('STREAM_STALE_REVALIDATE must be at least 0.');
-  }
-  if (catalogPageSize <= 0) {
-    throw new Error('CATALOG_PAGE_SIZE must be greater than 0.');
   }
   if (!Number.isInteger(radarrCatalogWatchedKeepCount) || radarrCatalogWatchedKeepCount < 0) {
     throw new Error('RADARR_CATALOG_WATCHED_KEEP_COUNT must be an integer greater than or equal to 0.');
@@ -426,6 +442,10 @@ function loadCacheConfig() {
 function loadFileStreamingConfig(): AppConfig['fileStreaming'] {
   const fileStreamingEnabled = readBoolean('FILE_STREAMING_ENABLED', false);
   const fileStreamingSecret = readString('FILE_STREAMING_SECRET');
+  const tokenTtlSec = Math.floor(readNumber('FILE_STREAM_TOKEN_TTL_SEC', 3600));
+  if (tokenTtlSec < 60 || tokenTtlSec > 86_400) {
+    throw new Error('FILE_STREAM_TOKEN_TTL_SEC must be between 60 and 86400.');
+  }
   const fileStreamingPlaybackMode = parseFileStreamingPlaybackMode(
     readString('FILE_STREAMING_PLAYBACK_MODE', fileStreamingEnabled ? 'direct' : 'kodi')
   );
@@ -435,8 +455,33 @@ function loadFileStreamingConfig(): AppConfig['fileStreaming'] {
   return {
     enabled: fileStreamingEnabled,
     secret: fileStreamingSecret,
+    tokenTtlSec,
     playbackMode: fileStreamingPlaybackMode
   };
+}
+
+function loadAccessConfig(): Pick<AppConfig, 'addonAccessToken' | 'actionTokenTtlSec' | 'actionRateLimitMax' | 'actionQueueMax'> {
+  const addonAccessToken = readRequiredString('ADDON_ACCESS_TOKEN');
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(addonAccessToken)) {
+    throw new Error('ADDON_ACCESS_TOKEN must be 32-128 URL-safe characters (letters, numbers, _ or -).');
+  }
+  const actionTokenTtlSec = Math.floor(readNumber('ACTION_TOKEN_TTL_SEC', 300));
+  const actionRateLimitMax = Math.floor(readNumber('ACTION_RATE_LIMIT_MAX', 20));
+  const actionQueueMax = Math.floor(readNumber('ACTION_QUEUE_MAX', 100));
+  if (actionTokenTtlSec < 60 || actionTokenTtlSec > 3600) throw new Error('ACTION_TOKEN_TTL_SEC must be between 60 and 3600.');
+  if (actionRateLimitMax < 1 || actionRateLimitMax > 1000) throw new Error('ACTION_RATE_LIMIT_MAX must be between 1 and 1000.');
+  if (actionQueueMax < 1 || actionQueueMax > 1000) throw new Error('ACTION_QUEUE_MAX must be between 1 and 1000.');
+  return { addonAccessToken, actionTokenTtlSec, actionRateLimitMax, actionQueueMax };
+}
+
+function loadConfigUiConfig(): Pick<AppConfig, 'configUiEnabled' | 'configUiRestartCommand'> {
+  const configUiEnabled = readBoolean('CONFIG_UI_ENABLED', false);
+  const token = readString('CONFIG_UI_TOKEN');
+  if (configUiEnabled && token.length < 16) {
+    throw new Error('CONFIG_UI_TOKEN must be at least 16 characters when CONFIG_UI_ENABLED=true.');
+  }
+  const configUiRestartCommand = readString('CONFIG_UI_RESTART_COMMAND', 'sudo systemctl restart stremio-addarr');
+  return { configUiEnabled, configUiRestartCommand };
 }
 
 function loadKodiConfig(): AppConfig['kodi'] {
@@ -577,6 +622,8 @@ export function loadConfig(): AppConfig {
   const publicBaseUrl = ensureHttpUrl('PUBLIC_BASE_URL', readRequiredString('PUBLIC_BASE_URL'));
 
   const coreRuntime = loadCoreRuntimeConfig(packageVersion, publicBaseUrl);
+  const accessConfig = loadAccessConfig();
+  const configUiConfig = loadConfigUiConfig();
   const cacheConfig = loadCacheConfig();
   const fileStreaming = loadFileStreamingConfig();
   const kodi = loadKodiConfig();
@@ -590,6 +637,8 @@ export function loadConfig(): AppConfig {
     version: packageVersion,
     publicBaseUrl,
     ...coreRuntime,
+    ...accessConfig,
+    ...configUiConfig,
     ...cacheConfig,
     fileStreaming,
     kodi,

@@ -4,12 +4,18 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/index.js';
-import { baseConfig, withServer } from './_helpers.js';
+import { addonUrl, baseConfig, withServer } from './_helpers.js';
 
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_TOKEN = process.env['CONFIG_UI_TOKEN'];
 const ORIGINAL_ENV_FILE = process.env['CONFIG_UI_ENV_FILE'];
 const tempDirs: string[] = [];
+
+function uiConfig() {
+  const cfg = baseConfig();
+  cfg.configUiEnabled = true;
+  return cfg;
+}
 
 async function tempEnv(initial = '# operator-owned comment\nPUBLIC_BASE_URL=https://example.invalid\n'): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'addarr-config-ui-'));
@@ -43,9 +49,10 @@ test.afterEach(async () => {
 });
 
 test('manifest advertises Stremio configuration without making it mandatory', async () => {
-  const app = createApp(baseConfig());
+  const cfg = uiConfig();
+  const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/manifest.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/manifest.json`);
     const manifest = (await response.json()) as { behaviorHints?: { configurable?: boolean; configurationRequired?: boolean } };
     assert.equal(response.status, 200);
     assert.equal(manifest.behaviorHints?.configurable, true);
@@ -56,7 +63,7 @@ test('manifest advertises Stremio configuration without making it mandatory', as
 test('/configure serves a TV-first page without exposing configured secrets', async () => {
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   process.env['CONFIG_UI_ENV_FILE'] = await tempEnv();
-  const app = createApp(baseConfig());
+  const app = createApp(uiConfig());
 
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${baseUrl}/configure`);
@@ -74,7 +81,7 @@ test('/configure serves a TV-first page without exposing configured secrets', as
 test('configuration API requires authentication and rejects a wrong token', async () => {
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   process.env['CONFIG_UI_ENV_FILE'] = await tempEnv();
-  const app = createApp(baseConfig());
+  const app = createApp(uiConfig());
 
   await withServer(app, async (baseUrl) => {
     const unauthenticated = await ORIGINAL_FETCH(`${baseUrl}/api/config`);
@@ -92,7 +99,7 @@ test('configuration API requires authentication and rejects a wrong token', asyn
 test('authenticated configuration response is redacted and reports secret presence only', async () => {
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   process.env['CONFIG_UI_ENV_FILE'] = await tempEnv('RADARR_API_KEY=persisted-secret\nSONARR_API_KEY=another-secret\n');
-  const cfg = baseConfig();
+  const cfg = uiConfig();
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
@@ -113,7 +120,7 @@ test('save validates and atomically updates only managed environment keys', asyn
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   const envFile = await tempEnv('# preserve me\nPUBLIC_BASE_URL=https://example.invalid\nUNRELATED_SETTING=keep-this\nRADARR_ENABLED=false\nRADARR_ENABLED=false\n');
   process.env['CONFIG_UI_ENV_FILE'] = envFile;
-  const cfg = baseConfig();
+  const cfg = uiConfig();
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
@@ -173,7 +180,7 @@ test('save validates and atomically updates only managed environment keys', asyn
 test('save requires CSRF token', async () => {
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   process.env['CONFIG_UI_ENV_FILE'] = await tempEnv();
-  const app = createApp(baseConfig());
+  const app = createApp(uiConfig());
 
   await withServer(app, async (baseUrl) => {
     const session = await login(baseUrl, process.env['CONFIG_UI_TOKEN']!);
@@ -189,7 +196,7 @@ test('save requires CSRF token', async () => {
 test('Arr connection test and option discovery use candidate credentials without returning them', async () => {
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   process.env['CONFIG_UI_ENV_FILE'] = await tempEnv();
-  const cfg = baseConfig();
+  const cfg = uiConfig();
   const seenKeys: string[] = [];
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
