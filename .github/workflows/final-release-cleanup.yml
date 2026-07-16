@@ -41,3 +41,5 @@ jobs:
           git add src/index.ts test/release-hardening.test.ts README.md docs/CONFIGURATION_UI.md
           git commit -m "redact install tokens and finalise v1.6 documentation"
           git push origin HEAD:agent/release-hardening-v1.6.0
+
+# This temporary workflow is removed after its validated source commit lands.
