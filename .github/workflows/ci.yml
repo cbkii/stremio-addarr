@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, agent/android-tv-config-ui]
+    branches: [main]
   pull_request:
 
 # Cancel in-progress CI runs for the same branch/PR when a new commit arrives.
@@ -11,86 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-config-review:
-    if: github.event_name == 'push' && github.ref_name == 'agent/android-tv-config-ui'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout feature branch
-        uses: actions/checkout@v4
-        with:
-          ref: agent/android-tv-config-ui
-      - name: Apply reviewed defensive fixes
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          source = Path('src/config-ui.ts')
-          text = source.read_text()
-          changes = 0
-
-          cookie_old = "if (key) result.set(key, decodeURIComponent(value));"
-          cookie_new = """if (!key) continue;
-    try {
-      result.set(key, decodeURIComponent(value));
-    } catch {
-      // A malformed user-controlled Cookie header must not crash the route.
-      result.set(key, value);
-    }"""
-          if cookie_old in text:
-              text = text.replace(cookie_old, cookie_new, 1)
-              changes += 1
-
-          start_marker = 'function normalizeTags(value: unknown, label: string): string {'
-          end_marker = '\n}\n\nfunction parseBoolean('
-          start = text.find(start_marker)
-          end = text.find(end_marker, start)
-          if start < 0 or end < 0:
-              raise SystemExit('could not locate normalizeTags function boundaries')
-          current_tags = text[start:end + 2]
-          if "value.trim() === ''" not in current_tags:
-              replacement_tags = """function normalizeTags(value: unknown, label: string): string {
-  if (value == null || (typeof value === 'string' && value.trim() === '')) return '';
-  const parts = Array.isArray(value)
-    ? value
-    : (typeof value === 'string' ? value.split(',') : []);
-  const cleanedParts = parts
-    .map((item) => String(item).trim())
-    .filter(Boolean);
-  const tags = cleanedParts.map((item) => Number(item));
-  if (cleanedParts.length !== tags.length || tags.some((item) => !Number.isInteger(item) || item < 0)) {
-    throw new Error(`${label} must be a comma-separated list of non-negative integer IDs.`);
-  }
-  return tags.join(',');
-}"""
-              text = text[:start] + replacement_tags + text[end + 2:]
-              changes += 1
-
-          remote_old = "const remote = req.ip ?? req.socket.remoteAddress ?? 'unknown';"
-          if remote_old in text:
-              text = text.replace(remote_old, "const remote = req.ip ?? req.socket?.remoteAddress ?? 'unknown';", 1)
-              changes += 1
-
-          source.write_text(text)
-          Path('.config-review-change-count').write_text(str(changes))
-          PY
-      - name: Commit reviewed fixes when needed
-        run: |
-          changes=$(cat .config-review-change-count)
-          rm -f .config-review-change-count
-          if [ "$changes" = "0" ]; then
-            echo 'Reviewed fixes already applied.'
-            exit 0
-          fi
-          test "$changes" = "3"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/config-ui.ts
-          git commit -m 'fix: harden configuration input parsing'
-          git push origin HEAD:agent/android-tv-config-ui
-
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
