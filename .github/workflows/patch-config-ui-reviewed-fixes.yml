@@ -1,0 +1,76 @@
+name: Apply reviewed configuration hardening
+
+on:
+  push:
+    branches:
+      - agent/android-tv-config-ui
+    paths:
+      - '.github/workflows/patch-config-ui-reviewed-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/android-tv-config-ui
+      - name: Apply reviewed defensive fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/config-ui.ts')
+          text = source.read_text()
+          changes = 0
+
+          cookie_old = "if (key) result.set(key, decodeURIComponent(value));"
+          if cookie_old in text:
+              text = text.replace(cookie_old, """if (!key) continue;
+    try {
+      result.set(key, decodeURIComponent(value));
+    } catch {
+      // A malformed user-controlled Cookie header must not crash the route.
+      result.set(key, value);
+    }""", 1)
+              changes += 1
+
+          start = text.index('function normalizeTags(value: unknown, label: string): string {')
+          end = text.index('\n}\n\nfunction parseBoolean(', start) + 2
+          current_tags = text[start:end]
+          if "value.trim() === ''" not in current_tags:
+              replacement = """function normalizeTags(value: unknown, label: string): string {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return '';
+  const parts = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' ? value.split(',') : []);
+  const cleanedParts = parts
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+  const tags = cleanedParts.map((item) => Number(item));
+  if (cleanedParts.length !== tags.length || tags.some((item) => !Number.isInteger(item) || item < 0)) {
+    throw new Error(`${label} must be a comma-separated list of non-negative integer IDs.`);
+  }
+  return tags.join(',');
+}"""
+              text = text[:start] + replacement + text[end:]
+              changes += 1
+
+          remote_old = "const remote = req.ip ?? req.socket.remoteAddress ?? 'unknown';"
+          if remote_old in text:
+              text = text.replace(remote_old, "const remote = req.ip ?? req.socket?.remoteAddress ?? 'unknown';", 1)
+              changes += 1
+
+          if changes != 3:
+              raise SystemExit(f'expected 3 changes, applied {changes}')
+          source.write_text(text)
+          PY
+      - name: Commit reviewed fixes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/config-ui.ts
+          git commit -m 'fix: harden configuration input parsing'
+          git push origin HEAD:agent/android-tv-config-ui
