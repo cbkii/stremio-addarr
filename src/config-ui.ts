@@ -20,8 +20,8 @@ function sanitizeCookieHeader(req: Request): void {
     const value = item.slice(separator + 1).trim();
     if (!key) continue;
     try {
-      decodeURIComponent(value);
-      safeCookies.push(`${key}=${value}`);
+      const decodedValue = decodeURIComponent(value);
+      safeCookies.push(`${key}=${encodeURIComponent(decodedValue)}`);
     } catch {
       // Discard malformed user-controlled cookie values rather than allowing
       // decodeURIComponent inside the core router to throw a URIError.
@@ -45,16 +45,6 @@ function normalizeBlankTagInputs(req: Request): void {
   }
 }
 
-function ensureSocketForTestDoubles(req: Request): void {
-  const optionalRequest = req as Request & { socket?: { remoteAddress?: string } };
-  if (optionalRequest.socket) return;
-  Object.defineProperty(optionalRequest, 'socket', {
-    configurable: true,
-    enumerable: false,
-    value: { remoteAddress: undefined }
-  });
-}
-
 export function createConfigUiRouter(
   config: AppConfig,
   statusService: ArrStatusService,
@@ -65,7 +55,6 @@ export function createConfigUiRouter(
 
   router.use((req, _res, next) => {
     sanitizeCookieHeader(req);
-    ensureSocketForTestDoubles(req);
     next();
   });
 
