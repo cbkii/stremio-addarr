@@ -7,6 +7,12 @@ on:
     paths:
       - scripts/apply-episode-monitor-scope.py
       - .github/workflows/apply-episode-monitor-scope.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/apply-episode-monitor-scope.py
+      - .github/workflows/apply-episode-monitor-scope.yml
 
 permissions:
   contents: write
