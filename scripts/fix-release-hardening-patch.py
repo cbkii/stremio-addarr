@@ -8,6 +8,4 @@ end = s.index('// Bound the in-process action queue', start)
 block = s[start:end]
 if 'Sonarr DOWN' not in block or not block.rstrip().endswith(', 2);'):
     raise SystemExit('Unexpected Sonarr offline replacement block')
-first = block.replace(', 2);', ', 1);', 1)
-second = block.replace('replaceAllExact', 'replaceOnce', 1).replace(', 2);', ');', 1)
-p.write_text(s[:start] + first + second + s[end:])
+p.write_text(s[:start] + block.replace(', 2);', ', 1);', 1) + s[end:])
