@@ -111,7 +111,7 @@ test('authenticated configuration response is redacted and reports secret presen
 
 test('save validates and atomically updates only managed environment keys', async () => {
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
-  const envFile = await tempEnv('# preserve me\nPUBLIC_BASE_URL=https://example.invalid\nUNRELATED_SETTING=keep-this\n');
+  const envFile = await tempEnv('# preserve me\nPUBLIC_BASE_URL=https://example.invalid\nUNRELATED_SETTING=keep-this\nRADARR_ENABLED=false\nRADARR_ENABLED=false\n');
   process.env['CONFIG_UI_ENV_FILE'] = envFile;
   const cfg = baseConfig();
   const app = createApp(cfg);
@@ -152,7 +152,8 @@ test('save validates and atomically updates only managed environment keys', asyn
     assert.match(saved, /# preserve me/);
     assert.match(saved, /UNRELATED_SETTING=keep-this/);
     assert.match(saved, /PUBLIC_BASE_URL=https:\/\/example\.invalid/);
-    assert.match(saved, /RADARR_ENABLED=true/);
+    assert.equal((saved.match(/^RADARR_ENABLED=true$/gm) ?? []).length, 2);
+    assert.ok(!saved.includes('RADARR_ENABLED=false'));
     assert.match(saved, /RADARR_BASE_URL=http:\/\/127\.0\.0\.1:7878/);
     assert.match(saved, /RADARR_API_KEY=new-radarr-secret/);
     assert.match(saved, /RADARR_QUALITY_PROFILE_ID=7/);

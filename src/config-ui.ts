@@ -285,8 +285,8 @@ function updateEnvContent(content: string, updates: Map<string, string>): string
   const lines = content ? content.split(/\r?\n/) : [];
   const updated = lines.map((line) => {
     const match = /^(\s*(?:export\s+)?)([A-Z][A-Z0-9_]*)\s*=/.exec(line);
-    if (!match || !remaining.has(match[2])) return line;
-    const value = remaining.get(match[2]) ?? '';
+    if (!match || !updates.has(match[2])) return line;
+    const value = updates.get(match[2]) ?? '';
     remaining.delete(match[2]);
     return `${match[1]}${match[2]}=${encodeEnvValue(value)}`;
   });
@@ -701,7 +701,7 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
 
         <footer class="save-bar">
           <button type="submit" class="primary">Save configuration</button>
-          <span>Writes <code>${escapeHtml(process.env['CONFIG_UI_ENV_FILE'] || path.resolve(process.cwd(), '.env'))}</code>; restart required.</span>
+          <span>Writes the managed environment file atomically; restart required.</span>
         </footer>
       </form>
     </section>
