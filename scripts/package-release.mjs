@@ -18,7 +18,11 @@ const REQUIRED_FILES = [
   'package-lock.json',
   'README.md',
   'README_HOST.md',
+  'docs/CONFIGURATION_UI.md',
   '.env.example',
+  'assets/logo.png',
+  'assets/configure.css',
+  'assets/configure.js',
   'Caddyfile.example',
   'Caddyfile.duckdns.example',
   'Caddyfile.desec.example',
@@ -63,6 +67,10 @@ stage('package-lock.json');
 // Documentation
 stage('README.md');
 stage('README_HOST.md');
+stage('docs', 'docs');
+
+// Runtime web assets (manifest logo and /configure UI)
+stage('assets', 'assets');
 
 // Config examples
 stage('.env.example');

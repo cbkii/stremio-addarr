@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/index.js';
-import { baseConfig, withServer } from './_helpers.js';
+import { addonUrl, baseConfig, withServer } from './_helpers.js';
 import { buildDefaultManifestLogoUrl } from '../src/config.js';
 
 const ORIGINAL_FETCH = globalThis.fetch;
@@ -11,9 +11,10 @@ test.afterEach(() => {
 });
 
 test('manifest endpoint shape sanity', async () => {
-  const app = createApp(baseConfig());
+  const cfg = baseConfig();
+  const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/manifest.json`);
+    const response = await fetch(`${addonUrl(baseUrl, cfg)}/manifest.json`);
     assert.equal(response.status, 200);
     const manifest = (await response.json()) as {
       resources: string[];
@@ -33,7 +34,7 @@ test('manifest omits logo when manifestLogoUrl is blank', async () => {
   cfg.manifestLogoUrl = '';
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/manifest.json`);
+    const response = await fetch(`${addonUrl(baseUrl, cfg)}/manifest.json`);
     assert.equal(response.status, 200);
     const manifest = (await response.json()) as { logo?: string };
     assert.equal(manifest.logo, undefined);
@@ -65,12 +66,12 @@ test('catalog handler returns rows for radarr-recent and sonarr-recent', async (
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const movieRes = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    const movieRes = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/catalog/movie/radarr-recent.json`);
     const movieBody = (await movieRes.json()) as { metas: Array<{ id: string }> };
     assert.equal(movieRes.status, 200);
     assert.equal(movieBody.metas[0]?.id, 'tt100');
 
-    const seriesRes = await ORIGINAL_FETCH(`${baseUrl}/catalog/series/sonarr-recent.json`);
+    const seriesRes = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/catalog/series/sonarr-recent.json`);
     const seriesBody = (await seriesRes.json()) as { metas: Array<{ id: string }> };
     assert.equal(seriesRes.status, 200);
     assert.equal(seriesBody.metas[0]?.id, 'tt200');
@@ -85,7 +86,7 @@ test('catalog cache hints are driven by config values', async () => {
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/catalog/movie/radarr-recent.json`);
     const body = (await response.json()) as { cacheMaxAge: number; staleRevalidate: number; staleError: number };
     assert.equal(response.status, 200);
     assert.equal(body.cacheMaxAge, 9);
@@ -95,9 +96,10 @@ test('catalog cache hints are driven by config values', async () => {
 });
 
 test('catalog handler returns empty metas when endpoint type does not match catalog type', async () => {
-  const app = createApp(baseConfig());
+  const cfg = baseConfig();
+  const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/series/radarr-recent.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/catalog/series/radarr-recent.json`);
     const body = (await response.json()) as { metas: unknown[] };
     assert.equal(response.status, 200);
     assert.deepEqual(body.metas, []);
@@ -105,9 +107,10 @@ test('catalog handler returns empty metas when endpoint type does not match cata
 });
 
 test('catalog route includes CORS headers', async () => {
-  const app = createApp(baseConfig());
+  const cfg = baseConfig();
+  const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/catalog/movie/radarr-recent.json`);
     assert.equal(response.headers.get('access-control-allow-origin'), '*');
   });
 });
@@ -126,7 +129,7 @@ test('catalog handler degrades to empty metas when Arr services throw', async ()
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/catalog/movie/radarr-recent.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/catalog/movie/radarr-recent.json`);
     const body = (await response.json()) as { metas: unknown[] };
     assert.equal(response.status, 200);
     assert.deepEqual(body.metas, []);
@@ -147,7 +150,7 @@ test('downloaded tile launches Kodi via externalUrl when enabled', async () => {
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; externalUrl?: string }> };
     assert.ok(body.streams[0].name?.includes('✅'), 'downloaded tile name should include ✅');
     assert.ok(body.streams[0].description?.includes('UNWATCHED'));
@@ -171,7 +174,7 @@ test('downloaded tile has no externalUrl when Kodi is disabled', async () => {
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ externalUrl?: string }> };
     assert.equal(body.streams[0].externalUrl ? 1 : 0, 0);
   });
@@ -193,12 +196,16 @@ test('missing movie tile triggers search action URL and does not expose secrets'
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string; behaviorHints?: { notWebReady?: boolean } }> };
     assert.ok(body.streams[0].name?.includes('🔍🦜'), 'search tile name should include search emoji');
     assert.ok(body.streams[0].description?.includes('UNWATCHED'));
     assert.ok(body.streams[0].description?.includes('192.168.1.50:7878'), 'description should include Radarr host');
-    assert.equal(body.streams[0].url, 'https://stremio-addarr.lan/action/search/movie/tt1234567');
+    const actionUrl = new URL(body.streams[0].url ?? '');
+    assert.equal(actionUrl.origin, 'https://stremio-addarr.lan');
+    assert.equal(actionUrl.pathname, `/${encodeURIComponent(cfg.addonAccessToken)}/action/search/movie/tt1234567`);
+    assert.ok(Number.isSafeInteger(Number(actionUrl.searchParams.get('exp'))));
+    assert.ok(actionUrl.searchParams.get('sig'));
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true, 'Action tiles must set notWebReady to prevent watched tracking');
     assert.ok(body.streams[0].description?.includes('Mock Movie'), 'description should include matched title');
     assert.match(body.streams[0].description ?? '', /\(07 Mar 20\)/, 'description should include formatted release date');
@@ -228,11 +235,15 @@ test('missing episode tile generates encoded Sonarr search action URL', async ()
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt7654321%3A2%3A5.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/series/tt7654321%3A2%3A5.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string; behaviorHints?: { notWebReady?: boolean } }> };
     assert.ok(body.streams[0].name?.includes('🔍🦜'), 'search tile name should include search emoji');
     assert.ok(body.streams[0].description?.includes('192.168.1.50:8989'), 'description should include Sonarr host');
-    assert.equal(body.streams[0].url, 'https://stremio-addarr.lan/action/search/series/tt7654321%3A2%3A5');
+    const actionUrl = new URL(body.streams[0].url ?? '');
+    assert.equal(actionUrl.origin, 'https://stremio-addarr.lan');
+    assert.equal(actionUrl.pathname, `/${encodeURIComponent(cfg.addonAccessToken)}/action/search/series/tt7654321%3A2%3A5`);
+    assert.ok(actionUrl.searchParams.get('exp'));
+    assert.ok(actionUrl.searchParams.get('sig'));
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
     assert.ok(body.streams[0].description?.includes('S02E05'), 'description should include episode label');
   });
@@ -255,7 +266,7 @@ test('movie line uses in-cinemas date only when release dates are unavailable', 
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ description?: string }> };
     assert.match(body.streams[0].description ?? '', /\(11 Sep[a-z]* 21\)/i, 'expected in-cinemas fallback formatted date');
   });
@@ -279,7 +290,7 @@ test('episode labels include release date when Sonarr airDateUtc exists', async 
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt7654321%3A2%3A5.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/series/tt7654321%3A2%3A5.json`);
     const body = (await response.json()) as { streams: Array<{ description?: string }> };
     assert.ok(body.streams[0].description?.includes('S02E05 (09 Jan 24)'), 'description should include episode release date');
   });
@@ -292,7 +303,7 @@ test('stream cache hints are driven by config values', async () => {
   const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
     assert.equal(response.status, 200);
     const body = (await response.json()) as { cacheMaxAge: number; staleRevalidate: number };
     assert.equal(body.cacheMaxAge, 7);
@@ -322,7 +333,7 @@ test('downloaded tile includes playback url and omits Kodi fallback when file st
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as {
       streams: Array<{
         name: string;
@@ -334,7 +345,10 @@ test('downloaded tile includes playback url and omits Kodi fallback when file st
     };
     assert.ok(body.streams[0].name?.includes('✅'), 'downloaded tile name should include ✅');
     assert.ok(body.streams[0].description?.includes('UNWATCHED'));
-    assert.ok(body.streams[0].url?.startsWith('https://pi.example.com/files/movie/77?t='), 'should have a file streaming url');
+    const fileUrl = new URL(body.streams[0].url ?? '');
+    assert.equal(fileUrl.pathname, `/${encodeURIComponent(cfg.addonAccessToken)}/files/movie/77`);
+    assert.ok(fileUrl.searchParams.get('exp'));
+    assert.ok(fileUrl.searchParams.get('t'), 'should have a signed file streaming url');
     assert.equal(body.streams[0].externalUrl ? 1 : 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
     assert.equal(body.streams[0].behaviorHints?.filename, 'Test.Movie.2020.mkv');
@@ -361,11 +375,11 @@ test('downloaded tile has no url when file streaming is disabled', async () => {
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string }> };
     assert.ok(body.streams[0].name?.includes('✅'), 'downloaded tile name should include ✅');
     assert.ok(body.streams[0].description?.includes('UNWATCHED'));
-    assert.equal(body.streams[0].url, undefined, 'no url when file streaming disabled');
+    assert.match(body.streams[0].url ?? '', /\/status\/movie\/tt1234567\.m3u8$/, 'status fallback keeps the stream object protocol-valid');
   });
 });
 
@@ -389,7 +403,7 @@ test('downloaded tile has no url when movieFile id is absent and keeps Kodi fall
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ url?: string; externalUrl?: string }> };
     assert.equal(body.streams[0].url, undefined, 'no url without movieFile.id');
     assert.match(body.streams[0].externalUrl ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
@@ -418,7 +432,7 @@ test('episode downloaded tile keeps Kodi fallback in direct mode when episodeFil
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt9876543%3A1%3A2.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/series/tt9876543%3A1%3A2.json`);
     const body = (await response.json()) as { streams: Array<{ url?: string; externalUrl?: string }> };
     assert.equal(body.streams[0].url, undefined, 'no url without episodeFileId');
     assert.match(body.streams[0].externalUrl ?? '', /package=org.xbmc.kodi/, 'Kodi fallback should be preserved');
@@ -452,7 +466,7 @@ test('episode downloaded tile includes playback url and omits Kodi fallback when
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/series/tt9876543%3A1%3A2.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/series/tt9876543%3A1%3A2.json`);
     const body = (await response.json()) as {
       streams: Array<{
         name: string;
@@ -462,7 +476,10 @@ test('episode downloaded tile includes playback url and omits Kodi fallback when
       }>;
     };
     assert.ok(body.streams[0].name?.includes('✅'), 'downloaded tile name should include ✅');
-    assert.ok(body.streams[0].url?.startsWith('https://pi.example.com/files/series/88?t='), 'should have episode file streaming url');
+    const fileUrl = new URL(body.streams[0].url ?? '');
+    assert.equal(fileUrl.pathname, `/${encodeURIComponent(cfg.addonAccessToken)}/files/series/88`);
+    assert.ok(fileUrl.searchParams.get('exp'));
+    assert.ok(fileUrl.searchParams.get('t'), 'should have a signed episode file streaming url');
     assert.equal(body.streams[0].externalUrl ? 1 : 0, 0, 'Kodi fallback must be omitted when direct stream url is present');
     assert.equal(body.streams[0].behaviorHints?.notWebReady, true);
     assert.equal(body.streams[0].behaviorHints?.filename, 'Test.Show.S01E02.mkv');
@@ -492,7 +509,7 @@ test('downloaded tile uses Kodi only when playback mode is set to kodi', async (
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/stream/movie/tt1234567.json`);
+    const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
     const body = (await response.json()) as { streams: Array<{ url?: string; externalUrl?: string }> };
     assert.equal(body.streams[0].url, undefined);
     assert.match(body.streams[0].externalUrl ?? '', /package=org.xbmc.kodi/);

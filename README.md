@@ -22,7 +22,7 @@ This README is the **canonical install and upgrade guide**.
 - Stremio installs the add-on from:
 
 ```text
-https://YOUR_HOSTNAME/manifest.json
+https://YOUR_HOSTNAME/OPAQUE_INSTALL_TOKEN/manifest.json
 ```
 
 The hostname in all places must match exactly:
@@ -110,6 +110,7 @@ During the guided `.env` review gate, ensure required values are set:
 HOST=127.0.0.1
 PORT=7010
 PUBLIC_BASE_URL=https://YOUR_HOSTNAME
+ADDON_ACCESS_TOKEN=replace-with-32-plus-url-safe-random-characters
 TARGET_CLIENT=android-tv
 GRACEFUL_SHUTDOWN_TIMEOUT_MS=10000
 FORCED_SHUTDOWN_EXIT_CODE=0
@@ -128,7 +129,7 @@ SONARR_QUALITY_PROFILE_ID=1
 SONARR_LANGUAGE_PROFILE_ID=1
 SONARR_SERIES_MONITOR=all
 
-CATALOG_PAGE_SIZE=35
+CATALOG_PAGE_SIZE=100
 RADARR_CATALOG_WATCHED_KEEP_COUNT=1
 CATALOG_CACHE_TTL_MS=5000
 CATALOG_CACHE_MAX_AGE_SEC=15
@@ -137,7 +138,7 @@ CATALOG_STALE_ERROR_SEC=120
 ```
 
 Notes:
-- `MANIFEST_LOGO_URL` defaults to `https://img.icons8.com/?size=100&id=43669&format=png&color=000000`. With this default, Stremio clients will fetch the logo from `img.icons8.com`, which can leak client IPs to that third party and makes logo availability depend on that external service. For privacy-sensitive deployments, set `MANIFEST_LOGO_URL=none` to hide the logo, or set `MANIFEST_LOGO_URL` to a self-hosted HTTPS logo URL (query parameters are allowed, e.g. `https://example.com/logo.png?v=2`).
+- `MANIFEST_LOGO_URL` defaults to `local`, serving the bundled logo from the add-on HTTPS origin. Set it to `none` to omit the logo, or to an explicit HTTPS URL when a separately hosted image is required.
 - `SONARR_SERIES_MONITOR` maps directly to Sonarr's `addOptions.monitor` field and accepts: `all`, `future`, `missing`, `existing`, `firstSeason`, `lastSeason`, `latestSeason`, `pilot`, `recent`, `monitorSpecials`, `unmonitorSpecials`, `none`, `skip`, `ep`, `epfuture`, or `epseason`.
 - `SONARR_SERIES_MONITOR` is parsed case-insensitively (`ALL`, `All`, `none` all work).
 - Episode-scoped custom values in `SONARR_SERIES_MONITOR`:
@@ -160,7 +161,7 @@ Notes:
 - `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
 
 Optional tuning:
-- `CATALOG_PAGE_SIZE` (default `35`, max effective `50`): how many cards each catalog page returns.
+- `CATALOG_PAGE_SIZE` is normalised to `100` to match Stremio pagination. Legacy lower values are accepted during upgrade but do not reduce the public page size.
 - `RADARR_CATALOG_WATCHED_KEEP_COUNT` (default `1`): how many watched movies remain visible in filtered Radarr catalog views.
 - `CATALOG_CACHE_TTL_MS` (default `5000`): short in-memory cache for merged Arr queue+history results and progressive Radarr watched-filter pagination state.
 - `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint sent to Stremio for catalog responses.
@@ -190,7 +191,7 @@ When finished, you must have:
 Exact URL to paste into Stremio:
 
 ```text
-$PUBLIC_BASE_URL/manifest.json
+$PUBLIC_BASE_URL/$ADDON_ACCESS_TOKEN/manifest.json
 ```
 
 ### Step 8 — Install in Stremio
@@ -199,7 +200,7 @@ On Stremio (Android TV):
 1. Open **Add-ons**.
 2. Open **Community Add-ons** (or search).
 3. Paste the manifest URL from Step 7:
-   - `https://YOUR_HOSTNAME/manifest.json`
+   - `https://YOUR_HOSTNAME/OPAQUE_INSTALL_TOKEN/manifest.json`
 4. Click **Install**.
 
 ---
@@ -236,7 +237,7 @@ If your hostname/TLS setup changed, re-run the hosting guide: [README_HOST.md](R
 sudo journalctl -u stremio-addarr -n 50 --no-pager
 curl -fsS http://127.0.0.1:7010/healthz
 source /opt/stremio-addarr/.env
-curl -fsS "https://$PUBLIC_BASE_URL/status.json"
+curl -fsS "$PUBLIC_BASE_URL/status.json"
 ```
 
 ---
@@ -249,7 +250,7 @@ All logs are structured JSON, emitted to **stdout** (info/debug/warn) and **stde
 Each line is a single JSON object with at minimum: `time`, `level`, `message`.
 
 ```json
-{"time":"2024-11-01T14:32:01.123Z","level":"info","message":"request","reqId":"a1b2c3d4-...","method":"GET","path":"/stream/movie/tt1234567","status":200,"durationMs":42}
+{"time":"2024-11-01T14:32:01.123Z","level":"info","message":"request","reqId":"a1b2c3d4-...","method":"GET","path":"/<protected>/stream/movie/tt1234567","status":200,"durationMs":42}
 {"time":"2024-11-01T14:32:01.081Z","level":"info","message":"radarr add success","imdbId":"tt1234567","title":"Example Movie","searchOnAdd":true}
 {"time":"2024-11-01T14:32:00.950Z","level":"debug","message":"arr response","service":"radarr","method":"GET","path":"/api/v3/movie","status":200,"durationMs":18}
 ```
@@ -325,10 +326,10 @@ Each HTTP request gets a unique `reqId`. Find the Stremio stream request and tra
 ```bash
 # Find the stream request for a specific title/id
 sudo journalctl -u stremio-addarr -n 500 --no-pager -o cat \
-  | jq 'select(.path and (.path | startswith("/stream/")))'
+  | jq 'select(.path and (.path | startswith("/<protected>/stream/")))'
 
 # Example output:
-# {"time":"...","level":"info","message":"request","reqId":"abc-123","method":"GET","path":"/stream/movie/tt1234567","status":200,"durationMs":55}
+# {"time":"...","level":"info","message":"request","reqId":"abc-123","method":"GET","path":"/<protected>/stream/movie/tt1234567","status":200,"durationMs":55}
 # {"time":"...","level":"info","message":"stream handler complete","type":"movie","id":"tt1234567","tileCount":1,"durationMs":48}
 ```
 
@@ -423,7 +424,7 @@ Common causes and fixes:
 
 ```bash
 # Check PUBLIC_BASE_URL is HTTPS and reachable from outside
-curl -fsI https://YOUR_HOSTNAME/manifest.json
+curl -fsI https://YOUR_HOSTNAME/OPAQUE_INSTALL_TOKEN/manifest.json
 
 # Check addon status page
 curl -fsS https://YOUR_HOSTNAME/status.json | jq '{likelyAndroidTvCompatible, configIssues}'
@@ -577,3 +578,11 @@ All providers are filtered to valid dates with year `> 1901`, and display remain
 - Hosting/TLS (canonical): [README_HOST.md](README_HOST.md)
 - Example env variables: [.env.example](.env.example)
 - Systemd example: [deploy/stremio-addarr.service.example](deploy/stremio-addarr.service.example)
+
+## Release 1.6 security and compatibility requirements
+
+- Set a unique `ADDON_ACCESS_TOKEN` (32-128 URL-safe characters). Install Stremio using the protected URL shown by the authenticated configuration UI; unprefixed manifest, catalogue and stream routes are intentionally unavailable.
+- Stremio catalogue pages are fixed at 100 items so Android TV does not stop pagination early.
+- Add/search links use short-lived HMAC signatures, direct-file links expire, action requests are rate-limited, and the background queue is bounded.
+- The configuration dashboard is a single-tenant server administration surface. Enable it explicitly with `CONFIG_UI_ENABLED=true` and a 16+ character `CONFIG_UI_TOKEN`.
+- The Docker image runs as UID/GID 10001. Ensure the mounted configuration directory is writable by that identity and mount media libraries read-only wherever possible.

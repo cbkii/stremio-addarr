@@ -1,5 +1,7 @@
 import type { AppConfig } from '../config.js';
 import { AsyncTtlCache } from '../lib/cache.js';
+import { buildActionToken } from '../lib/action-tokens.js';
+import { addonBaseUrl } from '../lib/addon-access.js';
 import { buildFileToken } from '../lib/file-tokens.js';
 import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId, ServiceHealth, StatusTile } from '../types.js';
 import { RadarrClient } from './radarr.js';
@@ -180,12 +182,19 @@ export class ArrStatusService {
   }
 
   buildActionLink(action: 'search' | 'add-search', parsed: ParsedStremioId): string {
-    return `${this.config.publicBaseUrl}/action/${action}/${parsed.kind}/${encodeURIComponent(parsed.rawId)}`;
+    const expiresAtSec = Math.floor(Date.now() / 1000) + this.config.actionTokenTtlSec;
+    const signature = buildActionToken(this.config.addonAccessToken, action, parsed.kind, parsed.rawId, expiresAtSec);
+    return `${addonBaseUrl(this.config)}/action/${action}/${parsed.kind}/${encodeURIComponent(parsed.rawId)}?exp=${expiresAtSec}&sig=${encodeURIComponent(signature)}`;
+  }
+
+  buildStatusStreamUrl(parsed: ParsedStremioId): string {
+    return `${addonBaseUrl(this.config)}/status/${parsed.kind}/${encodeURIComponent(parsed.rawId)}.m3u8`;
   }
 
   buildFileStreamUrl(kind: 'movie' | 'series', fileId: number): string {
-    const token = buildFileToken(this.config.fileStreaming.secret, kind, fileId);
-    return `${this.config.publicBaseUrl}/files/${kind}/${fileId}?t=${token}`;
+    const expiresAtSec = Math.floor(Date.now() / 1000) + this.config.fileStreaming.tokenTtlSec;
+    const token = buildFileToken(this.config.fileStreaming.secret, kind, fileId, expiresAtSec);
+    return `${addonBaseUrl(this.config)}/files/${kind}/${fileId}?exp=${expiresAtSec}&t=${encodeURIComponent(token)}`;
   }
 
   private canDirectStream(): boolean {
@@ -226,21 +235,23 @@ export class ArrStatusService {
             watchedLine(watched, borderFallback),
             movieLine(status.title, status.releaseDate, this.config.timeZone),
             '✅ File is downloaded',
-            fileUrl ? '🗯️ ▶️  PLAY FROM PI ►' : (kodiExternalUrl ? '🗯️ ▶️  OPEN IN KODI ►' : '🗯️ ▶️  PLAY FROM PI ►')
+            fileUrl ? '🗯️ ▶️  PLAY FROM PI ►' : (kodiExternalUrl ? '🗯️ ▶️  OPEN IN KODI ►' : '🗯️ Playback unavailable — enable direct streaming or Kodi')
           ),
-          url: fileUrl,
+          url: fileUrl ?? (kodiExternalUrl ? undefined : this.buildStatusStreamUrl(parsed)),
           behaviorHints: fileUrl ? {
             notWebReady: true,
             filename: status.fileName,
             videoSize: status.fileSizeBytes
-          } : undefined,
+          } : (kodiExternalUrl ? undefined : { notWebReady: true }),
           externalUrl: kodiExternalUrl
         }];
       }
       case 'downloading':
         return [{
           name: '⏱️📥...\nDLing',
-          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️⏱️ DOWNLOAD IN PROGRESS…', this.radarrCardLine())
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️⏱️ DOWNLOAD IN PROGRESS…', this.radarrCardLine()),
+          url: this.buildStatusStreamUrl(parsed),
+          behaviorHints: { notWebReady: true }
         }];
       case 'missing':
         return [{
@@ -268,7 +279,7 @@ export class ArrStatusService {
         }];
       case 'unavailable':
       default:
-        return [{ name: '🛑❌\nRadarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()) }];
+        return [{ name: '🛑❌\nRadarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()), url: this.buildStatusStreamUrl(parsed), behaviorHints: { notWebReady: true } }];
     }
   }
 
@@ -286,21 +297,23 @@ export class ArrStatusService {
             watchedLine(watched, borderFallback),
             seriesLine(status.title),
             ep ? `✅ ${ep} is downloaded` : '✅ File is downloaded',
-            fileUrl ? '🗯️ ▶️  PLAY FROM PI ►' : (kodiExternalUrl ? '🗯️ ▶️  OPEN IN KODI ►' : '🗯️ ▶️  PLAY FROM PI ►')
+            fileUrl ? '🗯️ ▶️  PLAY FROM PI ►' : (kodiExternalUrl ? '🗯️ ▶️  OPEN IN KODI ►' : '🗯️ Playback unavailable — enable direct streaming or Kodi')
           ),
-          url: fileUrl,
+          url: fileUrl ?? (kodiExternalUrl ? undefined : this.buildStatusStreamUrl(parsed)),
           behaviorHints: fileUrl ? {
             notWebReady: true,
             filename: status.fileName,
             videoSize: status.fileSizeBytes
-          } : undefined,
+          } : (kodiExternalUrl ? undefined : { notWebReady: true }),
           externalUrl: kodiExternalUrl
         }];
       }
       case 'episode_downloading':
         return [{
           name: '⏱️📥...\nDLing',
-          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `🗯️ ⏱  ${ep} DOWNLOADING…` : '🗯️⏱️ DOWNLOAD IN PROGRESS…', this.sonarrCardLine())
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `🗯️ ⏱  ${ep} DOWNLOADING…` : '🗯️⏱️ DOWNLOAD IN PROGRESS…', this.sonarrCardLine()),
+          url: this.buildStatusStreamUrl(parsed),
+          behaviorHints: { notWebReady: true }
         }];
       case 'episode_missing':
         return [{
@@ -329,7 +342,7 @@ export class ArrStatusService {
         }];
       case 'unavailable':
       default:
-        return [{ name: '🛑❌\nSonarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];
+        return [{ name: '🛑❌\nSonarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()), url: this.buildStatusStreamUrl(parsed), behaviorHints: { notWebReady: true } }];
     }
   }
 
@@ -352,7 +365,7 @@ export class ArrStatusService {
       ]);
       const borderFallback = this.useBorderFallbackLine();
       if (!health.radarr.reachable) {
-        return [{ name: '🛑❌\nRadarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()) }];
+        return [{ name: '🛑❌\nRadarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Radarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.radarrCardLine()), url: this.buildStatusStreamUrl(parsed), behaviorHints: { notWebReady: true } }];
       }
       const status = await this.radarr.getMovieStatus(parsed.imdbId);
       const releaseDate = await this.resolveMovieReleaseDate(parsed.imdbId, status.releaseDate);
@@ -369,7 +382,7 @@ export class ArrStatusService {
     ]);
     const borderFallback = this.useBorderFallbackLine();
     if (!health.sonarr.reachable) {
-      return [{ name: '🛑❌\nSonarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()) }];
+      return [{ name: '🛑❌\nSonarr DOWN', description: desc(watchedLine(watched, borderFallback), '🛑  Sonarr not reachable', '🗯️ 🔧  CHECK SETTINGS / NETWORK', this.sonarrCardLine()), url: this.buildStatusStreamUrl(parsed), behaviorHints: { notWebReady: true } }];
     }
 
     const status = await this.sonarr.getEpisodeStatus(parsed.imdbId, parsed.season, parsed.episode);

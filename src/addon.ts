@@ -8,18 +8,21 @@ import { ArrStatusService } from './services/status.js';
 import { NoopWatchedLookup } from './services/watched.js';
 import type { WatchedLookup } from './services/watched.js';
 
-function streamFromTile(tile: StatusTile) {
+export function streamFromTile(tile: StatusTile) {
+  if (!tile.url && !tile.externalUrl) {
+    throw new Error(`Invalid status tile without a Stremio stream source: ${tile.name}`);
+  }
   return {
     name: tile.name,
-    description: tile.description,
-    url: tile.url,
-    externalUrl: tile.externalUrl,
-    behaviorHints: tile.behaviorHints
+    ...(tile.description ? { description: tile.description } : {}),
+    ...(tile.url ? { url: tile.url } : {}),
+    ...(tile.externalUrl ? { externalUrl: tile.externalUrl } : {}),
+    ...(tile.behaviorHints ? { behaviorHints: tile.behaviorHints } : {})
   };
 }
 
 export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: { watchedLookup?: WatchedLookup }) {
-  const catalogHardMax = 50;
+  const catalogHardMax = 100;
   const catalogPageSize = Math.max(1, Math.min(config.catalogPageSize, catalogHardMax));
   const builder = new addonBuilder({
     id: 'org.cbkii.stremio-addarr',
@@ -42,7 +45,10 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
     behaviorHints: {
-      configurable: false,
+      // Stremio opens `${addonOrigin}/configure` for configurable add-ons.
+      // Existing environment-configured installs remain valid, so configuration
+      // is offered but is not required before installation.
+      configurable: config.configUiEnabled,
       configurationRequired: false
     },
     ...(config.manifestLogoUrl ? { logo: config.manifestLogoUrl } : {})

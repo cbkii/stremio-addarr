@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/index.js';
-import { baseConfig, withServer } from './_helpers.js';
+import { baseConfig, signedActionUrl, withServer } from './_helpers.js';
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
@@ -143,7 +143,7 @@ test('search action route triggers Radarr search and returns HLS stream', async 
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/action/search/movie/tt1234567`);
+    const res = await ORIGINAL_FETCH(signedActionUrl(baseUrl, cfg, 'search', 'movie', 'tt1234567'));
     assert.equal(res.status, 200);
     const text = await res.text();
     assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
@@ -206,8 +206,7 @@ test('add-search action route performs add and search on Sonarr', async () => {
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const encoded = encodeURIComponent('tt7654321:2:5');
-    const res = await ORIGINAL_FETCH(`${baseUrl}/action/add-search/series/${encoded}`);
+    const res = await ORIGINAL_FETCH(signedActionUrl(baseUrl, cfg, 'add-search', 'series', 'tt7654321:2:5'));
     assert.equal(res.status, 200);
     const text = await res.text();
     assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
@@ -260,7 +259,7 @@ test('series add-search action route triggers Sonarr add and search', async () =
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(`${baseUrl}/action/add-search/series/tt1111111`);
+    const res = await ORIGINAL_FETCH(signedActionUrl(baseUrl, cfg, 'add-search', 'series', 'tt1111111'));
     assert.equal(res.status, 200);
     const text = await res.text();
     assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');

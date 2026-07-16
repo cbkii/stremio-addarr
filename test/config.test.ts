@@ -14,6 +14,7 @@ test.afterEach(() => {
 
 test.beforeEach(() => {
   process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
+  process.env.ADDON_ACCESS_TOKEN = 'test-addon-access-token-0123456789abcdef';
 });
 
 test('loads valid config', () => {

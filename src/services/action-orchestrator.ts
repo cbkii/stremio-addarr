@@ -28,14 +28,19 @@ export class ActionOrchestrator {
 
   constructor(
     private readonly statusService: ArrStatusService,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    private readonly maxQueueDepth = 100
   ) {}
 
-  enqueue(action: ActionName, parsed: ParsedStremioId, reqId?: string): string {
+  enqueue(action: ActionName, parsed: ParsedStremioId, reqId?: string): string | null {
     const dedupeKey = `${action}:${parsed.kind}:${parsed.rawId}`;
     if (this.queuedKeys.has(dedupeKey)) {
       this.logger.info('Action queue deduped', { reqId, action, kind: parsed.kind, id: parsed.rawId });
       return dedupeKey;
+    }
+    if (this.queue.length >= this.maxQueueDepth) {
+      this.logger.warn('Action queue full', { reqId, action, kind: parsed.kind, id: parsed.rawId, queueDepth: this.queue.length });
+      return null;
     }
 
     const job: ActionJob = {

@@ -1,5 +1,8 @@
 import type { AppConfig } from '../src/config.js';
 import { buildDefaultManifestLogoUrl } from '../src/config.js';
+import { addonBasePath } from '../src/lib/addon-access.js';
+import { buildActionToken } from '../src/lib/action-tokens.js';
+import { buildFileToken } from '../src/lib/file-tokens.js';
 
 export function baseConfig(): AppConfig {
   return {
@@ -8,6 +11,12 @@ export function baseConfig(): AppConfig {
     host: '127.0.0.1',
     port: 0,
     publicBaseUrl: 'http://127.0.0.1:7010',
+    addonAccessToken: 'test-addon-access-token-0123456789abcdef',
+    actionTokenTtlSec: 300,
+    actionRateLimitMax: 20,
+    actionQueueMax: 100,
+    configUiEnabled: false,
+    configUiRestartCommand: 'sudo systemctl restart stremio-addarr',
     manifestLogoUrl: buildDefaultManifestLogoUrl('http://127.0.0.1:7010', '0.1.0-test'),
     targetClient: 'android-tv',
     timeZone: 'UTC',
@@ -19,7 +28,7 @@ export function baseConfig(): AppConfig {
     serviceHealthCacheTtlMs: 2_000,
     streamCacheMaxAgeSec: 2,
     streamStaleRevalidateSec: 5,
-    catalogPageSize: 35,
+    catalogPageSize: 100,
     radarrCatalogWatchedKeepCount: 1,
     catalogCacheTtlMs: 5_000,
     catalogCacheMaxAgeSec: 15,
@@ -28,6 +37,7 @@ export function baseConfig(): AppConfig {
     fileStreaming: {
       enabled: false,
       secret: '',
+      tokenTtlSec: 3600,
       playbackMode: 'kodi'
     },
     kodi: {
@@ -80,6 +90,39 @@ export function baseConfig(): AppConfig {
       region: 'US'
     }
   };
+}
+
+export function addonUrl(baseUrl: string, config: AppConfig = baseConfig()): string {
+  return `${baseUrl}${addonBasePath(config)}`;
+}
+
+export function signedActionUrl(
+  baseUrl: string,
+  config: AppConfig,
+  action: 'search' | 'add-search',
+  kind: 'movie' | 'series',
+  rawId: string,
+  expiresAtSec = Math.floor(Date.now() / 1000) + config.actionTokenTtlSec
+): string {
+  const signature = buildActionToken(config.addonAccessToken, action, kind, rawId, expiresAtSec);
+  return `${addonUrl(baseUrl, config)}/action/${action}/${kind}/${encodeURIComponent(rawId)}?exp=${expiresAtSec}&sig=${encodeURIComponent(signature)}`;
+}
+
+export function signedFileUrl(
+  baseUrl: string,
+  config: AppConfig,
+  kind: 'movie' | 'series',
+  fileId: number,
+  options: { secret?: string; tokenFileId?: number; token?: string; expiresAtSec?: number } = {}
+): string {
+  const expiresAtSec = options.expiresAtSec ?? Math.floor(Date.now() / 1000) + config.fileStreaming.tokenTtlSec;
+  const token = options.token ?? buildFileToken(
+    options.secret ?? config.fileStreaming.secret,
+    kind,
+    options.tokenFileId ?? fileId,
+    expiresAtSec
+  );
+  return `${addonUrl(baseUrl, config)}/files/${kind}/${fileId}?exp=${expiresAtSec}&t=${encodeURIComponent(token)}`;
 }
 
 export async function withServer<T>(
