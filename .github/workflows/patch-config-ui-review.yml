@@ -1,9 +1,7 @@
 name: Apply configuration UI review hardening
 
 on:
-  push:
-    branches:
-      - agent/android-tv-config-ui
+  pull_request:
     paths:
       - '.github/workflows/patch-config-ui-review.yml'
 
