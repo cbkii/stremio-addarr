@@ -7,6 +7,12 @@ on:
     paths:
       - scripts/final-release-cleanup.py
       - .github/workflows/final-release-cleanup.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/final-release-cleanup.py
+      - .github/workflows/final-release-cleanup.yml
 
 permissions:
   contents: write
