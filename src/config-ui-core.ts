@@ -11,11 +11,16 @@ const SESSION_COOKIE = 'addarr_config_session';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 8;
+const CONTROL_WINDOW_MS = 60_000;
+const CONTROL_MAX_REQUESTS = 60;
+const WRITE_QUEUE_MAX = 4;
 const JSON_LIMIT = '64kb';
 
 interface Session {
   csrf: string;
   expiresAt: number;
+  controlCount: number;
+  controlResetAt: number;
 }
 
 interface LoginWindow {
@@ -88,6 +93,8 @@ interface UiConfigPayload {
 interface ConfigUiOptions {
   envFilePath?: string;
   adminToken?: string;
+  controlRateLimitMax?: number;
+  writeQueueMax?: number;
 }
 
 const MANAGED_KEYS = new Set([
@@ -541,15 +548,31 @@ async function fetchJson(url: string, init: RequestInit, timeoutMs: number): Pro
   }
 }
 
+export function credentialForProbeOrigin(
+  requestedBaseUrl: string,
+  suppliedCredential: string,
+  storedBaseUrl: string,
+  storedCredential: string
+): string {
+  if (suppliedCredential) return suppliedCredential;
+  try {
+    return new URL(requestedBaseUrl).origin === new URL(storedBaseUrl).origin ? storedCredential : '';
+  } catch {
+    return '';
+  }
+}
+
 function arrProbeInput(body: unknown, service: 'radarr' | 'sonarr', config: AppConfig, pending: Map<string, string>): ArrProbeInput {
   const record = readRecord(body, `${service} probe`);
   const isRadarr = service === 'radarr';
   const prefix = isRadarr ? 'RADARR' : 'SONARR';
   const current = isRadarr ? config.radarr : config.sonarr;
-  const baseUrl = normalizeHttpUrl(record['baseUrl'] ?? pending.get(`${prefix}_BASE_URL`) ?? current.baseUrl, `${service} server URL`);
+  const storedBaseUrl = pending.get(`${prefix}_BASE_URL`) || current.baseUrl;
+  const baseUrl = normalizeHttpUrl(record['baseUrl'] ?? storedBaseUrl, `${service} server URL`);
   const suppliedKey = readStringField(record, 'apiKey');
-  const apiKey = suppliedKey || pending.get(`${prefix}_API_KEY`) || current.apiKey;
-  if (!apiKey) throw new Error(`${service} API key is required.`);
+  const storedKey = pending.get(`${prefix}_API_KEY`) || current.apiKey;
+  const apiKey = credentialForProbeOrigin(baseUrl, suppliedKey, storedBaseUrl, storedKey);
+  if (!apiKey) throw new Error(`${service} API key must be supplied when testing a different server origin.`);
   return { baseUrl, apiKey };
 }
 
@@ -727,12 +750,18 @@ export function createConfigUiRouter(
   const router = express.Router();
   const envFile = path.resolve(options.envFilePath ?? process.env['CONFIG_UI_ENV_FILE'] ?? path.resolve(process.cwd(), '.env'));
   const adminToken = (options.adminToken ?? process.env['CONFIG_UI_TOKEN'] ?? '').trim();
-  const authEnabled = config.configUiEnabled && adminToken.length >= 16;
+  if (config.configUiEnabled && adminToken.length < 16) {
+    throw new Error('CONFIG_UI_TOKEN must be at least 16 characters when CONFIG_UI_ENABLED=true.');
+  }
+  const authEnabled = config.configUiEnabled;
+  const controlRateLimitMax = options.controlRateLimitMax ?? CONTROL_MAX_REQUESTS;
+  const writeQueueMax = options.writeQueueMax ?? WRITE_QUEUE_MAX;
   const secureCookie = new URL(config.publicBaseUrl).protocol === 'https:';
   const expectedOrigin = new URL(config.publicBaseUrl).origin;
   const sessions = new Map<string, Session>();
   const loginWindows = new Map<string, LoginWindow>();
   let writeQueue: Promise<void> = Promise.resolve();
+  let pendingWrites = 0;
 
   function cleanup(): void {
     const now = Date.now();
@@ -774,10 +803,33 @@ export function createConfigUiRouter(
     next();
   }
 
-  async function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
+  function requireControlRate(req: Request, res: Response, next: NextFunction): void {
+    const session = res.locals['configUiSession'] as Session | undefined;
+    const now = Date.now();
+    if (!session) {
+      res.status(401).json({ error: 'authentication_required' });
+      return;
+    }
+    if (session.controlResetAt <= now) {
+      session.controlCount = 0;
+      session.controlResetAt = now + CONTROL_WINDOW_MS;
+    }
+    session.controlCount += 1;
+    if (session.controlCount > controlRateLimitMax) {
+      res.status(429).json({ error: 'control_rate_limit_exceeded' });
+      return;
+    }
+    next();
+  }
+
+  function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
+    if (pendingWrites >= writeQueueMax) {
+      return Promise.reject(Object.assign(new Error('Configuration write queue is full.'), { code: 'CONFIG_WRITE_QUEUE_FULL' }));
+    }
+    pendingWrites += 1;
     const result = writeQueue.then(task, task);
     writeQueue = result.then(() => undefined, () => undefined);
-    return result;
+    return result.finally(() => { pendingWrites -= 1; });
   }
 
   router.use((_, res, next) => {
@@ -830,7 +882,12 @@ export function createConfigUiRouter(
     }
     loginWindows.delete(remote);
     const id = randomBytes(32).toString('base64url');
-    const session: Session = { csrf: randomBytes(24).toString('base64url'), expiresAt: now + SESSION_TTL_MS };
+    const session: Session = {
+      csrf: randomBytes(24).toString('base64url'),
+      expiresAt: now + SESSION_TTL_MS,
+      controlCount: 0,
+      controlResetAt: now + CONTROL_WINDOW_MS
+    };
     sessions.set(id, session);
     res.cookie(SESSION_COOKIE, id, {
       httpOnly: true,
@@ -856,7 +913,7 @@ export function createConfigUiRouter(
     res.json({ csrf: session.csrf, config: buildViewModel(config, values) });
   });
 
-  router.put('/api/config', sameOrigin, requireSession, requireCsrf, async (req, res) => {
+  router.put('/api/config', sameOrigin, requireSession, requireCsrf, requireControlRate, async (req, res) => {
     try {
       const result = await enqueueWrite(async () => {
         const current = await readEnvFile(envFile);
@@ -874,11 +931,12 @@ export function createConfigUiRouter(
       });
     } catch (error) {
       logger.warn('Configuration UI save rejected', { error: error instanceof Error ? error.message : String(error) });
-      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+      res.status(code === 'CONFIG_WRITE_QUEUE_FULL' ? 429 : 400).json({ error: error instanceof Error ? error.message : String(error) });
     }
   });
 
-  router.post('/api/config/test/:service', sameOrigin, requireSession, requireCsrf, async (req, res) => {
+  router.post('/api/config/test/:service', sameOrigin, requireSession, requireCsrf, requireControlRate, async (req, res) => {
     const service = req.params.service;
     try {
       const { values } = await readEnvFile(envFile);
@@ -897,9 +955,12 @@ export function createConfigUiRouter(
       }
       if (service === 'tmdb') {
         const record = readRecord(req.body, 'TMDB probe');
-        const baseUrl = normalizeHttpUrl(record['baseUrl'] ?? values.get('TMDB_API_BASE_URL') ?? config.tmdb.apiBaseUrl, 'TMDB API URL');
-        const token = readStringField(record, 'authToken') || values.get('TMDB_API_READ_ACCESS_TOKEN') || config.tmdb.authToken;
-        if (!token) throw new Error('TMDB token is required.');
+        const storedBaseUrl = values.get('TMDB_API_BASE_URL') || config.tmdb.apiBaseUrl;
+        const baseUrl = normalizeHttpUrl(record['baseUrl'] ?? storedBaseUrl, 'TMDB API URL');
+        const suppliedToken = readStringField(record, 'authToken');
+        const storedToken = values.get('TMDB_API_READ_ACCESS_TOKEN') || config.tmdb.authToken;
+        const token = credentialForProbeOrigin(baseUrl, suppliedToken, storedBaseUrl, storedToken);
+        if (!token) throw new Error('TMDB token must be supplied when testing a different server origin.');
         await fetchJson(`${baseUrl}/3/configuration`, {
           headers: { authorization: `Bearer ${token}`, accept: 'application/json' }
         }, config.requestTimeoutMs);
@@ -912,7 +973,7 @@ export function createConfigUiRouter(
     }
   });
 
-  router.post('/api/config/options/:service', sameOrigin, requireSession, requireCsrf, async (req, res) => {
+  router.post('/api/config/options/:service', sameOrigin, requireSession, requireCsrf, requireControlRate, async (req, res) => {
     const service = req.params.service;
     if (service !== 'radarr' && service !== 'sonarr') {
       res.status(404).json({ error: 'unsupported_service' });

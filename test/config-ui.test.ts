@@ -49,6 +49,7 @@ test.afterEach(async () => {
 });
 
 test('manifest advertises Stremio configuration without making it mandatory', async () => {
+  process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   const cfg = uiConfig();
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {

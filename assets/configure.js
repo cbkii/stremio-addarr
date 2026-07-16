@@ -238,6 +238,9 @@ async function testAndDiscover(service) {
       language.replaceChildren();
       option(language, 0, 'Not used');
       for (const item of options.languageProfiles) option(language, item.id, item.name);
+      if (selectedLanguage && ![...language.options].some((item) => item.value === selectedLanguage)) {
+        option(language, selectedLanguage, `Profile ${selectedLanguage}`);
+      }
       language.value = selectedLanguage || '0';
     }
     setMessage(result, `Connected. Found ${options.rootFolders.length} root folder(s) and ${options.qualityProfiles.length} quality profile(s).`, 'success');

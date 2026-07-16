@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import express from 'express';
 import { createApp } from '../src/index.js';
+import { createConfigUiRouter, credentialForProbeOrigin } from '../src/config-ui-core.js';
+import { createLogger } from '../src/logger.js';
 import { baseConfig, withServer } from './_helpers.js';
 
 const ORIGINAL_TOKEN = process.env['CONFIG_UI_TOKEN'];
@@ -98,5 +101,62 @@ test('malformed percent-encoded cookies fail authentication without crashing', a
     assert.equal(response.status, 401);
     const body = (await response.json()) as { error: string };
     assert.equal(body.error, 'authentication_required');
+  });
+});
+
+
+test('probe credentials are reused only for the configured origin', () => {
+  assert.equal(
+    credentialForProbeOrigin('http://radarr.local/api', '', 'http://radarr.local', 'stored-secret'),
+    'stored-secret'
+  );
+  assert.equal(
+    credentialForProbeOrigin('http://other.local', '', 'http://radarr.local', 'stored-secret'),
+    ''
+  );
+  assert.equal(
+    credentialForProbeOrigin('http://other.local', 'fresh-secret', 'http://radarr.local', 'stored-secret'),
+    'fresh-secret'
+  );
+});
+
+test('enabled configuration UI rejects a short administrator token at startup', () => {
+  process.env['CONFIG_UI_TOKEN'] = 'too-short';
+  assert.throws(() => createApp(uiConfig()), /CONFIG_UI_TOKEN must be at least 16 characters/);
+});
+
+test('authenticated control routes are rate limited per session', async () => {
+  const cfg = uiConfig();
+  const token = 'correct-horse-battery-staple';
+  const envFile = await tempEnv();
+  const app = express();
+  const statusService = {
+    getServiceHealth: async () => ({
+      radarr: { configured: false, reachable: false, detail: 'disabled' },
+      sonarr: { configured: false, reachable: false, detail: 'disabled' }
+    })
+  };
+  app.use(createConfigUiRouter(cfg, statusService as never, createLogger('none'), {
+    adminToken: token,
+    envFilePath: envFile,
+    controlRateLimitMax: 1
+  }));
+
+  await withServer(app, async (baseUrl) => {
+    const session = await login(baseUrl, token);
+    const headers = {
+      cookie: session.cookie,
+      'content-type': 'application/json',
+      'x-csrf-token': session.csrf
+    };
+    const first = await fetch(`${baseUrl}/api/config/test/unsupported`, {
+      method: 'POST', headers, body: '{}'
+    });
+    assert.equal(first.status, 404);
+    const second = await fetch(`${baseUrl}/api/config/test/unsupported`, {
+      method: 'POST', headers, body: '{}'
+    });
+    assert.equal(second.status, 429);
+    assert.deepEqual(await second.json(), { error: 'control_rate_limit_exceeded' });
   });
 });
