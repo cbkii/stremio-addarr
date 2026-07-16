@@ -1,0 +1,43 @@
+name: Validate final release cleanup
+
+on:
+  push:
+    branches:
+      - agent/release-hardening-v1.6.0
+    paths:
+      - scripts/final-release-cleanup.py
+      - .github/workflows/final-release-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/release-hardening-v1.6.0
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Apply final cleanup
+        run: python scripts/final-release-cleanup.py
+      - name: Install
+        run: npm ci
+      - name: Validate
+        run: |
+          git diff --check
+          npm run ci
+          npm run package:release
+          rm -rf release
+      - name: Commit reviewed source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/index.ts test/release-hardening.test.ts README.md docs/CONFIGURATION_UI.md
+          git commit -m "redact install tokens and finalise v1.6 documentation"
+          git push origin HEAD:agent/release-hardening-v1.6.0
