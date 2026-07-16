@@ -57,6 +57,9 @@ jobs:
           set -o pipefail
           npm run package:release 2>&1 | tee package-release.log
           rm -rf release
+      - name: Build diagnostic source snapshot
+        if: failure()
+        run: tar --exclude=.git --exclude=node_modules --exclude=diagnostics-snapshot.tar.gz -czf diagnostics-snapshot.tar.gz .
       - name: Upload implementation diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -67,12 +70,13 @@ jobs:
             dependency-refresh.log
             ci.log
             package-release.log
+            diagnostics-snapshot.tar.gz
             scripts/release-hardening-apply.mjs
           if-no-files-found: warn
       - name: Commit validated implementation
         run: |
           rm -rf scripts/.release-hardening scripts/.release-hardening-gz scripts/.release-hardening-gz2 scripts/.release-hardening-gz-fixed
-          rm -f scripts/release-hardening-apply.mjs scripts/fix-release-hardening-patch.py release-hardening.log dependency-refresh.log ci.log package-release.log
+          rm -f scripts/release-hardening-apply.mjs scripts/fix-release-hardening-patch.py release-hardening.log dependency-refresh.log ci.log package-release.log diagnostics-snapshot.tar.gz
           rm -f .github/workflows/release-hardening-apply.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
