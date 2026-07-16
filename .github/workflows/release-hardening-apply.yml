@@ -6,14 +6,12 @@ on:
       - agent/release-hardening-v1.6.0
     paths:
       - scripts/.release-hardening-gz/**
-      - scripts/fix-release-hardening-patch.py
       - .github/workflows/release-hardening-apply.yml
   pull_request:
     branches:
       - main
     paths:
       - scripts/.release-hardening-gz/**
-      - scripts/fix-release-hardening-patch.py
       - .github/workflows/release-hardening-apply.yml
 
 permissions:
@@ -32,10 +30,8 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      - name: Reassemble and correct release hardening patch
-        run: |
-          cat scripts/.release-hardening-gz/part-* | base64 -d | gzip -d > scripts/release-hardening-apply.mjs
-          python scripts/fix-release-hardening-patch.py
+      - name: Reassemble release hardening patch
+        run: cat scripts/.release-hardening-gz/part-* | base64 -d | gzip -d > scripts/release-hardening-apply.mjs
       - name: Apply release hardening patch
         run: |
           set -o pipefail
