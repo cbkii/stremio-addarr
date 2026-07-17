@@ -3,17 +3,17 @@
 When `CONFIG_UI_ENABLED=true`, `stremio-addarr` advertises Stremio's standard `configurable` behaviour hint. The **Configure** action opens:
 
 ```text
-https://YOUR_PUBLIC_BASE_URL/ADDON_ACCESS_TOKEN/configure
+https://YOUR_PUBLIC_BASE_URL/<ADDON_ACCESS_TOKEN>/configure
 ```
 
 The page is intentionally built with server-rendered HTML, native browser controls, a small JavaScript module and TV-first CSS. It does not put Radarr, Sonarr, Trakt or TMDB credentials in the manifest URL.
 
 ## Enable editing
 
-Add a long random administrator token to the same environment file used by the systemd service:
+Let `quick.sh` generate an 8-character token, or add a 4-8 character URL-safe administrator token to the same environment file used by the systemd service:
 
 ```bash
-openssl rand -base64 32
+openssl rand -hex 4
 sudoedit /opt/stremio-addarr/.env
 ```
 

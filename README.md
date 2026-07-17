@@ -579,12 +579,12 @@ All providers are filtered to valid dates with year `> 1901`, and display remain
 - Example env variables: [.env.example](.env.example)
 - Systemd example: [deploy/stremio-addarr.service.example](deploy/stremio-addarr.service.example)
 
-## Release 1.6 security and compatibility requirements
+## Release 1.6+ security and compatibility requirements
 
-- Set a unique `ADDON_ACCESS_TOKEN` (32-128 URL-safe characters). Install Stremio using the protected URL shown by the authenticated configuration UI; unprefixed manifest, catalogue and stream routes are intentionally unavailable.
-- Stremio catalogue pages are fixed at 100 items so Android TV does not stop pagination early.
+- Set a unique `ADDON_ACCESS_TOKEN` (4-128 URL-safe characters). New installs generate 8 characters and existing longer values remain valid. Install Stremio using the protected URL shown by the authenticated configuration UI; unprefixed manifest, catalogue and stream routes are intentionally unavailable.
+- `CATALOG_PAGE_SIZE` is configurable from 10 to 100 and defaults to 30 for lower Pi and Arr request load.
 - Add/search links use short-lived HMAC signatures, direct-file links expire, action requests are rate-limited, and the background queue is bounded.
-- The configuration dashboard is a single-tenant server administration surface. Enable it explicitly with `CONFIG_UI_ENABLED=true` and a 16+ character `CONFIG_UI_TOKEN`.
+- The configuration dashboard is a single-tenant server administration surface. Enable it explicitly with `CONFIG_UI_ENABLED=true` and a 4-128 character URL-safe `CONFIG_UI_TOKEN`; new installs generate 8 characters.
 - The Docker image runs as UID/GID 10001. Ensure the mounted configuration directory is writable by that identity and mount media libraries read-only wherever possible.
 
 
