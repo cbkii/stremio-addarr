@@ -27,8 +27,8 @@ source = source.replace(
     '"    \'README_HOST.md\',\\n    \'CHANGELOG.md\',\\n    \'docs/CONFIGURATION_UI.md\',"',
     '"  \'README_HOST.md\',\\n  \'CHANGELOG.md\',\\n  \'docs/CONFIGURATION_UI.md\',"',
 ).replace(
-    "assert.match(script, /data\\\\.tvLast/);",
-    "assert.match(script, /dataset\\\\.tvLast/);",
+    r"assert.match(script, /data\.tvLast/);",
+    r"assert.match(script, /dataset\.tvLast/);",
 )
 SCRIPT.write_text(source, encoding="utf-8")
 DIAGNOSTIC.unlink(missing_ok=True)
