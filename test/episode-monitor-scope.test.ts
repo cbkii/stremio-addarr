@@ -72,12 +72,12 @@ test('all applicable ep-scope modifiers fit on one tile line', () => {
 
   assert.deepEqual(seriesMonitorScopeLabels(config), [
     'this ep',
-    '≥3 files in prior 8 → this + future',
+    '≥3 in ⎗8 → this + future',
     'new eps: off→on if upgraded'
   ]);
   assert.equal(
     seriesMonitorScopeLine(config),
-    '📡: this ep · ≥3 files in prior 8 → this + future · new eps: off→on if upgraded'
+    '📡: this ep · ≥3 in ⎗8 → this + future · new eps: off→on if upgraded'
   );
   assert.ok(!seriesMonitorScopeLine(config).includes('\n'));
 });
@@ -93,7 +93,7 @@ test('auto remains off when ep upgrades only to season end', () => {
 
   assert.equal(
     seriesMonitorScopeLine(config),
-    '📡: this ep · ≥3 files in prior 8 → season end · new eps: off'
+    '📡: this ep · ≥3 in ⎗8 → season end · new eps: off'
   );
 });
 
@@ -138,7 +138,7 @@ test('episode action tile shows every applicable scope label on one line', async
     assert.equal(response.status, 200);
     const body = (await response.json()) as { streams: Array<{ description?: string }> };
     const lines = body.streams[0].description?.split('\n') ?? [];
-    assert.ok(lines.includes('📡: this ep · ≥3 files in prior 8 → this + future · new eps: off→on if upgraded'));
+    assert.ok(lines.includes('📡: this ep · ≥3 in ⎗8 → this + future · new eps: off→on if upgraded'));
     assert.equal(lines.filter((line) => line.startsWith('📡:')).length, 1);
   });
 });
