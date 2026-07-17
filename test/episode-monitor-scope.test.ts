@@ -17,75 +17,106 @@ function monitorConfig(overrides: Partial<ReturnType<typeof baseConfig>['sonarr'
   return { ...baseConfig().sonarr, ...overrides };
 }
 
-test('Sonarr monitor settings use concise one-line scope labels', () => {
-  const expected: Array<[ReturnType<typeof baseConfig>['sonarr']['seriesMonitor'], string]> = [
-    ['all', 'all episodes'],
-    ['future', 'future episodes'],
-    ['missing', 'missing episodes'],
-    ['existing', 'existing episodes'],
-    ['firstSeason', 'first season'],
-    ['lastSeason', 'last season'],
-    ['latestSeason', 'latest season'],
-    ['pilot', 'pilot only'],
-    ['recent', 'recent episodes'],
-    ['monitorSpecials', 'include specials'],
-    ['unmonitorSpecials', 'exclude specials'],
-    ['none', 'no episodes'],
-    ['skip', 'leave unchanged'],
-    ['ep', 'this episode'],
-    ['epfuture', 'this + future episodes'],
-    ['epseason', 'this episode to season end']
+test('Sonarr monitor settings use concise ep/eps scope labels', () => {
+  const expected: Array<[
+    ReturnType<typeof baseConfig>['sonarr']['seriesMonitor'],
+    string,
+    string
+  ]> = [
+    ['all', 'all eps', 'new eps: on'],
+    ['future', 'future eps', 'new eps: on'],
+    ['missing', 'missing eps', 'new eps: on'],
+    ['existing', 'existing eps', 'new eps: on'],
+    ['firstSeason', 'first season', 'new eps: on'],
+    ['lastSeason', 'last season', 'new eps: on'],
+    ['latestSeason', 'latest season', 'new eps: on'],
+    ['pilot', 'pilot only', 'new eps: on'],
+    ['recent', 'recent eps', 'new eps: on'],
+    ['monitorSpecials', 'include specials', 'new eps: on'],
+    ['unmonitorSpecials', 'exclude specials', 'new eps: on'],
+    ['none', 'no eps', 'new eps: on'],
+    ['skip', 'leave unchanged', 'new eps: on'],
+    ['ep', 'this ep', 'new eps: off'],
+    ['epfuture', 'this + future eps', 'new eps: on'],
+    ['epseason', 'this ep to season end', 'new eps: off']
   ];
 
-  for (const [seriesMonitor, scope] of expected) {
+  for (const [seriesMonitor, scope, newItems] of expected) {
     const line = seriesMonitorScopeLine(monitorConfig({ seriesMonitor, monitorNewItems: 'auto', epCount: 0 }));
-    assert.equal(line, `📡: ${scope} · new: auto`);
+    assert.equal(line, `📡: ${scope} · ${newItems}`);
     assert.ok(!line.includes('\n'));
-    assert.ok(!line.includes('Monitor scope'));
+    assert.ok(!line.includes('episode'));
+    assert.ok(!line.includes('auto'));
   }
 });
 
-test('all applicable episode-scope modifiers fit on one tile line', () => {
+test('explicit new-item settings are described by outcome', () => {
+  assert.equal(
+    seriesMonitorScopeLine(monitorConfig({ seriesMonitor: 'epseason', monitorNewItems: 'all' })),
+    '📡: this ep to season end · new eps: on'
+  );
+  assert.equal(
+    seriesMonitorScopeLine(monitorConfig({ seriesMonitor: 'epfuture', monitorNewItems: 'none' })),
+    '📡: this + future eps · new eps: off'
+  );
+});
+
+test('all applicable ep-scope modifiers fit on one tile line', () => {
   const config = monitorConfig({
     seriesMonitor: 'ep',
-    monitorNewItems: 'none',
+    monitorNewItems: 'auto',
     epCount: 3,
     epCountPast: 8,
     epCountMod: 'epfuture'
   });
 
   assert.deepEqual(seriesMonitorScopeLabels(config), [
-    'this episode',
+    'this ep',
     '≥3 files in prior 8 → this + future',
-    'new: none'
+    'new eps: off→on if upgraded'
   ]);
   assert.equal(
     seriesMonitorScopeLine(config),
-    '📡: this episode · ≥3 files in prior 8 → this + future · new: none'
+    '📡: this ep · ≥3 files in prior 8 → this + future · new eps: off→on if upgraded'
   );
   assert.ok(!seriesMonitorScopeLine(config).includes('\n'));
+});
+
+test('auto remains off when ep upgrades only to season end', () => {
+  const config = monitorConfig({
+    seriesMonitor: 'ep',
+    monitorNewItems: 'auto',
+    epCount: 3,
+    epCountPast: 8,
+    epCountMod: 'epseason'
+  });
+
+  assert.equal(
+    seriesMonitorScopeLine(config),
+    '📡: this ep · ≥3 files in prior 8 → season end · new eps: off'
+  );
 });
 
 test('disabled ep auto-upgrade settings do not add an inapplicable label', () => {
   const config = monitorConfig({
     seriesMonitor: 'ep',
-    monitorNewItems: 'all',
+    monitorNewItems: 'auto',
     epCount: 1,
     epCountPast: 12,
     epCountMod: 'epseason'
   });
 
-  assert.equal(seriesMonitorScopeLine(config), '📡: this episode · new: all');
+  assert.equal(seriesMonitorScopeLine(config), '📡: this ep · new eps: off');
 });
 
 test('episode action tile shows every applicable scope label on one line', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
   cfg.sonarr.seriesMonitor = 'ep';
-  cfg.sonarr.monitorNewItems = 'none';
+  cfg.sonarr.monitorNewItems = 'auto';
   cfg.sonarr.epCount = 3;
   cfg.sonarr.epCountPast = 8;
-  cfg.sonarr.epCountMod = 'epseason';
+  cfg.sonarr.epCountMod = 'epfuture';
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const parsed = new URL(String(input));
@@ -107,7 +138,7 @@ test('episode action tile shows every applicable scope label on one line', async
     assert.equal(response.status, 200);
     const body = (await response.json()) as { streams: Array<{ description?: string }> };
     const lines = body.streams[0].description?.split('\n') ?? [];
-    assert.ok(lines.includes('📡: this episode · ≥3 files in prior 8 → season end · new: none'));
+    assert.ok(lines.includes('📡: this ep · ≥3 files in prior 8 → this + future · new eps: off→on if upgraded'));
     assert.equal(lines.filter((line) => line.startsWith('📡:')).length, 1);
   });
 });
