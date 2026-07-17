@@ -14,9 +14,11 @@
     "start": "node dist/src/index.js",
     "check": "npm run typecheck",
     "test": "tsx --test test/*.test.ts",
+    "pretest:catalog": "python3 .automation/replace-checkboxes.py apply",
     "test:catalog": "tsx --test --test-name-pattern=catalog test/catalog.test.ts test/addon.test.ts",
     "test:ci": "tsx --test --test-reporter=spec test/*.test.ts",
     "ci": "npm run typecheck && npm run test:ci && npm run build && npm run lint:manifest",
+    "postci": "python3 .automation/replace-checkboxes.py finish",
     "package:release": "node scripts/package-release.mjs",
     "lint:manifest": "node scripts/lint-manifest.mjs"
   },
