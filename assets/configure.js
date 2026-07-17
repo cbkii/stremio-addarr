@@ -49,6 +49,18 @@ function selectValue(id, value, fallbackLabel) {
   select.value = String(value ?? '');
 }
 
+function setBooleanValue(id, value) {
+  byId(id).value = value ? 'true' : 'false';
+}
+
+function readBooleanValue(id) {
+  const value = byId(id).value;
+  if (value !== 'true' && value !== 'false') {
+    throw new Error(`Invalid boolean selection for ${id}.`);
+  }
+  return value === 'true';
+}
+
 function populate(config) {
   currentConfig = config;
   const { catalog, radarr, sonarr, playback, trakt, tmdb } = config;
@@ -56,7 +68,7 @@ function populate(config) {
   byId('catalog-page-size').value = catalog.pageSize;
   byId('catalog-watched-keep').value = catalog.watchedKeepCount;
 
-  byId('radarr-enabled').checked = radarr.enabled;
+  setBooleanValue('radarr-enabled', radarr.enabled);
   byId('radarr-url').value = radarr.baseUrl;
   byId('radarr-card-url').value = radarr.cardUrl || '';
   byId('radarr-key').value = '';
@@ -65,10 +77,10 @@ function populate(config) {
   selectValue('radarr-profile', radarr.qualityProfileId, `Profile ${radarr.qualityProfileId}`);
   byId('radarr-minimum').value = radarr.minimumAvailability;
   byId('radarr-tags').value = radarr.tags;
-  byId('radarr-search').checked = radarr.searchOnAdd;
-  byId('radarr-strict').checked = radarr.strictImdbMatch;
+  setBooleanValue('radarr-search', radarr.searchOnAdd);
+  setBooleanValue('radarr-strict', radarr.strictImdbMatch);
 
-  byId('sonarr-enabled').checked = sonarr.enabled;
+  setBooleanValue('sonarr-enabled', sonarr.enabled);
   byId('sonarr-url').value = sonarr.baseUrl;
   byId('sonarr-card-url').value = sonarr.cardUrl || '';
   byId('sonarr-key').value = '';
@@ -79,22 +91,22 @@ function populate(config) {
   byId('sonarr-monitor').value = sonarr.seriesMonitor;
   byId('sonarr-new-items').value = sonarr.monitorNewItems;
   byId('sonarr-tags').value = sonarr.tags;
-  byId('sonarr-search').checked = sonarr.searchOnAdd;
+  setBooleanValue('sonarr-search', sonarr.searchOnAdd);
   byId('episode-timeout').value = sonarr.episodeReadyTimeoutMs;
   byId('episode-poll').value = sonarr.episodeReadyPollMs;
   byId('ep-count').value = sonarr.epCount;
   byId('ep-count-past').value = sonarr.epCountPast;
   byId('ep-count-mod').value = sonarr.epCountMod;
 
-  byId('kodi-enabled').checked = playback.kodiEnabled;
+  setBooleanValue('kodi-enabled', playback.kodiEnabled);
   byId('kodi-package').value = playback.kodiPackageName;
-  byId('streaming-enabled').checked = playback.fileStreamingEnabled;
+  setBooleanValue('streaming-enabled', playback.fileStreamingEnabled);
   byId('playback-mode').value = playback.fileStreamingPlaybackMode;
   byId('streaming-secret-state').textContent = playback.fileStreamingSecretConfigured
     ? 'The file-streaming signing secret is configured outside this UI.'
     : 'Set FILE_STREAMING_SECRET in the server environment before enabling direct streaming.';
 
-  byId('trakt-enabled').checked = trakt.enabled;
+  setBooleanValue('trakt-enabled', trakt.enabled);
   byId('trakt-sync-mins').value = trakt.syncMins;
   byId('trakt-api-url').value = trakt.apiBaseUrl;
   byId('trakt-client-id').value = '';
@@ -124,7 +136,7 @@ function collect() {
       watchedKeepCount: readNumber('catalog-watched-keep')
     },
     radarr: {
-      enabled: byId('radarr-enabled').checked,
+      enabled: readBooleanValue('radarr-enabled'),
       baseUrl: byId('radarr-url').value,
       cardUrl: byId('radarr-card-url').value,
       apiKey: byId('radarr-key').value,
@@ -132,11 +144,11 @@ function collect() {
       qualityProfileId: readNumber('radarr-profile'),
       minimumAvailability: byId('radarr-minimum').value,
       tags: byId('radarr-tags').value,
-      searchOnAdd: byId('radarr-search').checked,
-      strictImdbMatch: byId('radarr-strict').checked
+      searchOnAdd: readBooleanValue('radarr-search'),
+      strictImdbMatch: readBooleanValue('radarr-strict')
     },
     sonarr: {
-      enabled: byId('sonarr-enabled').checked,
+      enabled: readBooleanValue('sonarr-enabled'),
       baseUrl: byId('sonarr-url').value,
       cardUrl: byId('sonarr-card-url').value,
       apiKey: byId('sonarr-key').value,
@@ -151,16 +163,16 @@ function collect() {
       epCountPast: readNumber('ep-count-past'),
       epCountMod: byId('ep-count-mod').value,
       tags: byId('sonarr-tags').value,
-      searchOnAdd: byId('sonarr-search').checked
+      searchOnAdd: readBooleanValue('sonarr-search')
     },
     playback: {
-      kodiEnabled: byId('kodi-enabled').checked,
+      kodiEnabled: readBooleanValue('kodi-enabled'),
       kodiPackageName: byId('kodi-package').value,
-      fileStreamingEnabled: byId('streaming-enabled').checked,
+      fileStreamingEnabled: readBooleanValue('streaming-enabled'),
       fileStreamingPlaybackMode: byId('playback-mode').value
     },
     trakt: {
-      enabled: byId('trakt-enabled').checked,
+      enabled: readBooleanValue('trakt-enabled'),
       syncMins: readNumber('trakt-sync-mins'),
       apiBaseUrl: byId('trakt-api-url').value,
       clientId: byId('trakt-client-id').value,
@@ -328,6 +340,14 @@ document.addEventListener('keydown', (event) => {
 });
 
 const FIELD_HELP = {
+  'radarr-enabled': 'Choose Enabled to expose Radarr actions and catalogues, or Disabled to leave Radarr unused.',
+  'radarr-search': 'Choose Enabled to start a Radarr search immediately after adding a movie.',
+  'radarr-strict': 'Choose Enabled to require an exact IMDb match before Radarr actions are offered.',
+  'sonarr-enabled': 'Choose Enabled to expose Sonarr actions and catalogues, or Disabled to leave Sonarr unused.',
+  'sonarr-search': 'Choose Enabled to start a Sonarr search immediately after adding a series or episode.',
+  'kodi-enabled': 'Choose Enabled to offer Kodi as a playback fallback.',
+  'streaming-enabled': 'Choose Enabled to serve existing media files directly from this Pi.',
+  'trakt-enabled': 'Choose Enabled to synchronise watched history with Trakt.',
   'radarr-url': 'The URL this Pi uses to reach Radarr, including http:// or https:// and its port.',
   'radarr-card-url': 'Optional user-facing Radarr URL shown on cards. Leave blank to reuse the server URL.',
   'radarr-key': 'Used only by the server. Leave blank to keep the existing key.',

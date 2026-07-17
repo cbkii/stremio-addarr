@@ -648,7 +648,7 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
 
         <section class="panel config-section" data-page="arr" hidden>
           <h2>Radarr</h2>
-          <div class="toggle-row"><label for="radarr-enabled">Enable Radarr</label><input id="radarr-enabled" type="checkbox"></div>
+          <label for="radarr-enabled">Radarr integration</label><select id="radarr-enabled" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
           <label for="radarr-url">Server URL</label><input id="radarr-url" inputmode="url" placeholder="http://127.0.0.1:7878">
           <label for="radarr-card-url">Display URL <span class="muted">optional</span></label><input id="radarr-card-url" inputmode="url">
           <label for="radarr-key">API key <span class="muted" id="radarr-key-state"></span></label><input id="radarr-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing">
@@ -659,12 +659,12 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
           <label for="radarr-minimum">Minimum availability</label>
           <select id="radarr-minimum"><option value="announced">Announced</option><option value="inCinemas">In cinemas</option><option value="released">Released</option><option value="preDB">PreDB</option></select>
           <label for="radarr-tags">Tag IDs</label><input id="radarr-tags" inputmode="numeric" placeholder="1,3">
-          <div class="toggle-row"><label for="radarr-search">Search immediately after add</label><input id="radarr-search" type="checkbox"></div>
-          <div class="toggle-row"><label for="radarr-strict">Require strict IMDb match</label><input id="radarr-strict" type="checkbox"></div>
+          <label for="radarr-search">Search immediately after add</label><select id="radarr-search" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
+          <label for="radarr-strict">Require strict IMDb match</label><select id="radarr-strict" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
 
           <hr>
           <h2>Sonarr</h2>
-          <div class="toggle-row"><label for="sonarr-enabled">Enable Sonarr</label><input id="sonarr-enabled" type="checkbox"></div>
+          <label for="sonarr-enabled">Sonarr integration</label><select id="sonarr-enabled" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
           <label for="sonarr-url">Server URL</label><input id="sonarr-url" inputmode="url" placeholder="http://127.0.0.1:8989">
           <label for="sonarr-card-url">Display URL <span class="muted">optional</span></label><input id="sonarr-card-url" inputmode="url">
           <label for="sonarr-key">API key <span class="muted" id="sonarr-key-state"></span></label><input id="sonarr-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing">
@@ -683,7 +683,7 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
           </select>
           <label for="sonarr-new-items">Monitor new items</label><select id="sonarr-new-items"><option value="auto">Automatic</option><option value="all">All</option><option value="none">None</option></select>
           <label for="sonarr-tags">Tag IDs</label><input id="sonarr-tags" inputmode="numeric" placeholder="1,3">
-          <div class="toggle-row"><label for="sonarr-search">Search immediately after add</label><input id="sonarr-search" type="checkbox"></div>
+          <label for="sonarr-search">Search immediately after add</label><select id="sonarr-search" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
           <details><summary>Advanced episode behaviour</summary>
             <label for="episode-timeout">Episode-ready timeout (ms)</label><input id="episode-timeout" type="number" min="1000" step="250">
             <label for="episode-poll">Episode-ready poll interval (ms)</label><input id="episode-poll" type="number" min="250" step="250">
@@ -703,16 +703,16 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
 
         <section class="panel config-section" data-page="playback" hidden>
           <h2>Playback</h2>
-          <div class="toggle-row"><label for="kodi-enabled">Enable Kodi fallback</label><input id="kodi-enabled" type="checkbox"></div>
+          <label for="kodi-enabled">Kodi fallback</label><select id="kodi-enabled" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
           <label for="kodi-package">Kodi Android package</label><input id="kodi-package">
-          <div class="toggle-row"><label for="streaming-enabled">Enable direct Pi file streaming</label><input id="streaming-enabled" type="checkbox"></div>
+          <label for="streaming-enabled">Direct Pi file streaming</label><select id="streaming-enabled" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
           <p class="muted" id="streaming-secret-state"></p>
           <label for="playback-mode">Preferred playback mode</label><select id="playback-mode"><option value="direct">Direct stream</option><option value="kodi">Kodi fallback</option></select>
         </section>
 
         <section class="panel config-section" data-page="integrations" hidden>
           <h2>Trakt watched sync</h2>
-          <div class="toggle-row"><label for="trakt-enabled">Enable Trakt sync</label><input id="trakt-enabled" type="checkbox"></div>
+          <label for="trakt-enabled">Trakt watched sync</label><select id="trakt-enabled" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
           <label for="trakt-sync-mins">Sync interval (minutes)</label><input id="trakt-sync-mins" type="number" min="40">
           <label for="trakt-api-url">API URL</label><input id="trakt-api-url" inputmode="url">
           <label for="trakt-client-id">Client ID <span class="muted" id="trakt-client-id-state"></span></label><input id="trakt-client-id" type="password" placeholder="Leave blank to keep existing">

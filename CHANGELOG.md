@@ -18,4 +18,5 @@
 - Restore configurable catalogue page sizes from 10 to 100 with a Pi-friendly default of 30.
 - Redesign the configuration UI for compact TV and landscape use, with smaller header/status/actions, purple action controls, wider responsive layouts and detailed field guidance.
 - Rework D-pad behaviour so form navigation is sequential, number inputs can be exited, tabs are predictable, Back first leaves edit mode, and the sticky save action is reached only at the end.
+- Replace all Configure UI checkboxes with explicit Enabled/Disabled dropdowns for reliable Android TV remote operation.
 - Clarify that saving changes server configuration, while Install / reinstall is only for initial installation or access-token rotation.
