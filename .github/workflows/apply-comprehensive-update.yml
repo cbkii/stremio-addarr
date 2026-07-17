@@ -1,0 +1,63 @@
+name: Apply comprehensive update
+
+on:
+  push:
+    branches:
+      - agent/fix-install-config-ui-flow
+    paths:
+      - .automation/apply_comprehensive_update.py
+      - .github/workflows/apply-comprehensive-update.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-comprehensive-update
+  cancel-in-progress: false
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/fix-install-config-ui-flow
+
+      - name: Apply asserted source transformations
+        run: python3 .automation/apply_comprehensive_update.py
+
+      - name: Validate shell syntax
+        run: bash -n quick.sh
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run full CI suite
+        run: npm run ci
+
+      - name: Remove one-shot automation
+        run: |
+          rm -f .automation/apply_comprehensive_update.py
+          rmdir .automation 2>/dev/null || true
+          rm -f .github/workflows/apply-comprehensive-update.yml
+
+      - name: Commit validated implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No implementation changes were produced."
+            exit 1
+          fi
+          git commit -m "fix: harden install flow and redesign configuration UI"
+          git push origin HEAD:agent/fix-install-config-ui-flow
