@@ -29,7 +29,7 @@ const MONITOR_SCOPE_LABELS: Record<SeriesMonitorMode, string> = {
 function epAutoUpgradeLabel(config: SeriesMonitorDisplayConfig): string | undefined {
   if (config.seriesMonitor !== 'ep' || config.epCount <= 1) return undefined;
   const target = config.epCountMod === 'epfuture' ? 'this + future' : 'season end';
-  return `≥${config.epCount} files in prior ${config.epCountPast} → ${target}`;
+  return `≥${config.epCount} in ⎗${config.epCountPast} → ${target}`;
 }
 
 function monitorNewItemsLabel(config: SeriesMonitorDisplayConfig): string {
