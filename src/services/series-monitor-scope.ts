@@ -8,22 +8,22 @@ type SeriesMonitorDisplayConfig = Pick<
 >;
 
 const MONITOR_SCOPE_LABELS: Record<SeriesMonitorMode, string> = {
-  all: 'all episodes',
-  future: 'future episodes',
-  missing: 'missing episodes',
-  existing: 'existing episodes',
+  all: 'all eps',
+  future: 'future eps',
+  missing: 'missing eps',
+  existing: 'existing eps',
   firstSeason: 'first season',
   lastSeason: 'last season',
   latestSeason: 'latest season',
   pilot: 'pilot only',
-  recent: 'recent episodes',
+  recent: 'recent eps',
   monitorSpecials: 'include specials',
   unmonitorSpecials: 'exclude specials',
-  none: 'no episodes',
+  none: 'no eps',
   skip: 'leave unchanged',
-  ep: 'this episode',
-  epfuture: 'this + future episodes',
-  epseason: 'this episode to season end'
+  ep: 'this ep',
+  epfuture: 'this + future eps',
+  epseason: 'this ep to season end'
 };
 
 function epAutoUpgradeLabel(config: SeriesMonitorDisplayConfig): string | undefined {
@@ -32,11 +32,26 @@ function epAutoUpgradeLabel(config: SeriesMonitorDisplayConfig): string | undefi
   return `≥${config.epCount} files in prior ${config.epCountPast} → ${target}`;
 }
 
+function monitorNewItemsLabel(config: SeriesMonitorDisplayConfig): string {
+  if (config.monitorNewItems === 'all') return 'new eps: on';
+  if (config.monitorNewItems === 'none') return 'new eps: off';
+
+  if (config.seriesMonitor === 'epfuture') return 'new eps: on';
+  if (config.seriesMonitor === 'epseason') return 'new eps: off';
+  if (config.seriesMonitor === 'ep') {
+    return config.epCount > 1 && config.epCountMod === 'epfuture'
+      ? 'new eps: off→on if upgraded'
+      : 'new eps: off';
+  }
+
+  return 'new eps: on';
+}
+
 export function seriesMonitorScopeLabels(config: SeriesMonitorDisplayConfig): string[] {
   return [
     MONITOR_SCOPE_LABELS[config.seriesMonitor],
     epAutoUpgradeLabel(config),
-    `new: ${config.monitorNewItems}`
+    monitorNewItemsLabel(config)
   ].filter((label): label is string => Boolean(label));
 }
 
