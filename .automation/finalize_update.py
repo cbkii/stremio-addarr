@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import subprocess
 
@@ -10,10 +9,15 @@ package_path = root / "package.json"
 package = json.loads(package_path.read_text(encoding="utf-8"))
 package["scripts"].pop("preci", None)
 package["scripts"].pop("postci", None)
+package["scripts"]["ci"] = "npm run typecheck && npm run test:ci && npm run build && npm run lint:manifest"
 package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
 
 for relative in [
     ".automation/apply_comprehensive_update.py",
+    ".automation/run_transform.py",
+    ".automation/run_ci.py",
+    ".automation/transform-error.txt",
+    ".automation/ci-error.txt",
     ".automation/finalize_update.py",
     ".github/workflows/apply-comprehensive-update.yml",
 ]:
