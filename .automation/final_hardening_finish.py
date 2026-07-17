@@ -12,7 +12,12 @@ package["scripts"].pop("preci", None)
 package["scripts"].pop("postci", None)
 package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
 
-for relative in [".automation/final_hardening.py", ".automation/final_hardening_finish.py"]:
+for relative in [
+    ".automation/final_hardening.py",
+    ".automation/run_final_hardening.py",
+    ".automation/final-hardening-error.txt",
+    ".automation/final_hardening_finish.py",
+]:
     (ROOT / relative).unlink(missing_ok=True)
 try:
     (ROOT / ".automation").rmdir()
