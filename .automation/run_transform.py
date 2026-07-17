@@ -10,8 +10,8 @@ BRANCH = "agent/fix-install-config-ui-flow"
 SCRIPT = ROOT / ".automation/apply_comprehensive_update.py"
 DIAGNOSTIC = ROOT / ".automation/transform-error.txt"
 
-# Correct the asserted indentation used by the install-mode insertion. The
-# source line is inside a two-space shell block; upgrade-mode gates use four.
+# Normalise two asserted source snippets whose indentation differs from the
+# semantic content expected by the transformation.
 source = SCRIPT.read_text(encoding="utf-8")
 source = source.replace(
     '"""    say \\"Please review app config before continuing.\\"""',
@@ -19,6 +19,12 @@ source = source.replace(
 ).replace(
     '"""    configure_tokens\\n\\n    say \\"Please review app config before continuing.\\"""',
     '"""  configure_tokens\\n\\n  say \\"Please review app config before continuing.\\"""',
+).replace(
+    '"    \'README_HOST.md\',\\n    \'docs/CONFIGURATION_UI.md\',"',
+    '"  \'README_HOST.md\',\\n  \'docs/CONFIGURATION_UI.md\',"',
+).replace(
+    '"    \'README_HOST.md\',\\n    \'CHANGELOG.md\',\\n    \'docs/CONFIGURATION_UI.md\',"',
+    '"  \'README_HOST.md\',\\n  \'CHANGELOG.md\',\\n  \'docs/CONFIGURATION_UI.md\',"',
 )
 SCRIPT.write_text(source, encoding="utf-8")
 DIAGNOSTIC.unlink(missing_ok=True)
