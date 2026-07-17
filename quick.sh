@@ -170,6 +170,9 @@ merge_env_with_template() {
       while ((getline line < existing_file) > 0) {
         delete key_buf
         delete val_buf
+        # Commented examples are documentation, not configured values. Keeping
+        # them caused placeholder tokens to override real upgrade settings.
+        if (line ~ /^[[:space:]]*#/) continue
         if (parse_assignment(line, key_buf, val_buf)) {
           key = key_buf[1]
           if (!(key in existing_vals)) {
@@ -325,6 +328,134 @@ upsert_env_key() {
   fi
 }
 
+generate_short_token() {
+  # Six random bytes encode to exactly eight URL-safe base64 characters.
+  openssl rand -base64 6 | tr '+/' '-_' | tr -d '=\n'
+}
+
+read_env_value() {
+  local key="$1"
+  [[ -f "$INSTALL_DIR/.env" ]] || { printf '\\n'; return 0; }
+  awk -v key="$key" '
+    /^[[:space:]]*#/ { next }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (line ~ "^[[:space:]]*" key "[[:space:]]*=") {
+        sub("^[[:space:]]*" key "[[:space:]]*=", "", line)
+        value = line
+      }
+    }
+    END { print value }
+  ' "$INSTALL_DIR/.env"
+}
+
+is_runtime_token() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]{8,128}$ ]]
+}
+
+is_short_token() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]{8}$ ]]
+}
+
+choose_token() {
+  local key="$1"
+  local label="$2"
+  local purpose="$3"
+  local current choice value prompt
+  current="$(read_env_value "$key")"
+
+  echo
+  say "$label"
+  echo "$purpose"
+  if is_runtime_token "$current"; then
+    echo "Current value: configured (${#current} characters)."
+    prompt="Choose [k] keep / [s] specify exactly 8 characters / [g] generate random 8 characters [k]: "
+  else
+    echo "Current value: not configured or invalid."
+    prompt="Choose [s] specify exactly 8 characters / [g] generate random 8 characters [g]: "
+  fi
+
+  while true; do
+    read -r -p "${C_YELLOW}${C_BOLD}${prompt}${C_RESET}" choice
+    choice="${choice,,}"
+    if [[ -z "$choice" ]]; then
+      if is_runtime_token "$current"; then choice="k"; else choice="g"; fi
+    fi
+    case "$choice" in
+      k|keep)
+        if is_runtime_token "$current"; then
+          ok "Keeping existing $key."
+          return 0
+        fi
+        warn "There is no valid token to keep."
+        ;;
+      s|specify)
+        read -r -p "${C_YELLOW}${C_BOLD}Enter exactly 8 URL-safe characters [A-Za-z0-9_-]: ${C_RESET}" value
+        if ! is_short_token "$value"; then
+          warn "Use exactly 8 characters containing only letters, numbers, _ or -."
+          continue
+        fi
+        upsert_env_key "$key" "$value"
+        ok "$key set to: $value"
+        return 0
+        ;;
+      g|generate)
+        value="$(generate_short_token)"
+        upsert_env_key "$key" "$value"
+        ok "$key generated: $value"
+        echo "Record this value now; it is intentionally short for TV entry."
+        return 0
+        ;;
+      *) warn "Choose keep, specify or generate." ;;
+    esac
+  done
+}
+
+prompt_config_ui_enabled() {
+  local current answer default_prompt
+  current="$(read_env_value CONFIG_UI_ENABLED)"
+  case "${current,,}" in
+    true|1|yes|on) current="true"; default_prompt="[Y/n]" ;;
+    *) current="false"; default_prompt="[y/N]" ;;
+  esac
+  while true; do
+    read -r -p "${C_YELLOW}${C_BOLD}Enable the Stremio/browser configuration UI? $default_prompt: ${C_RESET}" answer
+    answer="${answer,,}"
+    if [[ -z "$answer" ]]; then answer="$current"; fi
+    case "$answer" in
+      y|yes|true|1|on) upsert_env_key CONFIG_UI_ENABLED true; return 0 ;;
+      n|no|false|0|off) upsert_env_key CONFIG_UI_ENABLED false; return 0 ;;
+      *) warn "Please enter y or n." ;;
+    esac
+  done
+}
+
+configure_tokens() {
+  say "Token setup"
+  echo "The add-on access token forms the private Stremio manifest path."
+  echo "The configuration token unlocks server settings and is never part of the manifest URL."
+  echo "New random tokens are 8 characters. Existing longer tokens remain supported."
+
+  choose_token ADDON_ACCESS_TOKEN "Add-on access token" \
+    "Used in /<token>/manifest.json and /<token>/configure."
+
+  prompt_config_ui_enabled
+  if [[ "$(read_env_value CONFIG_UI_ENABLED)" == "true" ]]; then
+    choose_token CONFIG_UI_TOKEN "Configuration UI token" \
+      "Entered on the Configure page to unlock editing."
+  else
+    warn "Configuration UI disabled; /configure will not be exposed."
+  fi
+
+  local logo
+  logo="$(read_env_value MANIFEST_LOGO_URL)"
+  if [[ "$logo" == *'${PUBLIC_BASE_URL}'* || "$logo" == *'$PUBLIC_BASE_URL'* ]]; then
+    upsert_env_key MANIFEST_LOGO_URL local
+    warn "Migrated MANIFEST_LOGO_URL to 'local'; systemd EnvironmentFile values do not expand nested variables."
+  fi
+}
+
 configure_trakt_oauth() {
   say "Optional Trakt OAuth setup"
   if ! prompt_confirm "Configure Trakt watched-sync OAuth in this quick run?"; then
@@ -444,19 +575,31 @@ VERIFY_ERRORS=()
 # Does not exit the script on timeout — verification section will catch it.
 wait_for_service() {
   local svc="$1"
-  local timeout="${2:-10}"
+  local timeout="${2:-15}"
   local i=0
+  local stable=0
   while (( i < timeout )); do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
-      ok "Service $svc is active."
-      return 0
+      stable=$((stable + 1))
+      if (( stable >= 3 )); then
+        ok "Service $svc remained active for three consecutive checks."
+        return 0
+      fi
+    else
+      stable=0
     fi
     sleep 1
     (( i++ )) || true
   done
-  warn "Service $svc did not become active within ${timeout}s."
-  warn "Recent logs:"
-  sudo journalctl -u "$svc" -n 20 --no-pager || true
+  warn "Service $svc did not remain stably active within ${timeout}s."
+  warn "Recent logs from the current service invocation:"
+  local invocation
+  invocation="$(systemctl show "$svc" -p InvocationID --value 2>/dev/null || true)"
+  if [[ -n "$invocation" ]]; then
+    sudo journalctl "_SYSTEMD_INVOCATION_ID=$invocation" -n 40 --no-pager || true
+  else
+    sudo journalctl -u "$svc" -n 40 --no-pager || true
+  fi
   return 1
 }
 
@@ -561,7 +704,7 @@ echo "Service account target: ${SVC_USER}:${SVC_GROUP}"
 echo "Install directory: $INSTALL_DIR"
 
 say "Preflight checks"
-for c in gh sha256sum tar npm node curl sudo file diff systemctl; do
+for c in gh sha256sum tar npm node curl sudo file diff systemctl openssl; do
   check_cmd "$c"
 done
 
@@ -628,6 +771,8 @@ if [[ "$MODE" == "install" ]]; then
     warn ".env already exists; preserving it."
   fi
 
+  configure_tokens
+
   say "Please review app config before continuing."
   echo "Tip: set PUBLIC_BASE_URL=https://YOUR_HOSTNAME and Arr API keys."
   prompt_gate "Review .env now." "$INSTALL_DIR/.env"
@@ -669,10 +814,12 @@ else
     else
       warn "Skipped .env merge step at operator request."
     fi
+    configure_tokens
     prompt_gate "Review .env diff and approve." "$INSTALL_DIR/.env"
   else
     warn "No existing .env found. Creating from .env.example."
     run_step "Create .env from .env.example" cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
+    configure_tokens
     prompt_gate "Review newly created .env." "$INSTALL_DIR/.env"
   fi
 
@@ -713,16 +860,32 @@ else
   sudo journalctl -u stremio-addarr -n 80 --no-pager || true
 fi
 
+PUBLIC_MANIFEST_URL=""
+PUBLIC_CONFIGURE_URL=""
 if [[ -z "${PUBLIC_BASE_URL:-}" ]]; then
   print_status_line WARN "PUBLIC_BASE_URL is missing in .env. Configure hosting before Stremio install."
+elif [[ -z "${ADDON_ACCESS_TOKEN:-}" ]]; then
+  print_status_line FAIL "ADDON_ACCESS_TOKEN is missing in .env."
+  VERIFICATION_FAILURES=$((VERIFICATION_FAILURES + 1))
+  VERIFY_ERRORS+=("ADDON_ACCESS_TOKEN is missing")
 else
-  run_verification "Public health endpoint responds." curl -fsS "${PUBLIC_BASE_URL}/healthz"
-  run_verification "Public HTTPS manifest endpoint responds." curl -fI "${PUBLIC_BASE_URL}/manifest.json"
-  run_verification "Public status.json endpoint responds." curl -fsS "${PUBLIC_BASE_URL}/status.json"
+  PUBLIC_MANIFEST_URL="${PUBLIC_BASE_URL%/}/${ADDON_ACCESS_TOKEN}/manifest.json"
+  PUBLIC_CONFIGURE_URL="${PUBLIC_BASE_URL%/}/${ADDON_ACCESS_TOKEN}/configure"
+  run_verification "Public health endpoint responds." curl -fsS "${PUBLIC_BASE_URL%/}/healthz"
+  run_verification "Public protected manifest endpoint responds." curl -fsS "$PUBLIC_MANIFEST_URL"
+  run_verification "Public status.json endpoint responds." curl -fsS "${PUBLIC_BASE_URL%/}/status.json"
+  if [[ "${CONFIG_UI_ENABLED:-false}" == "true" ]]; then
+    run_verification "Public token-derived Configure page responds." curl -fsS "$PUBLIC_CONFIGURE_URL"
+  fi
 fi
 
 run_verification "Local health endpoint responds." curl -fsS http://127.0.0.1:7010/healthz
-run_verification "Local manifest endpoint responds." curl -fsS http://127.0.0.1:7010/manifest.json
+if [[ -n "${ADDON_ACCESS_TOKEN:-}" ]]; then
+  run_verification "Local protected manifest endpoint responds." curl -fsS "http://127.0.0.1:7010/${ADDON_ACCESS_TOKEN}/manifest.json"
+  if [[ "${CONFIG_UI_ENABLED:-false}" == "true" ]]; then
+    run_verification "Local token-derived Configure page responds." curl -fsS "http://127.0.0.1:7010/${ADDON_ACCESS_TOKEN}/configure"
+  fi
+fi
 run_verification "Local status.json endpoint responds." curl -fsS http://127.0.0.1:7010/status.json
 
 echo
@@ -742,10 +905,15 @@ echo -e "  ${C_BOLD}Quick commands:${C_RESET}"
 echo "    sudo systemctl restart stremio-addarr"
 echo "    sudo systemctl status  stremio-addarr --no-pager -l"
 echo "    sudo journalctl -u stremio-addarr -f"
-if [[ -n "${PUBLIC_BASE_URL:-}" ]]; then
+if [[ -n "${PUBLIC_MANIFEST_URL:-}" ]]; then
   echo
-  echo -e "  ${C_BOLD}Add-on URL:${C_RESET}   ${PUBLIC_BASE_URL}/manifest.json"
-  echo "  Paste into Stremio: ${PUBLIC_BASE_URL}/manifest.json"
+  echo -e "  ${C_BOLD}Stremio manifest:${C_RESET}  $PUBLIC_MANIFEST_URL"
+  echo "  Paste this exact protected URL into Stremio."
+  echo "  The unprotected /manifest.json URL intentionally returns 404."
+  if [[ "${CONFIG_UI_ENABLED:-false}" == "true" ]]; then
+    echo -e "  ${C_BOLD}Configure page:${C_RESET}    $PUBLIC_CONFIGURE_URL"
+    echo "  Save server settings there; reinstall only after first setup or an access-token change."
+  fi
 fi
 if (( VERIFICATION_FAILURES > 0 )); then
   echo

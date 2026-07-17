@@ -388,13 +388,11 @@ function loadCacheConfig(): Pick<AppConfig,
   const serviceHealthCacheTtlMs = readNumber('SERVICE_HEALTH_CACHE_TTL_MS', 10000);
   const streamCacheMaxAgeSec = readNumber('STREAM_CACHE_MAX_AGE', 2);
   const streamStaleRevalidateSec = readNumber('STREAM_STALE_REVALIDATE', 5);
-  const requestedCatalogPageSize = readNumber('CATALOG_PAGE_SIZE', 100);
-  if (!Number.isInteger(requestedCatalogPageSize) || requestedCatalogPageSize <= 0) {
-    throw new Error('CATALOG_PAGE_SIZE must be a positive integer.');
+  const requestedCatalogPageSize = readNumber('CATALOG_PAGE_SIZE', 30);
+  if (!Number.isInteger(requestedCatalogPageSize) || requestedCatalogPageSize < 10 || requestedCatalogPageSize > 100) {
+    throw new Error('CATALOG_PAGE_SIZE must be an integer between 10 and 100.');
   }
-  // Stremio requests pagination in 100-item steps and treats shorter pages as end-of-catalog.
-  // Normalise legacy values instead of breaking upgrades from earlier 35/50-card defaults.
-  const catalogPageSize = 100;
+  const catalogPageSize = requestedCatalogPageSize;
   const radarrCatalogWatchedKeepCount = readNumber('RADARR_CATALOG_WATCHED_KEEP_COUNT', 1);
   const catalogCacheTtlMs = readNumber('CATALOG_CACHE_TTL_MS', 5000);
   const catalogCacheMaxAgeSec = readNumber('CATALOG_CACHE_MAX_AGE_SEC', 15);
@@ -462,8 +460,8 @@ function loadFileStreamingConfig(): AppConfig['fileStreaming'] {
 
 function loadAccessConfig(): Pick<AppConfig, 'addonAccessToken' | 'actionTokenTtlSec' | 'actionRateLimitMax' | 'actionQueueMax'> {
   const addonAccessToken = readRequiredString('ADDON_ACCESS_TOKEN');
-  if (!/^[A-Za-z0-9_-]{32,128}$/.test(addonAccessToken)) {
-    throw new Error('ADDON_ACCESS_TOKEN must be 32-128 URL-safe characters (letters, numbers, _ or -).');
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(addonAccessToken)) {
+    throw new Error('ADDON_ACCESS_TOKEN must be 8-128 URL-safe characters (letters, numbers, _ or -). New installs generate 8 characters; longer legacy tokens remain valid.');
   }
   const actionTokenTtlSec = Math.floor(readNumber('ACTION_TOKEN_TTL_SEC', 300));
   const actionRateLimitMax = Math.floor(readNumber('ACTION_RATE_LIMIT_MAX', 20));
@@ -477,8 +475,8 @@ function loadAccessConfig(): Pick<AppConfig, 'addonAccessToken' | 'actionTokenTt
 function loadConfigUiConfig(): Pick<AppConfig, 'configUiEnabled' | 'configUiRestartCommand'> {
   const configUiEnabled = readBoolean('CONFIG_UI_ENABLED', false);
   const token = readString('CONFIG_UI_TOKEN');
-  if (configUiEnabled && token.length < 16) {
-    throw new Error('CONFIG_UI_TOKEN must be at least 16 characters when CONFIG_UI_ENABLED=true.');
+  if (configUiEnabled && !/^[A-Za-z0-9_-]{8,128}$/.test(token)) {
+    throw new Error('CONFIG_UI_TOKEN must be 8-128 URL-safe characters when CONFIG_UI_ENABLED=true. New installs generate 8 characters; longer legacy tokens remain valid.');
   }
   const configUiRestartCommand = readString('CONFIG_UI_RESTART_COMMAND', 'sudo systemctl restart stremio-addarr');
   return { configUiEnabled, configUiRestartCommand };

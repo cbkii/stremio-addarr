@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import type { AppConfig } from './config.js';
-import { addonManifestUrl, stremioInstallUrl } from './lib/addon-access.js';
+import { addonBasePath, addonManifestUrl, stremioInstallUrl } from './lib/addon-access.js';
 import type { Logger } from './logger.js';
 import type { ArrStatusService } from './services/status.js';
 
@@ -368,7 +368,7 @@ function buildViewModel(config: AppConfig, pending: Map<string, string>) {
       envFileManaged: true
     },
     catalog: {
-      pageSize: 100,
+      pageSize: parseInteger(pending.get('CATALOG_PAGE_SIZE'), config.catalogPageSize),
       watchedKeepCount: parseInteger(pending.get('RADARR_CATALOG_WATCHED_KEEP_COUNT'), config.radarrCatalogWatchedKeepCount)
     },
     radarr: {
@@ -440,8 +440,7 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
     updates.set(key, String(value));
   };
 
-  readIntegerField(catalog, 'pageSize', 100, 100, 100);
-  set('CATALOG_PAGE_SIZE', 100);
+  set('CATALOG_PAGE_SIZE', readIntegerField(catalog, 'pageSize', config.catalogPageSize, 10, 100));
   set('RADARR_CATALOG_WATCHED_KEEP_COUNT', readIntegerField(catalog, 'watchedKeepCount', config.radarrCatalogWatchedKeepCount, 0, 50));
 
   const radarrEnabled = readBooleanField(radarr, 'enabled', config.radarr.enabled);
@@ -602,7 +601,7 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
       <div>
         <p class="eyebrow">STREMIO ADD-ON</p>
         <h1>Arr Status &amp; Add</h1>
-        <p class="lede">TV-first setup for Radarr, Sonarr, catalogues, playback and watched-state integrations.</p>
+        <p class="lede">Configure Radarr, Sonarr, catalogues and playback.</p>
       </div>
     </header>
 
@@ -637,9 +636,9 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
       <form id="config-form">
         <section class="panel config-section" data-page="overview">
           <h2>Install and status</h2>
-          <p>Configuration changes are written atomically to the service environment file. Restart the service to activate them.</p>
+          <p><strong>Save server settings</strong> applies changes to this add-on after a service restart. Use <strong>Install / reinstall</strong> only for first-time installation or after changing the add-on access token.</p>
           <div class="actions">
-            <a class="button primary" id="install-link" href="${escapeHtml(stremioInstallUrl(config))}">Install in Stremio</a>
+            <a class="button" id="install-link" href="${escapeHtml(stremioInstallUrl(config))}">Install / reinstall in Stremio</a>
             <button type="button" id="copy-manifest">Copy manifest URL</button>
             <button type="button" id="logout">Lock dashboard</button>
           </div>
@@ -696,8 +695,8 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
 
         <section class="panel config-section" data-page="catalog" hidden>
           <h2>Stremio catalogues</h2>
-          <label for="catalog-page-size">Cards per page</label><input id="catalog-page-size" type="number" min="100" max="100" value="100" readonly aria-describedby="catalog-page-help">
-          <p class="muted" id="catalog-page-help">Fixed at Stremio's 100-card pagination contract.</p>
+          <label for="catalog-page-size">Cards per page</label><input id="catalog-page-size" type="number" min="10" max="100" step="1" aria-describedby="catalog-page-help">
+          <p class="muted" id="catalog-page-help">How many cards the add-on builds per Stremio catalogue request. The default is 30; lower values reduce Pi and Arr load.</p>
           <label for="catalog-watched-keep">Recent watched movies kept visible</label><input id="catalog-watched-keep" type="number" min="0" max="50">
           <p class="muted">Use 0 to hide watched movies in filtered Radarr catalogue views.</p>
         </section>
@@ -730,8 +729,8 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
         </section>
 
         <footer class="save-bar">
-          <button type="submit" class="primary">Save configuration</button>
-          <span>Writes the managed environment file atomically; restart required.</span>
+          <button type="submit" class="primary" id="save-configuration">Save server settings</button>
+          <span>Saves safely to the server. Restart the service when prompted; reinstalling in Stremio is normally unnecessary.</span>
         </footer>
       </form>
     </section>
@@ -750,8 +749,8 @@ export function createConfigUiRouter(
   const router = express.Router();
   const envFile = path.resolve(options.envFilePath ?? process.env['CONFIG_UI_ENV_FILE'] ?? path.resolve(process.cwd(), '.env'));
   const adminToken = (options.adminToken ?? process.env['CONFIG_UI_TOKEN'] ?? '').trim();
-  if (config.configUiEnabled && adminToken.length < 16) {
-    throw new Error('CONFIG_UI_TOKEN must be at least 16 characters when CONFIG_UI_ENABLED=true.');
+  if (config.configUiEnabled && !/^[A-Za-z0-9_-]{8,128}$/.test(adminToken)) {
+    throw new Error('CONFIG_UI_TOKEN must be 8-128 URL-safe characters when CONFIG_UI_ENABLED=true.');
   }
   const authEnabled = config.configUiEnabled;
   const controlRateLimitMax = options.controlRateLimitMax ?? CONTROL_MAX_REQUESTS;
@@ -841,7 +840,8 @@ export function createConfigUiRouter(
     next();
   });
 
-  router.get('/configure', async (_req, res) => {
+  const configurePaths = ['/configure', `${addonBasePath(config)}/configure`];
+  router.get(configurePaths, async (_req, res) => {
     const health = await statusService.getServiceHealth();
     res.type('html').send(configureHtml(config, health, authEnabled));
   });

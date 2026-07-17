@@ -61,21 +61,26 @@ test('manifest advertises Stremio configuration without making it mandatory', as
   });
 });
 
-test('/configure serves a TV-first page without exposing configured secrets', async () => {
+test('root and token-derived Configure routes serve the TV page without exposing secrets', async () => {
   process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
   process.env['CONFIG_UI_ENV_FILE'] = await tempEnv();
-  const app = createApp(uiConfig());
+  const cfg = uiConfig();
+  const app = createApp(cfg);
 
   await withServer(app, async (baseUrl) => {
-    const response = await ORIGINAL_FETCH(`${baseUrl}/configure`);
-    const html = await response.text();
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/);
-    assert.match(html, /Arr Status &amp; Add/);
-    assert.match(html, /Unlock configuration/);
-    assert.match(html, /\/assets\/configure\.js/);
-    assert.ok(!html.includes('value="radarr-key"'));
-    assert.ok(!html.includes('value="sonarr-key"'));
+    for (const url of [`${baseUrl}/configure`, `${addonUrl(baseUrl, cfg)}/configure`]) {
+      const response = await ORIGINAL_FETCH(url);
+      const html = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/);
+      assert.match(html, /Arr Status &amp; Add/);
+      assert.match(html, /Unlock configuration/);
+      assert.match(html, /\/assets\/configure\.js/);
+      assert.ok(!html.includes('value="radarr-key"'));
+      assert.ok(!html.includes('value="sonarr-key"'));
+    }
+    const wrongToken = await ORIGINAL_FETCH(`${baseUrl}/wrong-token/configure`);
+    assert.equal(wrongToken.status, 404);
   });
 });
 
@@ -130,6 +135,7 @@ test('save validates and atomically updates only managed environment keys', asyn
     const current = (await currentResponse.json()) as { csrf: string; config: Record<string, any> };
 
     const payload = current.config;
+    payload.catalog.pageSize = 24;
     payload.radarr.enabled = true;
     payload.radarr.baseUrl = 'http://127.0.0.1:7878/';
     payload.radarr.cardUrl = '';
@@ -160,6 +166,7 @@ test('save validates and atomically updates only managed environment keys', asyn
     assert.match(saved, /# preserve me/);
     assert.match(saved, /UNRELATED_SETTING=keep-this/);
     assert.match(saved, /PUBLIC_BASE_URL=https:\/\/example\.invalid/);
+    assert.match(saved, /CATALOG_PAGE_SIZE=24/);
     assert.equal((saved.match(/^RADARR_ENABLED=true$/gm) ?? []).length, 2);
     assert.ok(!saved.includes('RADARR_ENABLED=false'));
     assert.match(saved, /RADARR_BASE_URL=http:\/\/127\.0\.0\.1:7878/);
