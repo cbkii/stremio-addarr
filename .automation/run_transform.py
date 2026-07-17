@@ -10,8 +10,9 @@ BRANCH = "agent/fix-install-config-ui-flow"
 SCRIPT = ROOT / ".automation/apply_comprehensive_update.py"
 DIAGNOSTIC = ROOT / ".automation/transform-error.txt"
 
-# Normalise two asserted source snippets whose indentation differs from the
-# semantic content expected by the transformation.
+# Normalise asserted source snippets whose indentation differs from the semantic
+# content expected by the transformation, and correct one literal asset-test
+# assertion to match `element.dataset.tvLast`.
 source = SCRIPT.read_text(encoding="utf-8")
 source = source.replace(
     '"""    say \\"Please review app config before continuing.\\"""',
@@ -25,6 +26,9 @@ source = source.replace(
 ).replace(
     '"    \'README_HOST.md\',\\n    \'CHANGELOG.md\',\\n    \'docs/CONFIGURATION_UI.md\',"',
     '"  \'README_HOST.md\',\\n  \'CHANGELOG.md\',\\n  \'docs/CONFIGURATION_UI.md\',"',
+).replace(
+    "assert.match(script, /data\\\\.tvLast/);",
+    "assert.match(script, /dataset\\\\.tvLast/);",
 )
 SCRIPT.write_text(source, encoding="utf-8")
 DIAGNOSTIC.unlink(missing_ok=True)
