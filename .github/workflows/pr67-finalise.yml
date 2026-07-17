@@ -1,0 +1,202 @@
+name: Finalise PR 67 fixes
+
+on:
+  push:
+    branches: [agent/fix-install-config-ui-flow]
+    paths: [.github/workflows/pr67-finalise.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  finalise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-install-config-ui-flow
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply asserted fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path.cwd()
+
+          def read(path: str) -> str:
+              return (root / path).read_text(encoding='utf-8')
+
+          def write(path: str, content: str) -> None:
+              target = root / path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(content, encoding='utf-8')
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              content = read(path)
+              count = content.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{path}: expected one match, found {count}: {old[:120]!r}')
+              write(path, content.replace(old, new, 1))
+
+          def replace_all(path: str, old: str, new: str, minimum: int = 1) -> None:
+              content = read(path)
+              count = content.count(old)
+              if count < minimum:
+                  raise RuntimeError(f'{path}: expected at least {minimum} matches, found {count}: {old[:120]!r}')
+              write(path, content.replace(old, new))
+
+          # The module previously called enhanceConfigurationUi before FIELD_HELP
+          # was initialised, causing a ReferenceError and preventing bootstrap.
+          replace_once(
+              'assets/configure.js',
+              "enhanceConfigurationUi();\nloadConfiguration();\n\nconst FIELD_HELP =",
+              'const FIELD_HELP =',
+          )
+          configure = read('assets/configure.js')
+          if not configure.endswith('\n'):
+              configure += '\n'
+          configure += '\nenhanceConfigurationUi();\nloadConfiguration();\n'
+          write('assets/configure.js', configure)
+
+          # Eight URL-safe characters are the compact persisted-token floor.
+          # Longer existing values remain accepted for upgrade compatibility.
+          for path in ['src/config.ts', 'src/config-ui-core.ts']:
+              replace_all(path, '{4,128}', '{8,128}')
+              replace_all(path, '4-128 URL-safe', '8-128 URL-safe')
+
+          replace_once(
+              'quick.sh',
+              "generate_short_token() {\n  openssl rand -hex 4\n}",
+              "generate_short_token() {\n  # Six random bytes encode to exactly eight URL-safe base64 characters.\n  openssl rand -base64 6 | tr '+/' '-_' | tr -d '=\\n'\n}",
+          )
+          replace_once(
+              'quick.sh',
+              "read_env_value() {\n  local key=\"$1\"\n  awk -v key=\"$key\" '",
+              "read_env_value() {\n  local key=\"$1\"\n  [[ -f \"$INSTALL_DIR/.env\" ]] || { printf '\\\\n'; return 0; }\n  awk -v key=\"$key\" '",
+          )
+          replace_all('quick.sh', '{4,128}', '{8,128}')
+          replace_all('quick.sh', '{4,8}', '{8}')
+          replace_all('quick.sh', 'specify 4-8 characters', 'specify exactly 8 characters', minimum=2)
+          replace_once('quick.sh', 'Enter 4-8 URL-safe characters [A-Za-z0-9_-]:', 'Enter exactly 8 URL-safe characters [A-Za-z0-9_-]:')
+          replace_once('quick.sh', 'Use 4-8 characters containing only letters, numbers, _ or -.', 'Use exactly 8 characters containing only letters, numbers, _ or -.')
+
+          # Stremio normally pages in 100-item steps and may treat a shorter
+          # response as terminal. Advertise explicit steps matching the configured
+          # page size so 10-100 item pages remain complete.
+          replace_once(
+              'src/addon.ts',
+              "  const catalogHardMax = 100;\n  const catalogPageSize = Math.max(1, Math.min(config.catalogPageSize, catalogHardMax));\n  const builder = new addonBuilder({",
+              "  const catalogHardMax = 100;\n  const catalogPageSize = Math.max(1, Math.min(config.catalogPageSize, catalogHardMax));\n  const catalogSkipOptions = Array.from({ length: 101 }, (_, page) => String(page * catalogPageSize));\n  const builder = new addonBuilder({",
+          )
+          replace_once(
+              'src/addon.ts',
+              "          { name: 'filter', options: ['unwatched', 'recent'], isRequired: false },\n          { name: 'skip', isRequired: false }",
+              "          { name: 'filter', options: ['unwatched', 'recent'], isRequired: false },\n          { name: 'skip', options: catalogSkipOptions, isRequired: false }",
+          )
+          replace_once(
+              'src/addon.ts',
+              "{ id: 'sonarr-recent', type: 'series', name: 'Recent on Sonarr', extra: [{ name: 'skip', isRequired: false }] }",
+              "{ id: 'sonarr-recent', type: 'series', name: 'Recent on Sonarr', extra: [{ name: 'skip', options: catalogSkipOptions, isRequired: false }] }",
+          )
+          replace_once(
+              'src/addon.ts',
+              "// Stremio opens `${addonOrigin}/configure` for configurable add-ons.",
+              '// Stremio derives Configure from the installed manifest transport path.',
+          )
+
+          replace_once(
+              'test/addon.test.ts',
+              "test('manifest endpoint shape sanity', async () => {\n  const cfg = baseConfig();\n  const app = createApp(cfg);",
+              "test('manifest endpoint shape sanity', async () => {\n  const cfg = baseConfig();\n  cfg.catalogPageSize = 30;\n  const app = createApp(cfg);",
+          )
+          replace_once(
+              'test/addon.test.ts',
+              "      logo: string;\n    };",
+              "      logo: string;\n      catalogs: Array<{ id: string; extra?: Array<{ name: string; options?: string[] }> }>;\n    };",
+          )
+          replace_once(
+              'test/addon.test.ts',
+              "    assert.equal(manifest.logo, buildDefaultManifestLogoUrl('http://127.0.0.1:7010', '0.1.0-test'));",
+              "    assert.equal(manifest.logo, buildDefaultManifestLogoUrl('http://127.0.0.1:7010', '0.1.0-test'));\n    const radarrCatalog = manifest.catalogs.find((catalog) => catalog.id === 'radarr-recent');\n    const sonarrCatalog = manifest.catalogs.find((catalog) => catalog.id === 'sonarr-recent');\n    assert.deepEqual(radarrCatalog?.extra?.find((item) => item.name === 'skip')?.options?.slice(0, 4), ['0', '30', '60', '90']);\n    assert.deepEqual(sonarrCatalog?.extra?.find((item) => item.name === 'skip')?.options?.slice(0, 4), ['0', '30', '60', '90']);",
+          )
+
+          replace_once(
+              'test/config.test.ts',
+              "test('short add-on access tokens are accepted while three-character tokens are rejected', () => {\n  process.env.ADDON_ACCESS_TOKEN = 'a1B2_c3D';\n  assert.equal(loadConfig().addonAccessToken, 'a1B2_c3D');\n  process.env.ADDON_ACCESS_TOKEN = 'abc';\n  assert.throws(() => loadConfig(), /ADDON_ACCESS_TOKEN must be 4-128/);\n});",
+              "test('eight-character add-on access tokens are accepted while seven-character tokens are rejected', () => {\n  process.env.ADDON_ACCESS_TOKEN = 'a1B2_c3D';\n  assert.equal(loadConfig().addonAccessToken, 'a1B2_c3D');\n  process.env.ADDON_ACCESS_TOKEN = 'abcdefg';\n  assert.throws(() => loadConfig(), /ADDON_ACCESS_TOKEN must be 8-128/);\n});\n\ntest('longer legacy add-on access tokens remain accepted', () => {\n  process.env.ADDON_ACCESS_TOKEN = 'legacy-token-that-is-longer-than-eight';\n  assert.equal(loadConfig().addonAccessToken, 'legacy-token-that-is-longer-than-eight');\n});",
+          )
+          replace_once(
+              'test/config-ui-hardening.test.ts',
+              "test('enabled configuration UI rejects an administrator token shorter than four characters', () => {\n  process.env['CONFIG_UI_TOKEN'] = 'abc';\n  assert.throws(() => createApp(uiConfig()), /CONFIG_UI_TOKEN must be 4-128 URL-safe characters/);\n});",
+              "test('enabled configuration UI rejects an administrator token shorter than eight characters', () => {\n  process.env['CONFIG_UI_TOKEN'] = 'abcdefg';\n  assert.throws(() => createApp(uiConfig()), /CONFIG_UI_TOKEN must be 8-128 URL-safe characters/);\n});",
+          )
+          replace_once(
+              'test/configure-assets.test.ts',
+              "  assert.match(script, /FIELD_HELP/);",
+              "  assert.match(script, /FIELD_HELP/);\n  const helpDeclaration = script.indexOf('const FIELD_HELP');\n  const startupCall = script.indexOf('enhanceConfigurationUi();');\n  assert.ok(helpDeclaration >= 0 && startupCall > helpDeclaration, 'configuration UI must initialise after FIELD_HELP');",
+          )
+
+          write(
+              'test/quick-script.test.ts',
+              """import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync } from 'node:fs';
+          import path from 'node:path';
+          import { fileURLToPath } from 'node:url';
+
+          const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+          const quick = readFileSync(path.join(root, 'quick.sh'), 'utf8');
+
+          test('quick.sh has valid Bash syntax', () => {
+            assert.doesNotThrow(() => execFileSync('bash', ['-n', 'quick.sh'], { cwd: root, stdio: 'pipe' }));
+          });
+
+          test('quick.sh exposes protected URLs and an exact-eight token flow', () => {
+            assert.match(quick, /openssl rand -base64 6/);
+            assert.match(quick, /specify exactly 8 characters/);
+            assert.match(quick, /\{8,128\}/);
+            assert.match(quick, /\{8\}/);
+            assert.match(quick, /PUBLIC_MANIFEST_URL=.*ADDON_ACCESS_TOKEN.*manifest\.json/);
+            assert.match(quick, /PUBLIC_CONFIGURE_URL=.*ADDON_ACCESS_TOKEN.*configure/);
+          });
+
+          test('quick.sh safely handles a missing environment file', () => {
+            assert.match(quick, /\[\[ -f \"\$INSTALL_DIR\/\.env\" \]\] \|\|/);
+          });
+          """,
+          )
+
+          for path in ['.env.example', 'README.md', 'README_HOST.md', 'docs/CONFIGURATION_UI.md', 'CHANGELOG.md', 'Caddyfile.example', 'Caddyfile.duckdns.example', 'Caddyfile.desec.example']:
+              content = read(path)
+              content = content.replace('{4,128}', '{8,128}')
+              content = content.replace('4-128 URL-safe', '8-128 URL-safe')
+              content = content.replace('4–128 URL-safe', '8–128 URL-safe')
+              content = content.replace('4-8 character', '8-character')
+              content = content.replace('4–8 character', '8-character')
+              content = content.replace('specify 4-8', 'specify exactly 8')
+              content = content.replace('openssl rand -hex 4', "openssl rand -base64 6 | tr '+/' '-_' | tr -d '=\\n'")
+              write(path, content)
+
+          print('Applied deterministic UI, token and catalogue pagination fixes.')
+          PY
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate shell and complete CI
+        run: |
+          bash -n quick.sh
+          npm run ci
+          npm run package:release
+      - name: Commit validated fixes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: harden configure startup tokens and catalog pagination'
+          git push origin HEAD:agent/fix-install-config-ui-flow
