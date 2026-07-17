@@ -70,7 +70,7 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
     const parsed = parseStremioId(type, id);
     const tiles = await statusService.buildTiles(parsed);
     const displayTiles = parsed.kind === 'series'
-      ? addSeriesMonitorScopeToActionTiles(tiles, config.sonarr.seriesMonitor)
+      ? addSeriesMonitorScopeToActionTiles(tiles, config.sonarr)
       : tiles;
 
     logger?.info('stream handler complete', { type, id, tileCount: displayTiles.length, durationMs: Date.now() - start });
