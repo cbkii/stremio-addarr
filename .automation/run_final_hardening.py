@@ -29,6 +29,20 @@ source = source.replace(
           { name: 'skip', options: catalogSkipOptions, isRequired: false }""",
 )''',
 )
+source = source.replace(
+    "# Manifest regression: configured 30-card pages advertise 30-based skip steps.",
+    '''# Manifest regression: configured 30-card pages advertise 30-based skip steps.
+replace_once(
+    "test/addon.test.ts",
+    """test('manifest endpoint shape sanity', async () => {
+  const cfg = baseConfig();
+  const app = createApp(cfg);""",
+    """test('manifest endpoint shape sanity', async () => {
+  const cfg = baseConfig();
+  cfg.catalogPageSize = 30;
+  const app = createApp(cfg);""",
+)''',
+)
 SCRIPT.write_text(source, encoding="utf-8")
 DIAGNOSTIC.unlink(missing_ok=True)
 
