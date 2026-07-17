@@ -120,9 +120,14 @@ test('probe credentials are reused only for the configured origin', () => {
   );
 });
 
-test('enabled configuration UI rejects a short administrator token at startup', () => {
-  process.env['CONFIG_UI_TOKEN'] = 'too-short';
-  assert.throws(() => createApp(uiConfig()), /CONFIG_UI_TOKEN must be at least 16 characters/);
+test('enabled configuration UI accepts an eight-character administrator token', () => {
+  process.env['CONFIG_UI_TOKEN'] = 'a1B2_c3D';
+  assert.doesNotThrow(() => createApp(uiConfig()));
+});
+
+test('enabled configuration UI rejects an administrator token shorter than four characters', () => {
+  process.env['CONFIG_UI_TOKEN'] = 'abc';
+  assert.throws(() => createApp(uiConfig()), /CONFIG_UI_TOKEN must be 4-128 URL-safe characters/);
 });
 
 test('authenticated control routes are rate limited per session', async () => {

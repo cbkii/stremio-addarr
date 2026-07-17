@@ -18,6 +18,7 @@ const REQUIRED_FILES = [
   'package-lock.json',
   'README.md',
   'README_HOST.md',
+  'CHANGELOG.md',
   'docs/CONFIGURATION_UI.md',
   '.env.example',
   'assets/logo.png',
@@ -67,6 +68,7 @@ stage('package-lock.json');
 // Documentation
 stage('README.md');
 stage('README_HOST.md');
+stage('CHANGELOG.md');
 stage('docs', 'docs');
 
 // Runtime web assets (manifest logo and /configure UI)

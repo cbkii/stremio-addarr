@@ -110,7 +110,7 @@ During the guided `.env` review gate, ensure required values are set:
 HOST=127.0.0.1
 PORT=7010
 PUBLIC_BASE_URL=https://YOUR_HOSTNAME
-ADDON_ACCESS_TOKEN=replace-with-32-plus-url-safe-random-characters
+ADDON_ACCESS_TOKEN=replace-with-4-to-8-url-safe-characters
 TARGET_CLIENT=android-tv
 GRACEFUL_SHUTDOWN_TIMEOUT_MS=10000
 FORCED_SHUTDOWN_EXIT_CODE=0
@@ -129,7 +129,7 @@ SONARR_QUALITY_PROFILE_ID=1
 SONARR_LANGUAGE_PROFILE_ID=1
 SONARR_SERIES_MONITOR=all
 
-CATALOG_PAGE_SIZE=100
+CATALOG_PAGE_SIZE=30
 RADARR_CATALOG_WATCHED_KEEP_COUNT=1
 CATALOG_CACHE_TTL_MS=5000
 CATALOG_CACHE_MAX_AGE_SEC=15
@@ -161,7 +161,7 @@ Notes:
 - `FORCED_SHUTDOWN_EXIT_CODE=0` keeps orchestrators from flagging timeout-forced stop as a failed exit.
 
 Optional tuning:
-- `CATALOG_PAGE_SIZE` is normalised to `100` to match Stremio pagination. Legacy lower values are accepted during upgrade but do not reduce the public page size.
+- `CATALOG_PAGE_SIZE` is configurable from `10` to `100` (default `30`). Lower values reduce work per request on a Pi; increase it only when larger catalogue pages are useful.
 - `RADARR_CATALOG_WATCHED_KEEP_COUNT` (default `1`): how many watched movies remain visible in filtered Radarr catalog views.
 - `CATALOG_CACHE_TTL_MS` (default `5000`): short in-memory cache for merged Arr queue+history results and progressive Radarr watched-filter pagination state.
 - `CATALOG_CACHE_MAX_AGE_SEC` (default `15`): fresh cache hint sent to Stremio for catalog responses.
@@ -207,7 +207,7 @@ On Stremio (Android TV):
 
 ## 5) Quick upgrade (recommended)
 
-Use the guided quick script. It keeps your existing `.env` and service wiring, reapplies ownership and dependencies, opens explicit review gates for `.env` and systemd unit changes, and runs verification checks.
+Use the guided quick script. It keeps your existing `.env` and service wiring, fixes legacy placeholder merges, offers keep/specify/generate choices for both tokens, reapplies ownership and dependencies, opens explicit review gates, waits for a stably running service, and verifies the protected manifest and Configure URLs.
 
 ```bash
 gh release download --repo cbkii/stremio-addarr --pattern quick.sh --output quick.sh --clobber
@@ -586,3 +586,19 @@ All providers are filtered to valid dates with year `> 1901`, and display remain
 - Add/search links use short-lived HMAC signatures, direct-file links expire, action requests are rate-limited, and the background queue is bounded.
 - The configuration dashboard is a single-tenant server administration surface. Enable it explicitly with `CONFIG_UI_ENABLED=true` and a 16+ character `CONFIG_UI_TOKEN`.
 - The Docker image runs as UID/GID 10001. Ensure the mounted configuration directory is writable by that identity and mount media libraries read-only wherever possible.
+
+
+---
+
+## Token and Configure URL rules
+
+`quick.sh` handles two different tokens:
+
+- `ADDON_ACCESS_TOKEN` is part of the private Stremio transport path. The manifest URL is `https://HOST/<ADDON_ACCESS_TOKEN>/manifest.json` and Stremio opens Configure at `https://HOST/<ADDON_ACCESS_TOKEN>/configure`.
+- `CONFIG_UI_TOKEN` is entered inside the Configure page to unlock server-side settings. It is never placed in the manifest URL.
+
+The installer can keep an existing value, accept a user-specified 4–8 character URL-safe value, or generate a random 8-character value. Longer existing tokens remain valid for backward compatibility. The plain `/manifest.json` route is intentionally not the install URL.
+
+Saving the configuration UI updates the server `.env`; it does not install the add-on. Use **Install / reinstall in Stremio** only for first-time installation or after changing `ADDON_ACCESS_TOKEN`.
+
+The Configure UI supports both `/configure` and the Stremio-derived `/<ADDON_ACCESS_TOKEN>/configure` route. The canonical Caddy examples retain a harmless compatibility rewrite for v1.6.1 installations.

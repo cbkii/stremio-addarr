@@ -1,9 +1,9 @@
 # In-Stremio configuration UI
 
-When `CONFIG_UI_ENABLED=true`, When `CONFIG_UI_ENABLED=true`, `stremio-addarr` advertises Stremio's standard `configurable` behaviour hint. The **Configure** action opens:
+When `CONFIG_UI_ENABLED=true`, `stremio-addarr` advertises Stremio's standard `configurable` behaviour hint. The **Configure** action opens:
 
 ```text
-https://YOUR_PUBLIC_BASE_URL/configure
+https://YOUR_PUBLIC_BASE_URL/ADDON_ACCESS_TOKEN/configure
 ```
 
 The page is intentionally built with server-rendered HTML, native browser controls, a small JavaScript module and TV-first CSS. It does not put Radarr, Sonarr, Trakt or TMDB credentials in the manifest URL.
@@ -19,7 +19,6 @@ sudoedit /opt/stremio-addarr/.env
 
 ```dotenv
 CONFIG_UI_ENABLED=true
-CONFIG_UI_ENABLED=true
 CONFIG_UI_TOKEN=replace-with-the-generated-value
 CONFIG_UI_ENV_FILE=/opt/stremio-addarr/.env
 ```
@@ -30,7 +29,7 @@ Then restart:
 sudo systemctl restart stremio-addarr
 ```
 
-When `CONFIG_UI_ENABLED` is false, `/configure` and the Configure behaviour hint are not exposed. When enabled, `CONFIG_UI_TOKEN` must be at least 16 characters. Existing environment-managed installations remain supported, but release 1.6 requires reinstalling through the tokenised manifest URL.
+When `CONFIG_UI_ENABLED` is false, `/configure` and the Configure behaviour hint are not exposed. When enabled, `CONFIG_UI_TOKEN` must contain 4–128 URL-safe characters. The installer generates 8 characters by default and preserves longer legacy values. Existing environment-managed installations remain supported, but release 1.6 requires reinstalling through the tokenised manifest URL.
 
 ## What the UI manages
 
@@ -144,3 +143,22 @@ The container runs as UID/GID 10001. Create and secure the writable configuratio
 `install -m 0600 -o 10001 -g 10001 .env config/.env`
 
 Use `CONFIG_UI_RESTART_COMMAND` to display deployment-appropriate restart instructions.
+
+
+## Saving versus installing
+
+**Save server settings** validates and writes the managed `.env` values. Restart the service when the UI reports that activation is required. Saving does not require reinstalling the add-on.
+
+**Install / reinstall in Stremio** opens Stremio with the protected manifest URL. Use it for the first installation or after rotating `ADDON_ACCESS_TOKEN`; it is not an Apply button.
+
+## TV remote navigation
+
+- Up/Down moves through visible controls in document order rather than jumping to the sticky save bar.
+- Left/Right moves between tabs and provides an exit path from number and select fields.
+- Number inputs no longer consume D-pad Up/Down merely to increment values.
+- Back/Escape first leaves an active field, then returns to Overview, before allowing the browser to close.
+- The form uses two columns on wide landscape displays and one column on narrow screens.
+
+## Catalogue page size
+
+`CATALOG_PAGE_SIZE` is editable from 10 to 100 and defaults to 30. Smaller pages reduce work per request on a Raspberry Pi; 100 is available for operators who prefer larger pages.

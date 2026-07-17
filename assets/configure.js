@@ -53,7 +53,7 @@ function populate(config) {
   currentConfig = config;
   const { catalog, radarr, sonarr, playback, trakt, tmdb } = config;
 
-  byId('catalog-page-size').value = 100;
+  byId('catalog-page-size').value = catalog.pageSize;
   byId('catalog-watched-keep').value = catalog.watchedKeepCount;
 
   byId('radarr-enabled').checked = radarr.enabled;
@@ -120,7 +120,7 @@ function readNumber(id) {
 function collect() {
   return {
     catalog: {
-      pageSize: 100,
+      pageSize: readNumber('catalog-page-size'),
       watchedKeepCount: readNumber('catalog-watched-keep')
     },
     radarr: {
@@ -184,7 +184,7 @@ async function loadConfiguration() {
     authPanel.hidden = true;
     dashboard.hidden = false;
     showPage('overview');
-    byId('install-link').focus();
+    document.querySelector('[data-section="overview"]')?.focus();
   } catch (error) {
     dashboard.hidden = true;
     authPanel.hidden = false;
@@ -309,42 +309,177 @@ document.querySelectorAll('[data-section]').forEach((button) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' || event.key === 'BrowserBack') {
-    const overviewVisible = !document.querySelector('[data-page="overview"]').hidden;
-    if (!overviewVisible && !dashboard.hidden) {
-      event.preventDefault();
-      showPage('overview');
-      document.querySelector('[data-section="overview"]')?.focus();
-    }
+  if (event.key !== 'Escape' && event.key !== 'BrowserBack') return;
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement || active instanceof HTMLSelectElement) {
+    event.preventDefault();
+    active.blur();
+    const page = active.closest('[data-page]')?.dataset.page || 'overview';
+    document.querySelector(`[data-section="${page}"]`)?.focus();
+    return;
+  }
+  const overview = document.querySelector('[data-page="overview"]');
+  if (overview && !overview.hidden && !dashboard.hidden) return;
+  if (!dashboard.hidden) {
+    event.preventDefault();
+    showPage('overview');
+    document.querySelector('[data-section="overview"]')?.focus();
   }
 });
 
+enhanceConfigurationUi();
 loadConfiguration();
 
-function moveTvFocus(direction) {
-  const focusable = [...document.querySelectorAll('button:not([hidden]), a[href]:not([hidden]), input:not([hidden]):not([disabled]), select:not([hidden]):not([disabled]), summary')]
-    .filter((element) => element.getClientRects().length > 0);
-  const current = document.activeElement;
-  if (!(current instanceof HTMLElement) || !focusable.includes(current)) return;
-  const rect = current.getBoundingClientRect();
-  const originX = rect.left + rect.width / 2;
-  const originY = rect.top + rect.height / 2;
-  const candidates = focusable.filter((candidate) => candidate !== current).map((candidate) => {
-    const box = candidate.getBoundingClientRect();
-    const dx = box.left + box.width / 2 - originX;
-    const dy = box.top + box.height / 2 - originY;
-    const primary = direction === 'left' ? -dx : direction === 'right' ? dx : direction === 'up' ? -dy : dy;
-    const cross = direction === 'left' || direction === 'right' ? Math.abs(dy) : Math.abs(dx);
-    return { candidate, primary, score: primary * primary + cross * cross * 2 };
-  }).filter((entry) => entry.primary > 4).sort((a, b) => a.score - b.score);
-  candidates[0]?.candidate.focus();
+const FIELD_HELP = {
+  'radarr-url': 'The URL this Pi uses to reach Radarr, including http:// or https:// and its port.',
+  'radarr-card-url': 'Optional user-facing Radarr URL shown on cards. Leave blank to reuse the server URL.',
+  'radarr-key': 'Used only by the server. Leave blank to keep the existing key.',
+  'radarr-root': 'Folder Radarr will use for movies added from Stremio.',
+  'radarr-profile': 'Radarr quality profile applied to newly added movies.',
+  'radarr-minimum': 'Earliest release stage at which Radarr is allowed to consider a movie available.',
+  'radarr-tags': 'Optional comma-separated Radarr tag IDs, for example 1,3.',
+  'sonarr-url': 'The URL this Pi uses to reach Sonarr, including http:// or https:// and its port.',
+  'sonarr-card-url': 'Optional user-facing Sonarr URL shown on cards. Leave blank to reuse the server URL.',
+  'sonarr-key': 'Used only by the server. Leave blank to keep the existing key.',
+  'sonarr-root': 'Folder Sonarr will use for series added from Stremio.',
+  'sonarr-profile': 'Sonarr quality profile applied to newly added series.',
+  'sonarr-language': 'Only Sonarr v3 uses language profiles. Leave as Not used for Sonarr v4.',
+  'sonarr-monitor': 'Which episodes Sonarr marks as monitored when an item is added from a Stremio episode page.',
+  'sonarr-new-items': 'Controls whether future episodes become monitored after the initial add. Automatic follows the selected monitoring mode.',
+  'sonarr-tags': 'Optional comma-separated Sonarr tag IDs, for example 2,4.',
+  'episode-timeout': 'Maximum time to wait for Sonarr to create episode records after a new series is added.',
+  'episode-poll': 'Delay between Sonarr episode-readiness checks. Smaller values poll more often.',
+  'ep-count': 'In Selected episode mode, switch to the threshold upgrade mode after this many nearby prior episodes are downloaded. Use 0 or 1 to disable.',
+  'ep-count-past': 'Maximum number of earlier episodes checked when applying the downloaded-episode threshold.',
+  'ep-count-mod': 'Monitoring scope used when the downloaded-episode threshold is met.',
+  'catalog-page-size': 'Cards built per request. Default 30; choose 10–100. Lower values reduce Pi and Arr load.',
+  'catalog-watched-keep': 'Number of watched Radarr movies still retained in filtered catalogue views.',
+  'kodi-package': 'Android package name used by the Kodi fallback intent. Standard Kodi is org.xbmc.kodi.',
+  'playback-mode': 'Direct serves an existing file from this Pi; Kodi opens the item in Kodi when direct playback is unavailable.',
+  'trakt-sync-mins': 'How often watched history is refreshed. Minimum 40 minutes.',
+  'trakt-api-url': 'Normally https://api.trakt.tv. Change only for a compatible proxy.',
+  'trakt-client-id': 'Leave blank to keep the stored Trakt client ID.',
+  'trakt-client-secret': 'Leave blank to keep the stored Trakt client secret.',
+  'trakt-refresh-token': 'Leave blank to keep the stored OAuth refresh token.',
+  'trakt-redirect-uri': 'Must match the redirect URI configured for the Trakt application.',
+  'tmdb-api-url': 'Normally https://api.themoviedb.org.',
+  'tmdb-token': 'Optional TMDB read-access token used only as a release-date fallback.',
+  'tmdb-region': 'Two-letter region used for release dates, for example AU.'
+};
+
+function enhanceConfigurationUi() {
+  document.querySelectorAll('.status-card').forEach((card) => {
+    const state = card.querySelector('strong')?.textContent?.trim().toLowerCase() || '';
+    card.dataset.state = state === 'connected' || state === 'ready'
+      ? 'online'
+      : state === 'disabled' ? 'disabled' : 'error';
+  });
+
+  document.querySelectorAll('.config-section label[for]').forEach((label) => {
+    if (label.closest('.toggle-row') || label.closest('.field')) return;
+    const control = document.getElementById(label.htmlFor);
+    if (!control || control.closest('.field')) return;
+    const field = document.createElement('div');
+    field.className = 'field';
+    label.parentNode.insertBefore(field, label);
+    field.append(label, control);
+    const description = FIELD_HELP[control.id];
+    if (description) {
+      const help = document.createElement('p');
+      help.className = 'field-help';
+      help.id = `${control.id}-help`;
+      help.textContent = description;
+      field.append(help);
+      const describedBy = [control.getAttribute('aria-describedby'), help.id].filter(Boolean).join(' ');
+      control.setAttribute('aria-describedby', describedBy);
+    }
+  });
+
+  const installLink = byId('install-link');
+  installLink.textContent = 'Install / reinstall in Stremio';
+  const saveButton = byId('save-configuration');
+  saveButton.dataset.tvLast = 'true';
 }
 
+function visibleFocusable(includeSave = false) {
+  return [...document.querySelectorAll('button:not([hidden]):not([disabled]), a[href]:not([hidden]), input:not([hidden]):not([disabled]), select:not([hidden]):not([disabled]), summary')]
+    .filter((element) => element.getClientRects().length > 0)
+    .filter((element) => includeSave || element.dataset.tvLast !== 'true');
+}
+
+function focusElement(element) {
+  if (!(element instanceof HTMLElement)) return;
+  element.focus();
+  element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+}
+
+function switchTab(delta) {
+  const tabs = [...document.querySelectorAll('[data-section]')];
+  const current = document.activeElement;
+  const index = Math.max(0, tabs.indexOf(current));
+  const next = tabs[(index + delta + tabs.length) % tabs.length];
+  showPage(next.dataset.section);
+  focusElement(next);
+}
+
+function moveSequential(delta) {
+  const current = document.activeElement;
+  let focusable = visibleFocusable(false);
+  let index = focusable.indexOf(current);
+  if (index < 0) {
+    focusElement(focusable[0]);
+    return;
+  }
+  const movingForward = delta > 0;
+  if (movingForward && index === focusable.length - 1) {
+    focusable = visibleFocusable(true);
+    index = focusable.indexOf(current);
+  }
+  const nextIndex = Math.max(0, Math.min(focusable.length - 1, index + delta));
+  focusElement(focusable[nextIndex]);
+}
+
+document.addEventListener('focusin', (event) => {
+  if (event.target instanceof HTMLElement) {
+    event.target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  }
+});
+
 document.addEventListener('keydown', (event) => {
-  const direction = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[event.key];
+  const direction = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -1, ArrowDown: 1 }[event.key];
   if (!direction) return;
   const active = document.activeElement;
-  if (active instanceof HTMLInputElement && ['text', 'password', 'number'].includes(active.type)) return;
+  if (!(active instanceof HTMLElement)) return;
+
+  if (active.matches('[data-section]') && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+    event.preventDefault();
+    switchTab(direction);
+    return;
+  }
+
+  if (active instanceof HTMLSelectElement) {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      moveSequential(direction);
+    }
+    return;
+  }
+
+  if (active instanceof HTMLInputElement) {
+    if (active.type === 'number') {
+      event.preventDefault();
+      moveSequential(direction);
+      return;
+    }
+    if (['text', 'password', 'url'].includes(active.type)) {
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        moveSequential(direction);
+      }
+      return;
+    }
+  }
+
   event.preventDefault();
-  moveTvFocus(direction);
+  moveSequential(direction);
 });

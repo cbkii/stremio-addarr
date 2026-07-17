@@ -13,5 +13,11 @@ replace-with-your-subdomain.duckdns.org {
     }
 
     encode zstd gzip
+
+    # Stremio derives /<ADDON_ACCESS_TOKEN>/configure from the protected
+    # manifest transport URL. This compatibility rewrite also supports v1.6.1.
+    @tokenConfigure path_regexp tokenConfigure ^/[A-Za-z0-9_-]{4,128}/configure$
+    rewrite @tokenConfigure /configure
+
     reverse_proxy 127.0.0.1:7010
 }

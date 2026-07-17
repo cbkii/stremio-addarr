@@ -193,6 +193,12 @@ $ADDARR_HOSTNAME {
     }
 
     encode zstd gzip
+
+    # Stremio derives this path from /<ADDON_ACCESS_TOKEN>/manifest.json.
+    # The rewrite is required for v1.6.1 and harmless on newer releases.
+    @tokenConfigure path_regexp tokenConfigure ^/[A-Za-z0-9_-]{4,128}/configure$
+    rewrite @tokenConfigure /configure
+
     reverse_proxy 127.0.0.1:7010
 }
 EOF_CADDY
@@ -216,7 +222,7 @@ sudo systemctl is-active caddy
 /usr/local/bin/caddy list-modules | grep -q dns.providers.duckdns \
   && echo "DuckDNS plugin present in running binary" \
   || { echo "ERROR: DuckDNS plugin missing"; exit 1; }
-curl -fI "https://$ADDARR_HOSTNAME/manifest.json"
+curl -fI "https://$ADDARR_HOSTNAME/$ADDON_ACCESS_TOKEN/manifest.json"
 ```
 
 ---
@@ -263,17 +269,18 @@ If you changed `/opt/stremio-addarr/.env`, restart is mandatory because systemd 
 Run the complete verification sequence:
 
 ```bash
+export ADDON_ACCESS_TOKEN="$(sudo sed -n 's/^ADDON_ACCESS_TOKEN=//p' /opt/stremio-addarr/.env | tail -n1)"
 # 1) local service is running
 sudo systemctl is-active stremio-addarr
 
 # 2) local manifest is reachable
-curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null
+curl -fsS "http://127.0.0.1:7010/$ADDON_ACCESS_TOKEN/manifest.json" >/dev/null
 
 # 3) public HTTPS manifest is reachable
-curl -fI "https://$ADDARR_HOSTNAME/manifest.json"
+curl -fI "https://$ADDARR_HOSTNAME/$ADDON_ACCESS_TOKEN/manifest.json"
 
 # 4) exact manifest URL to paste into Stremio
-echo "https://$ADDARR_HOSTNAME/manifest.json"
+echo "https://$ADDARR_HOSTNAME/$ADDON_ACCESS_TOKEN/manifest.json"
 ```
 
 In Stremio (Android TV):
@@ -281,3 +288,15 @@ In Stremio (Android TV):
 2. Open **Community Add-ons** (or search).
 3. Paste the exact URL printed above.
 4. Click **Install**.
+
+
+## Protected Configure path
+
+Stremio derives the Configure URL from the installed transport URL. For a manifest installed from `https://HOST/TOKEN/manifest.json`, it opens `https://HOST/TOKEN/configure`. Current releases serve that route directly. The documented Caddy rewrite maps the same path to `/configure` for compatibility with v1.6.1.
+
+Verify both endpoints:
+
+```bash
+curl -fI "https://$ADDARR_HOSTNAME/$ADDON_ACCESS_TOKEN/manifest.json"
+curl -fI "https://$ADDARR_HOSTNAME/$ADDON_ACCESS_TOKEN/configure"
+```
