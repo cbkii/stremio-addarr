@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/index.js';
-import { seriesMonitorScopeLine } from '../src/services/series-monitor-scope.js';
+import {
+  seriesMonitorScopeLabels,
+  seriesMonitorScopeLine
+} from '../src/services/series-monitor-scope.js';
 import { addonUrl, baseConfig, withServer } from './_helpers.js';
 
 const ORIGINAL_FETCH = globalThis.fetch;
@@ -10,35 +13,79 @@ test.afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
 });
 
-test('Sonarr monitor settings have concise plain-English tile labels', () => {
-  const expected: Array<[Parameters<typeof seriesMonitorScopeLine>[0], string]> = [
-    ['all', '📡 Monitor scope: all episodes'],
-    ['future', '📡 Monitor scope: future episodes'],
-    ['missing', '📡 Monitor scope: missing episodes'],
-    ['existing', '📡 Monitor scope: existing episodes'],
-    ['firstSeason', '📡 Monitor scope: first season'],
-    ['lastSeason', '📡 Monitor scope: last season'],
-    ['latestSeason', '📡 Monitor scope: latest season'],
-    ['pilot', '📡 Monitor scope: pilot only'],
-    ['recent', '📡 Monitor scope: recent episodes'],
-    ['monitorSpecials', '📡 Monitor scope: include specials'],
-    ['unmonitorSpecials', '📡 Monitor scope: exclude specials'],
-    ['none', '📡 Monitor scope: no episodes'],
-    ['skip', '📡 Monitor scope: leave unchanged'],
-    ['ep', '📡 Monitor scope: this episode only'],
-    ['epfuture', '📡 Monitor scope: this + future episodes'],
-    ['epseason', '📡 Monitor scope: this episode to season end']
+function monitorConfig(overrides: Partial<ReturnType<typeof baseConfig>['sonarr']> = {}) {
+  return { ...baseConfig().sonarr, ...overrides };
+}
+
+test('Sonarr monitor settings use concise one-line scope labels', () => {
+  const expected: Array<[ReturnType<typeof baseConfig>['sonarr']['seriesMonitor'], string]> = [
+    ['all', 'all episodes'],
+    ['future', 'future episodes'],
+    ['missing', 'missing episodes'],
+    ['existing', 'existing episodes'],
+    ['firstSeason', 'first season'],
+    ['lastSeason', 'last season'],
+    ['latestSeason', 'latest season'],
+    ['pilot', 'pilot only'],
+    ['recent', 'recent episodes'],
+    ['monitorSpecials', 'include specials'],
+    ['unmonitorSpecials', 'exclude specials'],
+    ['none', 'no episodes'],
+    ['skip', 'leave unchanged'],
+    ['ep', 'this episode'],
+    ['epfuture', 'this + future episodes'],
+    ['epseason', 'this episode to season end']
   ];
 
-  for (const [mode, label] of expected) {
-    assert.equal(seriesMonitorScopeLine(mode), label);
+  for (const [seriesMonitor, scope] of expected) {
+    const line = seriesMonitorScopeLine(monitorConfig({ seriesMonitor, monitorNewItems: 'auto', epCount: 0 }));
+    assert.equal(line, `📡: ${scope} · new: auto`);
+    assert.ok(!line.includes('\n'));
+    assert.ok(!line.includes('Monitor scope'));
   }
 });
 
-test('episode action tile explains the configured Sonarr monitoring scope', async () => {
+test('all applicable episode-scope modifiers fit on one tile line', () => {
+  const config = monitorConfig({
+    seriesMonitor: 'ep',
+    monitorNewItems: 'none',
+    epCount: 3,
+    epCountPast: 8,
+    epCountMod: 'epfuture'
+  });
+
+  assert.deepEqual(seriesMonitorScopeLabels(config), [
+    'this episode',
+    '≥3 files in prior 8 → this + future',
+    'new: none'
+  ]);
+  assert.equal(
+    seriesMonitorScopeLine(config),
+    '📡: this episode · ≥3 files in prior 8 → this + future · new: none'
+  );
+  assert.ok(!seriesMonitorScopeLine(config).includes('\n'));
+});
+
+test('disabled ep auto-upgrade settings do not add an inapplicable label', () => {
+  const config = monitorConfig({
+    seriesMonitor: 'ep',
+    monitorNewItems: 'all',
+    epCount: 1,
+    epCountPast: 12,
+    epCountMod: 'epseason'
+  });
+
+  assert.equal(seriesMonitorScopeLine(config), '📡: this episode · new: all');
+});
+
+test('episode action tile shows every applicable scope label on one line', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;
-  cfg.sonarr.seriesMonitor = 'epfuture';
+  cfg.sonarr.seriesMonitor = 'ep';
+  cfg.sonarr.monitorNewItems = 'none';
+  cfg.sonarr.epCount = 3;
+  cfg.sonarr.epCountPast = 8;
+  cfg.sonarr.epCountMod = 'epseason';
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const parsed = new URL(String(input));
@@ -59,9 +106,8 @@ test('episode action tile explains the configured Sonarr monitoring scope', asyn
     const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/series/tt7654321%3A2%3A5.json`);
     assert.equal(response.status, 200);
     const body = (await response.json()) as { streams: Array<{ description?: string }> };
-    assert.ok(
-      body.streams[0].description?.includes('📡 Monitor scope: this + future episodes'),
-      'episode action tile should explain the configured monitoring scope'
-    );
+    const lines = body.streams[0].description?.split('\n') ?? [];
+    assert.ok(lines.includes('📡: this episode · ≥3 files in prior 8 → season end · new: none'));
+    assert.equal(lines.filter((line) => line.startsWith('📡:')).length, 1);
   });
 });
