@@ -15,6 +15,20 @@ source = source.replace(
     '"Add an interactive token wizard to `quick.sh`: keep an existing token, specify an 8-character value, or generate a random 8-character value.",',
     '"Add an interactive token wizard to `quick.sh`: keep an existing token, specify a 8-character value, or generate a random 8-character value.",',
 )
+source = source.replace(
+    '''replace_once(
+    "src/addon.ts",
+    "{ name: 'skip', isRequired: false }",
+    "{ name: 'skip', options: catalogSkipOptions, isRequired: false }",
+)''',
+    '''replace_once(
+    "src/addon.ts",
+    """          { name: 'filter', options: ['unwatched', 'recent'], isRequired: false },
+          { name: 'skip', isRequired: false }""",
+    """          { name: 'filter', options: ['unwatched', 'recent'], isRequired: false },
+          { name: 'skip', options: catalogSkipOptions, isRequired: false }""",
+)''',
+)
 SCRIPT.write_text(source, encoding="utf-8")
 DIAGNOSTIC.unlink(missing_ok=True)
 
