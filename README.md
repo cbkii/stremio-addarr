@@ -581,7 +581,7 @@ All providers are filtered to valid dates with year `> 1901`, and display remain
 
 ## Release 1.6+ security and compatibility requirements
 
-- Set a unique `ADDON_ACCESS_TOKEN` (4-128 URL-safe characters). New installs generate 8 characters and existing longer values remain valid. Install Stremio using the protected URL shown by the authenticated configuration UI; unprefixed manifest, catalogue and stream routes are intentionally unavailable.
+- Set a unique `ADDON_ACCESS_TOKEN` (8-128 URL-safe characters). New installs generate 8 characters and existing longer values remain valid. Install Stremio using the protected URL shown by the authenticated configuration UI; unprefixed manifest, catalogue and stream routes are intentionally unavailable.
 - `CATALOG_PAGE_SIZE` is configurable from 10 to 100 and defaults to 30 for lower Pi and Arr request load.
 - Add/search links use short-lived HMAC signatures, direct-file links expire, action requests are rate-limited, and the background queue is bounded.
 - The configuration dashboard is a single-tenant server administration surface. Enable it explicitly with `CONFIG_UI_ENABLED=true` and a 4-128 character URL-safe `CONFIG_UI_TOKEN`; new installs generate 8 characters.
@@ -597,7 +597,7 @@ All providers are filtered to valid dates with year `> 1901`, and display remain
 - `ADDON_ACCESS_TOKEN` is part of the private Stremio transport path. The manifest URL is `https://HOST/<ADDON_ACCESS_TOKEN>/manifest.json` and Stremio opens Configure at `https://HOST/<ADDON_ACCESS_TOKEN>/configure`.
 - `CONFIG_UI_TOKEN` is entered inside the Configure page to unlock server-side settings. It is never placed in the manifest URL.
 
-The installer can keep an existing value, accept a user-specified 4–8 character URL-safe value, or generate a random 8-character value. Longer existing tokens remain valid for backward compatibility. The plain `/manifest.json` route is intentionally not the install URL.
+The installer can keep an existing value, accept a user-specified 8-character URL-safe value, or generate a random 8-character value. Longer existing tokens remain valid for backward compatibility. The plain `/manifest.json` route is intentionally not the install URL.
 
 Saving the configuration UI updates the server `.env`; it does not install the add-on. Use **Install / reinstall in Stremio** only for first-time installation or after changing `ADDON_ACCESS_TOKEN`.
 

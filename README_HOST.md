@@ -196,7 +196,7 @@ $ADDARR_HOSTNAME {
 
     # Stremio derives this path from /<ADDON_ACCESS_TOKEN>/manifest.json.
     # The rewrite is required for v1.6.1 and harmless on newer releases.
-    @tokenConfigure path_regexp tokenConfigure ^/[A-Za-z0-9_-]{4,128}/configure$
+    @tokenConfigure path_regexp tokenConfigure ^/[A-Za-z0-9_-]{8,128}/configure$
     rewrite @tokenConfigure /configure
 
     reverse_proxy 127.0.0.1:7010

@@ -25,6 +25,7 @@ export function streamFromTile(tile: StatusTile) {
 export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: { watchedLookup?: WatchedLookup }) {
   const catalogHardMax = 100;
   const catalogPageSize = Math.max(1, Math.min(config.catalogPageSize, catalogHardMax));
+  const catalogSkipOptions = Array.from({ length: 101 }, (_, page) => String(page * catalogPageSize));
   const builder = new addonBuilder({
     id: 'org.cbkii.stremio-addarr',
     version: config.version,
@@ -37,16 +38,16 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
         name: 'Recent on Radarr',
         extra: [
           { name: 'filter', options: ['unwatched', 'recent'], isRequired: false },
-          { name: 'skip', isRequired: false }
+          { name: 'skip', options: catalogSkipOptions, isRequired: false }
         ]
       },
-      { id: 'sonarr-recent', type: 'series', name: 'Recent on Sonarr', extra: [{ name: 'skip', isRequired: false }] }
+      { id: 'sonarr-recent', type: 'series', name: 'Recent on Sonarr', extra: [{ name: 'skip', options: catalogSkipOptions, isRequired: false }] }
     ],
     resources: ['stream', 'catalog'],
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
     behaviorHints: {
-      // Stremio opens `${addonOrigin}/configure` for configurable add-ons.
+      // Stremio derives Configure from the installed manifest transport path.
       // Existing environment-configured installs remain valid, so configuration
       // is offered but is not required before installation.
       configurable: config.configUiEnabled,

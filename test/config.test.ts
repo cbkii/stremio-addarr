@@ -509,9 +509,14 @@ test('catalogue page size rejects values outside 10 to 100', () => {
   assert.throws(() => loadConfig(), /CATALOG_PAGE_SIZE/);
 });
 
-test('short add-on access tokens are accepted while three-character tokens are rejected', () => {
+test('eight-character add-on access tokens are accepted while seven-character tokens are rejected', () => {
   process.env.ADDON_ACCESS_TOKEN = 'a1B2_c3D';
   assert.equal(loadConfig().addonAccessToken, 'a1B2_c3D');
-  process.env.ADDON_ACCESS_TOKEN = 'abc';
-  assert.throws(() => loadConfig(), /ADDON_ACCESS_TOKEN must be 4-128/);
+  process.env.ADDON_ACCESS_TOKEN = 'abcdefg';
+  assert.throws(() => loadConfig(), /ADDON_ACCESS_TOKEN must be 8-128/);
+});
+
+test('longer legacy add-on access tokens remain accepted', () => {
+  process.env.ADDON_ACCESS_TOKEN = 'legacy-token-that-is-longer-than-eight';
+  assert.equal(loadConfig().addonAccessToken, 'legacy-token-that-is-longer-than-eight');
 });

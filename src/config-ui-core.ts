@@ -749,8 +749,8 @@ export function createConfigUiRouter(
   const router = express.Router();
   const envFile = path.resolve(options.envFilePath ?? process.env['CONFIG_UI_ENV_FILE'] ?? path.resolve(process.cwd(), '.env'));
   const adminToken = (options.adminToken ?? process.env['CONFIG_UI_TOKEN'] ?? '').trim();
-  if (config.configUiEnabled && !/^[A-Za-z0-9_-]{4,128}$/.test(adminToken)) {
-    throw new Error('CONFIG_UI_TOKEN must be 4-128 URL-safe characters when CONFIG_UI_ENABLED=true.');
+  if (config.configUiEnabled && !/^[A-Za-z0-9_-]{8,128}$/.test(adminToken)) {
+    throw new Error('CONFIG_UI_TOKEN must be 8-128 URL-safe characters when CONFIG_UI_ENABLED=true.');
   }
   const authEnabled = config.configUiEnabled;
   const controlRateLimitMax = options.controlRateLimitMax ?? CONTROL_MAX_REQUESTS;

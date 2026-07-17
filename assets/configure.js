@@ -327,9 +327,6 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-enhanceConfigurationUi();
-loadConfiguration();
-
 const FIELD_HELP = {
   'radarr-url': 'The URL this Pi uses to reach Radarr, including http:// or https:// and its port.',
   'radarr-card-url': 'Optional user-facing Radarr URL shown on cards. Leave blank to reuse the server URL.',
@@ -483,3 +480,6 @@ document.addEventListener('keydown', (event) => {
   event.preventDefault();
   moveSequential(direction);
 });
+
+enhanceConfigurationUi();
+loadConfiguration();

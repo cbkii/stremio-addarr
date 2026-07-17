@@ -7,6 +7,9 @@ const css = readFileSync(new URL('../assets/configure.css', import.meta.url), 'u
 
 test('configuration UI assets contain TV navigation and compact responsive layout safeguards', () => {
   assert.match(script, /FIELD_HELP/);
+  const helpDeclaration = script.indexOf('const FIELD_HELP');
+  const startupCall = script.indexOf('enhanceConfigurationUi();');
+  assert.ok(helpDeclaration >= 0 && startupCall > helpDeclaration, 'configuration UI must initialise after FIELD_HELP');
   assert.match(script, /dataset\.tvLast/);
   assert.match(script, /active\.type === 'number'/);
   assert.match(script, /BrowserBack/);

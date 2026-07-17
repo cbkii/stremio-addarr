@@ -10,10 +10,10 @@ The page is intentionally built with server-rendered HTML, native browser contro
 
 ## Enable editing
 
-Let `quick.sh` generate an 8-character token, or add a 4-8 character URL-safe administrator token to the same environment file used by the systemd service:
+Let `quick.sh` generate an 8-character token, or add a 8-character URL-safe administrator token to the same environment file used by the systemd service:
 
 ```bash
-openssl rand -hex 4
+openssl rand -base64 6 | tr '+/' '-_' | tr -d '=\n'
 sudoedit /opt/stremio-addarr/.env
 ```
 
@@ -29,7 +29,7 @@ Then restart:
 sudo systemctl restart stremio-addarr
 ```
 
-When `CONFIG_UI_ENABLED` is false, `/configure` and the Configure behaviour hint are not exposed. When enabled, `CONFIG_UI_TOKEN` must contain 4–128 URL-safe characters. The installer generates 8 characters by default and preserves longer legacy values. Existing environment-managed installations remain supported, but release 1.6 requires reinstalling through the tokenised manifest URL.
+When `CONFIG_UI_ENABLED` is false, `/configure` and the Configure behaviour hint are not exposed. When enabled, `CONFIG_UI_TOKEN` must contain 8–128 URL-safe characters. The installer generates 8 characters by default and preserves longer legacy values. Existing environment-managed installations remain supported, but release 1.6 requires reinstalling through the tokenised manifest URL.
 
 ## What the UI manages
 

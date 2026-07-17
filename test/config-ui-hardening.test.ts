@@ -125,9 +125,9 @@ test('enabled configuration UI accepts an eight-character administrator token', 
   assert.doesNotThrow(() => createApp(uiConfig()));
 });
 
-test('enabled configuration UI rejects an administrator token shorter than four characters', () => {
-  process.env['CONFIG_UI_TOKEN'] = 'abc';
-  assert.throws(() => createApp(uiConfig()), /CONFIG_UI_TOKEN must be 4-128 URL-safe characters/);
+test('enabled configuration UI rejects an administrator token shorter than eight characters', () => {
+  process.env['CONFIG_UI_TOKEN'] = 'abcdefg';
+  assert.throws(() => createApp(uiConfig()), /CONFIG_UI_TOKEN must be 8-128 URL-safe characters/);
 });
 
 test('authenticated control routes are rate limited per session', async () => {

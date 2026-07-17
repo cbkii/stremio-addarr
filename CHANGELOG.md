@@ -13,7 +13,7 @@
 
 ### Changed
 
-- Add an interactive token wizard to `quick.sh`: keep an existing token, specify a 4–8 character value, or generate a random 8-character value.
+- Add an interactive token wizard to `quick.sh`: keep an existing token, specify a 8-character value, or generate a random 8-character value.
 - Retain support for longer legacy tokens while making short TV-friendly tokens the default for new installations.
 - Restore configurable catalogue page sizes from 10 to 100 with a Pi-friendly default of 30.
 - Redesign the configuration UI for compact TV and landscape use, with smaller header/status/actions, purple action controls, wider responsive layouts and detailed field guidance.

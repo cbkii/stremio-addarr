@@ -460,8 +460,8 @@ function loadFileStreamingConfig(): AppConfig['fileStreaming'] {
 
 function loadAccessConfig(): Pick<AppConfig, 'addonAccessToken' | 'actionTokenTtlSec' | 'actionRateLimitMax' | 'actionQueueMax'> {
   const addonAccessToken = readRequiredString('ADDON_ACCESS_TOKEN');
-  if (!/^[A-Za-z0-9_-]{4,128}$/.test(addonAccessToken)) {
-    throw new Error('ADDON_ACCESS_TOKEN must be 4-128 URL-safe characters (letters, numbers, _ or -). New installs generate 8 characters; longer legacy tokens remain valid.');
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(addonAccessToken)) {
+    throw new Error('ADDON_ACCESS_TOKEN must be 8-128 URL-safe characters (letters, numbers, _ or -). New installs generate 8 characters; longer legacy tokens remain valid.');
   }
   const actionTokenTtlSec = Math.floor(readNumber('ACTION_TOKEN_TTL_SEC', 300));
   const actionRateLimitMax = Math.floor(readNumber('ACTION_RATE_LIMIT_MAX', 20));
@@ -475,8 +475,8 @@ function loadAccessConfig(): Pick<AppConfig, 'addonAccessToken' | 'actionTokenTt
 function loadConfigUiConfig(): Pick<AppConfig, 'configUiEnabled' | 'configUiRestartCommand'> {
   const configUiEnabled = readBoolean('CONFIG_UI_ENABLED', false);
   const token = readString('CONFIG_UI_TOKEN');
-  if (configUiEnabled && !/^[A-Za-z0-9_-]{4,128}$/.test(token)) {
-    throw new Error('CONFIG_UI_TOKEN must be 4-128 URL-safe characters when CONFIG_UI_ENABLED=true. New installs generate 8 characters; longer legacy tokens remain valid.');
+  if (configUiEnabled && !/^[A-Za-z0-9_-]{8,128}$/.test(token)) {
+    throw new Error('CONFIG_UI_TOKEN must be 8-128 URL-safe characters when CONFIG_UI_ENABLED=true. New installs generate 8 characters; longer legacy tokens remain valid.');
   }
   const configUiRestartCommand = readString('CONFIG_UI_RESTART_COMMAND', 'sudo systemctl restart stremio-addarr');
   return { configUiEnabled, configUiRestartCommand };

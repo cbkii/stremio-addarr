@@ -329,11 +329,13 @@ upsert_env_key() {
 }
 
 generate_short_token() {
-  openssl rand -hex 4
+  # Six random bytes encode to exactly eight URL-safe base64 characters.
+  openssl rand -base64 6 | tr '+/' '-_' | tr -d '=\n'
 }
 
 read_env_value() {
   local key="$1"
+  [[ -f "$INSTALL_DIR/.env" ]] || { printf '\\n'; return 0; }
   awk -v key="$key" '
     /^[[:space:]]*#/ { next }
     {
@@ -349,11 +351,11 @@ read_env_value() {
 }
 
 is_runtime_token() {
-  [[ "$1" =~ ^[A-Za-z0-9_-]{4,128}$ ]]
+  [[ "$1" =~ ^[A-Za-z0-9_-]{8,128}$ ]]
 }
 
 is_short_token() {
-  [[ "$1" =~ ^[A-Za-z0-9_-]{4,8}$ ]]
+  [[ "$1" =~ ^[A-Za-z0-9_-]{8}$ ]]
 }
 
 choose_token() {
@@ -368,10 +370,10 @@ choose_token() {
   echo "$purpose"
   if is_runtime_token "$current"; then
     echo "Current value: configured (${#current} characters)."
-    prompt="Choose [k] keep / [s] specify 4-8 characters / [g] generate random 8 characters [k]: "
+    prompt="Choose [k] keep / [s] specify exactly 8 characters / [g] generate random 8 characters [k]: "
   else
     echo "Current value: not configured or invalid."
-    prompt="Choose [s] specify 4-8 characters / [g] generate random 8 characters [g]: "
+    prompt="Choose [s] specify exactly 8 characters / [g] generate random 8 characters [g]: "
   fi
 
   while true; do
@@ -389,9 +391,9 @@ choose_token() {
         warn "There is no valid token to keep."
         ;;
       s|specify)
-        read -r -p "${C_YELLOW}${C_BOLD}Enter 4-8 URL-safe characters [A-Za-z0-9_-]: ${C_RESET}" value
+        read -r -p "${C_YELLOW}${C_BOLD}Enter exactly 8 URL-safe characters [A-Za-z0-9_-]: ${C_RESET}" value
         if ! is_short_token "$value"; then
-          warn "Use 4-8 characters containing only letters, numbers, _ or -."
+          warn "Use exactly 8 characters containing only letters, numbers, _ or -."
           continue
         fi
         upsert_env_key "$key" "$value"

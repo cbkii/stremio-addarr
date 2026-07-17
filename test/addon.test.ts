@@ -12,6 +12,7 @@ test.afterEach(() => {
 
 test('manifest endpoint shape sanity', async () => {
   const cfg = baseConfig();
+  cfg.catalogPageSize = 30;
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await fetch(`${addonUrl(baseUrl, cfg)}/manifest.json`);
@@ -21,11 +22,16 @@ test('manifest endpoint shape sanity', async () => {
       types: string[];
       idPrefixes: string[];
       logo: string;
+      catalogs: Array<{ id: string; extra?: Array<{ name: string; options?: string[] }> }>;
     };
     assert.deepEqual(manifest.resources, ['stream', 'catalog']);
     assert.deepEqual(manifest.types, ['movie', 'series']);
     assert.deepEqual(manifest.idPrefixes, ['tt']);
     assert.equal(manifest.logo, buildDefaultManifestLogoUrl('http://127.0.0.1:7010', '0.1.0-test'));
+    const radarrCatalog = manifest.catalogs.find((catalog) => catalog.id === 'radarr-recent');
+    const sonarrCatalog = manifest.catalogs.find((catalog) => catalog.id === 'sonarr-recent');
+    assert.deepEqual(radarrCatalog?.extra?.find((item) => item.name === 'skip')?.options?.slice(0, 4), ['0', '30', '60', '90']);
+    assert.deepEqual(sonarrCatalog?.extra?.find((item) => item.name === 'skip')?.options?.slice(0, 4), ['0', '30', '60', '90']);
   });
 });
 
