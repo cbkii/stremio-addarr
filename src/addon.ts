@@ -5,6 +5,7 @@ import { parseStremioId } from './lib/stremio-ids.js';
 import type { StatusTile } from './types.js';
 import { CatalogService, type CatalogFilter } from './services/catalog.js';
 import { ArrStatusService } from './services/status.js';
+import { addSeriesMonitorScopeToActionTiles } from './services/series-monitor-scope.js';
 import { NoopWatchedLookup } from './services/watched.js';
 import type { WatchedLookup } from './services/watched.js';
 
@@ -68,11 +69,14 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
 
     const parsed = parseStremioId(type, id);
     const tiles = await statusService.buildTiles(parsed);
+    const displayTiles = parsed.kind === 'series'
+      ? addSeriesMonitorScopeToActionTiles(tiles, config.sonarr)
+      : tiles;
 
-    logger?.info('stream handler complete', { type, id, tileCount: tiles.length, durationMs: Date.now() - start });
+    logger?.info('stream handler complete', { type, id, tileCount: displayTiles.length, durationMs: Date.now() - start });
 
     return {
-      streams: tiles.map(streamFromTile),
+      streams: displayTiles.map(streamFromTile),
       cacheMaxAge: config.streamCacheMaxAgeSec,
       staleRevalidate: config.streamStaleRevalidateSec
     };
