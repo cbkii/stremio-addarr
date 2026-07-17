@@ -2,6 +2,10 @@ import type { AppConfig } from '../config.js';
 import type { StatusTile } from '../types.js';
 
 type SeriesMonitorMode = AppConfig['sonarr']['seriesMonitor'];
+type SeriesMonitorDisplayConfig = Pick<
+  AppConfig['sonarr'],
+  'seriesMonitor' | 'monitorNewItems' | 'epCount' | 'epCountPast' | 'epCountMod'
+>;
 
 const MONITOR_SCOPE_LABELS: Record<SeriesMonitorMode, string> = {
   all: 'all episodes',
@@ -17,20 +21,34 @@ const MONITOR_SCOPE_LABELS: Record<SeriesMonitorMode, string> = {
   unmonitorSpecials: 'exclude specials',
   none: 'no episodes',
   skip: 'leave unchanged',
-  ep: 'this episode only',
+  ep: 'this episode',
   epfuture: 'this + future episodes',
   epseason: 'this episode to season end'
 };
 
-export function seriesMonitorScopeLine(mode: SeriesMonitorMode): string {
-  return `📡 Monitor scope: ${MONITOR_SCOPE_LABELS[mode]}`;
+function epAutoUpgradeLabel(config: SeriesMonitorDisplayConfig): string | undefined {
+  if (config.seriesMonitor !== 'ep' || config.epCount <= 1) return undefined;
+  const target = config.epCountMod === 'epfuture' ? 'this + future' : 'season end';
+  return `≥${config.epCount} files in prior ${config.epCountPast} → ${target}`;
+}
+
+export function seriesMonitorScopeLabels(config: SeriesMonitorDisplayConfig): string[] {
+  return [
+    MONITOR_SCOPE_LABELS[config.seriesMonitor],
+    epAutoUpgradeLabel(config),
+    `new: ${config.monitorNewItems}`
+  ].filter((label): label is string => Boolean(label));
+}
+
+export function seriesMonitorScopeLine(config: SeriesMonitorDisplayConfig): string {
+  return `📡: ${seriesMonitorScopeLabels(config).join(' · ')}`;
 }
 
 export function addSeriesMonitorScopeToActionTiles(
   tiles: StatusTile[],
-  mode: SeriesMonitorMode
+  config: SeriesMonitorDisplayConfig
 ): StatusTile[] {
-  const scopeLine = seriesMonitorScopeLine(mode);
+  const scopeLine = seriesMonitorScopeLine(config);
   return tiles.map((tile) => {
     if (!tile.isAction || !tile.description) return tile;
 
