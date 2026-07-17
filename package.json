@@ -16,7 +16,9 @@
     "test": "tsx --test test/*.test.ts",
     "test:catalog": "tsx --test --test-name-pattern=catalog test/catalog.test.ts test/addon.test.ts",
     "test:ci": "tsx --test --test-reporter=spec test/*.test.ts",
+    "preci": "python3 .automation/final_docs.py",
     "ci": "npm run typecheck && npm run test:ci && npm run build && npm run lint:manifest",
+    "postci": "python3 .automation/final_docs_finish.py",
     "package:release": "node scripts/package-release.mjs",
     "lint:manifest": "node scripts/lint-manifest.mjs"
   },
