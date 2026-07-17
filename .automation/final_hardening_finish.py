@@ -10,12 +10,15 @@ package_path = ROOT / "package.json"
 package = json.loads(package_path.read_text(encoding="utf-8"))
 package["scripts"].pop("preci", None)
 package["scripts"].pop("postci", None)
+package["scripts"]["ci"] = "npm run typecheck && npm run test:ci && npm run build && npm run lint:manifest"
 package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
 
 for relative in [
     ".automation/final_hardening.py",
     ".automation/run_final_hardening.py",
+    ".automation/run_final_ci.py",
     ".automation/final-hardening-error.txt",
+    ".automation/final-ci-error.txt",
     ".automation/final_hardening_finish.py",
 ]:
     (ROOT / relative).unlink(missing_ok=True)
