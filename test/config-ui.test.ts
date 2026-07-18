@@ -76,6 +76,9 @@ test('root and token-derived Configure routes serve the TV page without exposing
       assert.match(html, /Arr Status &amp; Add/);
       assert.match(html, /Unlock configuration/);
       assert.match(html, /\/assets\/configure\.js/);
+      assert.doesNotMatch(html, /type="checkbox"/);
+      assert.equal((html.match(/data-boolean-select="true"/g) ?? []).length, 8);
+      assert.match(html, /id="radarr-enabled"[^>]*><option value="true">Enabled<\/option><option value="false">Disabled<\/option>/);
       assert.ok(!html.includes('value="radarr-key"'));
       assert.ok(!html.includes('value="sonarr-key"'));
     }
