@@ -1,0 +1,59 @@
+name: Stage Trakt device authentication upgrade
+
+on:
+  push:
+    branches:
+      - agent/fix-trakt-device-auth
+
+permissions:
+  contents: write
+
+concurrency:
+  group: trakt-device-auth-staging
+  cancel-in-progress: false
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-trakt-device-auth
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply asserted source transformations
+        run: python3 .automation/apply-trakt-device-auth.py
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate Bash and helper syntax
+        run: |
+          bash -n quick.sh
+          node --check scripts/trakt-device-auth.mjs
+
+      - name: Run complete CI suite
+        run: npm run ci
+
+      - name: Build and inspect release package
+        run: |
+          npm run package:release
+          tar -tzf dist/stremio-addarr-install.tar.gz | sort | tee /tmp/archive.txt
+          grep -qx './scripts/trakt-device-auth.mjs' /tmp/archive.txt
+
+      - name: Commit validated product changes and remove staging files
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .automation/apply-trakt-device-auth.py .github/workflows/trakt-device-auth-staging.yml
+          git add -A
+          git commit -m 'Fix Trakt device authentication and token lifecycle'
+          git push origin HEAD:agent/fix-trakt-device-auth
