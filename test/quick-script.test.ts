@@ -25,7 +25,6 @@ test('quick.sh safely handles a missing environment file', () => {
   assert.match(quick, /\[\[ -f "\$INSTALL_DIR\/\.env" \]\] \|\|/);
 });
 
-
 test('quick.sh exposes retryable standalone Trakt device authentication', () => {
   const helper = readFileSync(path.join(root, 'scripts/trakt-device-auth.mjs'), 'utf8');
   assert.match(quick, /bash quick\.sh trakt/);
@@ -34,6 +33,8 @@ test('quick.sh exposes retryable standalone Trakt device authentication', () => 
   assert.match(helper, /pollTraktDeviceToken/);
   assert.match(helper, /retry refresh/);
   assert.match(helper, /new device code/);
+  assert.match(helper, /Invalid URL format/);
+  assert.match(helper, /Use only the API origin/);
   assert.doesNotMatch(quick + helper, /oauth\/authorize/);
   assert.doesNotMatch(quick + helper, /urn:ietf:wg:oauth:2\.0:oob/);
   assert.doesNotThrow(() => execFileSync('node', ['--check', 'scripts/trakt-device-auth.mjs'], { cwd: root, stdio: 'pipe' }));
