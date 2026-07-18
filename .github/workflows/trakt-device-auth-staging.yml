@@ -47,6 +47,52 @@ jobs:
           fi
           rm .automation/staging-error.log
 
+      - name: Preserve Trakt helper exit codes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('quick.sh')
+          content = path.read_text()
+          old = '''  if ! run_trakt_device_auth; then
+            local rc=$?
+            if [[ "$rc" -ne 2 ]]; then
+              warn "Continuing the install/upgrade without changing Trakt authentication."
+            fi
+          fi
+          '''
+          new = '''  if run_trakt_device_auth; then
+            return 0
+          else
+            local rc=$?
+            if [[ "$rc" -ne 2 ]]; then
+              warn "Continuing the install/upgrade without changing Trakt authentication."
+            fi
+            return 0
+          fi
+          '''
+          if content.count(old) != 1:
+              raise SystemExit('configure_trakt_oauth exit-code block not found exactly once')
+          content = content.replace(old, new, 1)
+          old = '''  if run_trakt_device_auth; then
+            exit 0
+          fi
+          rc=$?
+          [[ "$rc" -eq 2 ]] && exit 0
+          exit "$rc"
+          '''
+          new = '''  if run_trakt_device_auth; then
+            exit 0
+          else
+            rc=$?
+            [[ "$rc" -eq 2 ]] && exit 0
+            exit "$rc"
+          fi
+          '''
+          if content.count(old) != 1:
+              raise SystemExit('standalone Trakt exit-code block not found exactly once')
+          path.write_text(content.replace(old, new, 1))
+          PY
+
       - name: Install locked dependencies
         run: npm ci
 
@@ -56,7 +102,20 @@ jobs:
           node --check scripts/trakt-device-auth.mjs
 
       - name: Run complete CI suite
-        run: npm run ci
+        run: |
+          set +e
+          npm run ci > .automation/ci-error.log 2>&1
+          status=$?
+          cat .automation/ci-error.log
+          if [[ $status -ne 0 ]]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add .automation/ci-error.log
+            git commit -m 'chore: capture Trakt CI failure [skip ci]'
+            git push origin HEAD:agent/fix-trakt-device-auth
+            exit $status
+          fi
+          rm .automation/ci-error.log
 
       - name: Build and inspect release package
         run: |
@@ -70,7 +129,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .automation/apply-trakt-device-auth.py .github/workflows/trakt-device-auth-staging.yml
+          git rm .automation/apply-trakt-device-auth.py .automation/staging-error.log .github/workflows/trakt-device-auth-staging.yml 2>/dev/null || true
           git add -A
           git commit -m 'Fix Trakt device authentication and token lifecycle'
           git push origin HEAD:agent/fix-trakt-device-auth
