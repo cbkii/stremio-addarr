@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   TraktAuthError,
   pollTraktDeviceToken,
+  traktJsonRequest,
   traktTokenTiming
 } from '../src/services/trakt-auth.js';
 import { TraktWatchedLookup } from '../src/services/trakt-watched.js';
@@ -18,6 +19,26 @@ const temporaryPaths: string[] = [];
 test.afterEach(async () => {
   globalThis.fetch = ORIGINAL_FETCH;
   await Promise.all(temporaryPaths.splice(0).map((entry) => fs.rm(entry, { recursive: true, force: true })));
+});
+
+test('generic Trakt requests retry transient HTTP responses and honour Retry-After', async () => {
+  const waits: number[] = [];
+  const responses = [
+    new Response('{"error":"rate_limited"}', { status: 429, headers: { 'retry-after': '2' } }),
+    new Response('{"ok":true}', { status: 200 })
+  ];
+
+  const result = await traktJsonRequest<{ ok: boolean }>(
+    'https://api.trakt.tv/example',
+    { method: 'GET' },
+    {
+      fetchImpl: (async () => responses.shift() ?? new Response('{}', { status: 500 })) as typeof fetch,
+      sleep: async (ms) => { waits.push(ms); }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(waits, [2_000]);
 });
 
 test('device flow observes pending and slow-down responses before success', async () => {
@@ -52,6 +73,60 @@ test('device flow observes pending and slow-down responses before success', asyn
   assert.deepEqual(statuses, ['pending', 'slow_down']);
   assert.ok(waits[1] >= 1_000);
   assert.ok(waits[2] >= 2_000);
+});
+
+test('device flow retries temporary Trakt 5xx responses before success', async () => {
+  let now = 0;
+  const statuses: string[] = [];
+  const responses = [
+    new Response('{"error":"temporary"}', { status: 503 }),
+    new Response('{"access_token":"access","refresh_token":"refresh"}', { status: 200 })
+  ];
+
+  const token = await pollTraktDeviceToken({
+    apiBaseUrl: 'https://api.trakt.tv',
+    clientId: 'client',
+    clientSecret: 'secret',
+    userAgent: 'stremio-addarr/test',
+    device: {
+      device_code: 'device',
+      user_code: 'ABCD1234',
+      verification_url: 'https://trakt.tv/activate',
+      expires_in: 60,
+      interval: 1
+    },
+    fetchImpl: (async () => responses.shift() ?? new Response('{}', { status: 500 })) as typeof fetch,
+    now: () => now,
+    sleep: async (ms) => { now += ms; },
+    onStatus: (status) => statuses.push(status)
+  });
+
+  assert.equal(token.access_token, 'access');
+  assert.deepEqual(statuses, ['server_error']);
+});
+
+test('device flow stops after three consecutive Trakt 5xx responses', async () => {
+  let now = 0;
+  await assert.rejects(
+    pollTraktDeviceToken({
+      apiBaseUrl: 'https://api.trakt.tv',
+      clientId: 'client',
+      clientSecret: 'secret',
+      userAgent: 'stremio-addarr/test',
+      device: {
+        device_code: 'device',
+        user_code: 'ABCD1234',
+        verification_url: 'https://trakt.tv/activate',
+        expires_in: 60,
+        interval: 1
+      },
+      fetchImpl: (async () => new Response('{"error":"temporary"}', { status: 503 })) as typeof fetch,
+      now: () => now,
+      sleep: async (ms) => { now += ms; }
+    }),
+    (error: unknown) => error instanceof TraktAuthError
+      && error.message === 'trakt_device_http_503'
+  );
 });
 
 test('device flow reports terminal denial and expiry statuses', async () => {
