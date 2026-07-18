@@ -1,164 +1,129 @@
-# In-Stremio configuration UI
+# Configuration UI
 
-When `CONFIG_UI_ENABLED=true`, `stremio-addarr` advertises Stremio's standard `configurable` behaviour hint. The **Configure** action opens:
+This guide explains the browser/Android TV dashboard. For setting meanings and manual `.env` changes, use [CONFIGURATION.md](CONFIGURATION.md). For public HTTPS, use [../README_HOST.md](../README_HOST.md).
+
+## Open the dashboard
+
+When `CONFIG_UI_ENABLED=true`, Stremio's **Configure** action opens the token-derived URL:
 
 ```text
-https://YOUR_PUBLIC_BASE_URL/<ADDON_ACCESS_TOKEN>/configure
+https://YOUR_HOSTNAME/YOUR_ADDON_ACCESS_TOKEN/configure
 ```
 
-The page is intentionally built with server-rendered HTML, native browser controls, a small JavaScript module and TV-first CSS. It does not put Radarr, Sonarr, Trakt or TMDB credentials in the manifest URL.
+`quick.sh` prints this exact URL after install or upgrade.
 
-## Enable editing
+The page asks for `CONFIG_UI_TOKEN`. This administrator token is separate from `ADDON_ACCESS_TOKEN` and never belongs in the manifest URL.
 
-Let `quick.sh` generate an 8-character token, or add a 8-character URL-safe administrator token to the same environment file used by the systemd service:
+## Enable or repair access
+
+The recommended method is to rerun the guided upgrade:
 
 ```bash
-openssl rand -base64 6 | tr '+/' '-_' | tr -d '=\n'
-sudoedit /opt/stremio-addarr/.env
+bash quick.sh upgrade
 ```
+
+It can keep, specify or generate both tokens and verifies the resulting Configure route.
+
+For manual setup:
 
 ```dotenv
 CONFIG_UI_ENABLED=true
-CONFIG_UI_TOKEN=replace-with-the-generated-value
+CONFIG_UI_TOKEN=YOUR_URL_SAFE_ADMIN_TOKEN
 CONFIG_UI_ENV_FILE=/opt/stremio-addarr/.env
 ```
 
-Then restart:
+The token must contain 8–128 letters, numbers, `_` or `-`. Restart after editing:
 
 ```bash
 sudo systemctl restart stremio-addarr
 ```
-
-When `CONFIG_UI_ENABLED` is false, `/configure` and the Configure behaviour hint are not exposed. When enabled, `CONFIG_UI_TOKEN` must contain 8–128 URL-safe characters. The installer generates 8 characters by default and preserves longer legacy values. Existing environment-managed installations remain supported, but release 1.6 requires reinstalling through the tokenised manifest URL.
 
 ## What the UI manages
 
-The UI can update operational settings for:
+The dashboard manages the normal operational settings for:
 
-- Radarr and Sonarr connections, root folders, profiles, tags and add/search behaviour;
-- catalogue page size and watched-item allowance;
-- Kodi fallback and direct-file playback mode;
-- Trakt watched-sync credentials and interval;
-- TMDB fallback token and region.
+- Radarr and Sonarr connections, profiles, roots, tags and actions;
+- Sonarr monitoring behaviour;
+- catalogue sizing;
+- Kodi and direct-stream playback;
+- Trakt watched sync;
+- TMDB fallback.
 
-Bootstrap and process settings remain environment-managed, including:
+Bootstrap and infrastructure settings remain environment-managed, including `HOST`, `PORT`, `PUBLIC_BASE_URL`, `CONFIG_UI_TOKEN`, `FILE_STREAMING_SECRET`, systemd and Caddy.
 
-- `HOST`, `PORT`, `PUBLIC_BASE_URL`, `TARGET_CLIENT`, `TZ` and logging;
-- shutdown settings;
-- `CONFIG_UI_TOKEN` and `CONFIG_UI_ENV_FILE`;
-- `FILE_STREAMING_SECRET`;
-- reverse-proxy, TLS and systemd configuration.
+See [CONFIGURATION.md](CONFIGURATION.md) for the setting reference and [../.env.example](../.env.example) for the exhaustive variable list.
 
-## Save and activation model
+## Saving versus installing
 
-Saving does not mutate live clients in place. The server:
-
-1. validates the complete submitted configuration;
-2. updates only an explicit allow-list of keys;
-3. preserves comments and unrelated environment entries;
-4. writes a temporary file with mode `0600`;
-5. keeps the previous file as `.env.bak`;
-6. atomically renames the validated file into place.
-
-Restart the service to activate changes:
+**Save server settings** validates and writes the managed `.env` values. Restart the service when prompted:
 
 ```bash
 sudo systemctl restart stremio-addarr
-sudo systemctl status stremio-addarr --no-pager
-journalctl -u stremio-addarr -n 100 --no-pager
 ```
+
+Saving ordinary settings does not require reinstalling the Stremio add-on.
+
+**Install / reinstall in Stremio** opens the protected manifest URL. Use it only:
+
+- for first installation;
+- after changing `ADDON_ACCESS_TOKEN`;
+- when Stremio will not refresh changed manifest metadata.
+
+## Android TV remote navigation
+
+The UI uses native dropdowns for every Enabled/Disabled setting because checkboxes are unreliable on some TV browsers.
+
+- Up/Down moves through visible controls in document order.
+- Left/Right leaves number and dropdown controls and moves between tabs where appropriate.
+- Number inputs do not trap Up/Down merely to increment values.
+- Back/Escape first leaves the active field, then returns to Overview, before the browser exits.
+- The save action is reached after the normal page controls rather than becoming the first focus target.
+- Wide landscape screens use multiple columns; narrow screens collapse to one column.
+
+Text-heavy values such as API keys are usually easier to enter from a phone or desktop browser using the same Configure URL. Saved settings apply to every Stremio client using this server.
+
+## Connection tests
+
+**Test & discover options** checks the entered Radarr/Sonarr URL and API key without saving them. It discovers available root folders, quality profiles, tags and Sonarr language profiles where supported.
+
+A successful test does not activate unsaved settings. Select the desired options, then use **Save server settings** and restart when prompted.
+
+## Safe write and rollback behaviour
+
+On save, the server:
+
+1. validates the complete submitted configuration;
+2. updates only its managed allow-list of keys;
+3. preserves comments and unrelated `.env` entries;
+4. writes with mode `0600`;
+5. keeps the previous file as `.env.bak`;
+6. atomically replaces the active file.
 
 Rollback:
 
 ```bash
-sudo cp /opt/stremio-addarr/.env.bak /opt/stremio-addarr/.env
+sudo cp -a /opt/stremio-addarr/.env.bak /opt/stremio-addarr/.env
 sudo chmod 0600 /opt/stremio-addarr/.env
 sudo systemctl restart stremio-addarr
 ```
 
 ## Security model
 
-- Credentials remain server-side and are never encoded into the Stremio install URL.
-- Secret fields are returned only as configured/not-configured flags.
-- Empty secret fields mean **keep the existing value**.
-- Login comparisons are constant-time and failed logins are rate-limited per client address.
-- Successful login creates a random, HTTP-only, `SameSite=Strict` session cookie.
-- Configuration changes require a per-session CSRF token.
-- State-changing requests reject a mismatched browser `Origin` header.
+- Credentials remain server-side and are not encoded into the install URL.
+- Secret fields return only configured/not-configured state; leaving a secret field empty keeps its existing value.
+- Login comparison is constant-time and failed logins are rate-limited.
+- Sessions use an HTTP-only `SameSite=Strict` cookie and CSRF token.
 - Configuration responses are `no-store` and use a restrictive Content Security Policy.
-- Configuration API routes are deliberately excluded from wildcard Stremio CORS handling.
+- State-changing requests reject mismatched browser origins.
 
-Treat the configuration token like an administrator password. Keep the add-on behind the documented HTTPS Caddy front door.
+Keep the dashboard behind the documented Caddy HTTPS front door and treat `CONFIG_UI_TOKEN` as an administrator password.
 
-## Android TV operation
+## Troubleshooting
 
-The page uses:
+Use [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for:
 
-- large native controls;
-- strong multi-signal focus styling;
-- predictable document order;
-- D-pad-compatible buttons and selects;
-- one-column form sections;
-- an always-available save bar;
-- Back/Escape behaviour that returns to Overview before leaving the page.
-
-Text-heavy entry is usually more comfortable through Stremio Web or a phone browser using the same `/configure` URL. The resulting server-side configuration applies to every installed client using this add-on instance.
-
-## Connection tests and discovery
-
-**Test & discover options** validates candidate Radarr/Sonarr URL and API-key values without saving them. It then queries:
-
-- `/api/v3/system/status`;
-- `/api/v3/rootfolder`;
-- `/api/v3/qualityprofile`;
-- `/api/v3/tag`;
-- `/api/v3/languageprofile` for Sonarr when available.
-
-Tests use the server's existing request timeout and never return the submitted API key. Trakt refresh credentials are not tested by rotating a token from the browser; they are validated locally and exercised by the normal Trakt startup/sync flow after restart.
-
-## Install links
-
-The Overview page provides both:
-
-```text
-stremio://YOUR_HOST/OPAQUE_INSTALL_TOKEN/manifest.json
-https://YOUR_HOST/OPAQUE_INSTALL_TOKEN/manifest.json
-```
-
-The custom-protocol link returns to Stremio. The HTTPS URL is suitable for copying into Stremio manually when custom-protocol handling is unavailable.
-
-## Protected installation URL
-
-Release 1.6 requires `ADDON_ACCESS_TOKEN`. The Stremio manifest is served below an opaque path such as:
-
-`https://addarr.example/your-random-token/manifest.json`
-
-The configuration UI displays the complete install URL only after administrator authentication. Health and logs redact this token. Rotate it by changing the environment variable, restarting the service, and reinstalling the add-on.
-
-## Docker permissions
-
-The container runs as UID/GID 10001. Create and secure the writable configuration path before startup:
-
-`install -d -m 0700 -o 10001 -g 10001 config`
-`install -m 0600 -o 10001 -g 10001 .env config/.env`
-
-Use `CONFIG_UI_RESTART_COMMAND` to display deployment-appropriate restart instructions.
-
-
-## Saving versus installing
-
-**Save server settings** validates and writes the managed `.env` values. Restart the service when the UI reports that activation is required. Saving does not require reinstalling the add-on.
-
-**Install / reinstall in Stremio** opens Stremio with the protected manifest URL. Use it for the first installation or after rotating `ADDON_ACCESS_TOKEN`; it is not an Apply button.
-
-## TV remote navigation
-
-- Up/Down moves through visible controls in document order rather than jumping to the sticky save bar.
-- Left/Right moves between tabs and provides an exit path from number and select fields.
-- Number inputs no longer consume D-pad Up/Down merely to increment values.
-- Back/Escape first leaves an active field, then returns to Overview, before allowing the browser to close.
-- The form uses two columns on wide landscape displays and one column on narrow screens.
-
-## Catalogue page size
-
-`CATALOG_PAGE_SIZE` is editable from 10 to 100 and defaults to 30. Smaller pages reduce work per request on a Raspberry Pi; 100 is available for operators who prefer larger pages.
+- `Cannot GET /TOKEN/configure`;
+- blank/white Configure screens;
+- authentication failures;
+- service restart loops;
+- Caddy route or certificate failures.

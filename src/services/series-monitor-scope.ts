@@ -21,30 +21,30 @@ const MONITOR_SCOPE_LABELS: Record<SeriesMonitorMode, string> = {
   unmonitorSpecials: 'exclude specials',
   none: 'no eps',
   skip: 'leave unchanged',
-  ep: 'this ep',
-  epfuture: 'this + future eps',
-  epseason: 'this ep to season end'
+  ep: 'this',
+  epfuture: '+future',
+  epseason: 'this to season end'
 };
 
 function epAutoUpgradeLabel(config: SeriesMonitorDisplayConfig): string | undefined {
   if (config.seriesMonitor !== 'ep' || config.epCount <= 1) return undefined;
-  const target = config.epCountMod === 'epfuture' ? 'this + future' : 'season end';
-  return `≥${config.epCount} in ⎗${config.epCountPast} → ${target}`;
+  const target = config.epCountMod === 'epfuture' ? '+future' : 'season end';
+  return `(⥸${config.epCount} / ⎗${config.epCountPast} = ${target})`;
 }
 
 function monitorNewItemsLabel(config: SeriesMonitorDisplayConfig): string {
-  if (config.monitorNewItems === 'all') return 'new eps: on';
-  if (config.monitorNewItems === 'none') return 'new eps: off';
+  if (config.monitorNewItems === 'all') return '✅new';
+  if (config.monitorNewItems === 'none') return '❌new';
 
-  if (config.seriesMonitor === 'epfuture') return 'new eps: on';
-  if (config.seriesMonitor === 'epseason') return 'new eps: off';
+  if (config.seriesMonitor === 'epfuture') return '✅new';
+  if (config.seriesMonitor === 'epseason') return '❌new';
   if (config.seriesMonitor === 'ep') {
     return config.epCount > 1 && config.epCountMod === 'epfuture'
-      ? 'new eps: off→on if upgraded'
-      : 'new eps: off';
+      ? '❌new→✅new'
+      : '❌new';
   }
 
-  return 'new eps: on';
+  return '✅new';
 }
 
 export function seriesMonitorScopeLabels(config: SeriesMonitorDisplayConfig): string[] {
@@ -56,7 +56,7 @@ export function seriesMonitorScopeLabels(config: SeriesMonitorDisplayConfig): st
 }
 
 export function seriesMonitorScopeLine(config: SeriesMonitorDisplayConfig): string {
-  return `📡: ${seriesMonitorScopeLabels(config).join(' · ')}`;
+  return `📡: ${seriesMonitorScopeLabels(config).join(' ')}`;
 }
 
 export function addSeriesMonitorScopeToActionTiles(
