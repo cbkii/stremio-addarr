@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/fix-trakt-device-auth
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -14,6 +17,7 @@ concurrency:
 
 jobs:
   patch-test-commit:
+    if: github.head_ref == 'agent/fix-trakt-device-auth' || github.ref_name == 'agent/fix-trakt-device-auth'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -128,60 +132,60 @@ jobs:
           test_content = test_path.read_text()
           test_content += '''
 
-          test('device flow retries temporary Trakt 5xx responses before success', async () => {
-            let now = 0;
-            const statuses: string[] = [];
-            const responses = [
-              new Response('{"error":"temporary"}', { status: 503 }),
-              new Response('{"access_token":"access","refresh_token":"refresh"}', { status: 200 })
-            ];
+test('device flow retries temporary Trakt 5xx responses before success', async () => {
+  let now = 0;
+  const statuses: string[] = [];
+  const responses = [
+    new Response('{"error":"temporary"}', { status: 503 }),
+    new Response('{"access_token":"access","refresh_token":"refresh"}', { status: 200 })
+  ];
 
-            const token = await pollTraktDeviceToken({
-              apiBaseUrl: 'https://api.trakt.tv',
-              clientId: 'client',
-              clientSecret: 'secret',
-              userAgent: 'stremio-addarr/test',
-              device: {
-                device_code: 'device',
-                user_code: 'ABCD1234',
-                verification_url: 'https://trakt.tv/activate',
-                expires_in: 60,
-                interval: 1
-              },
-              fetchImpl: (async () => responses.shift() ?? new Response('{}', { status: 500 })) as typeof fetch,
-              now: () => now,
-              sleep: async (ms) => { now += ms; },
-              onStatus: (status) => statuses.push(status)
-            });
+  const token = await pollTraktDeviceToken({
+    apiBaseUrl: 'https://api.trakt.tv',
+    clientId: 'client',
+    clientSecret: 'secret',
+    userAgent: 'stremio-addarr/test',
+    device: {
+      device_code: 'device',
+      user_code: 'ABCD1234',
+      verification_url: 'https://trakt.tv/activate',
+      expires_in: 60,
+      interval: 1
+    },
+    fetchImpl: (async () => responses.shift() ?? new Response('{}', { status: 500 })) as typeof fetch,
+    now: () => now,
+    sleep: async (ms) => { now += ms; },
+    onStatus: (status) => statuses.push(status)
+  });
 
-            assert.equal(token.access_token, 'access');
-            assert.deepEqual(statuses, ['server_error']);
-          });
+  assert.equal(token.access_token, 'access');
+  assert.deepEqual(statuses, ['server_error']);
+});
 
-          test('device flow stops after three consecutive Trakt 5xx responses', async () => {
-            let now = 0;
-            await assert.rejects(
-              pollTraktDeviceToken({
-                apiBaseUrl: 'https://api.trakt.tv',
-                clientId: 'client',
-                clientSecret: 'secret',
-                userAgent: 'stremio-addarr/test',
-                device: {
-                  device_code: 'device',
-                  user_code: 'ABCD1234',
-                  verification_url: 'https://trakt.tv/activate',
-                  expires_in: 60,
-                  interval: 1
-                },
-                fetchImpl: (async () => new Response('{"error":"temporary"}', { status: 503 })) as typeof fetch,
-                now: () => now,
-                sleep: async (ms) => { now += ms; }
-              }),
-              (error: unknown) => error instanceof TraktAuthError
-                && error.message === 'trakt_device_http_503'
-            );
-          });
-          '''
+test('device flow stops after three consecutive Trakt 5xx responses', async () => {
+  let now = 0;
+  await assert.rejects(
+    pollTraktDeviceToken({
+      apiBaseUrl: 'https://api.trakt.tv',
+      clientId: 'client',
+      clientSecret: 'secret',
+      userAgent: 'stremio-addarr/test',
+      device: {
+        device_code: 'device',
+        user_code: 'ABCD1234',
+        verification_url: 'https://trakt.tv/activate',
+        expires_in: 60,
+        interval: 1
+      },
+      fetchImpl: (async () => new Response('{"error":"temporary"}', { status: 503 })) as typeof fetch,
+      now: () => now,
+      sleep: async (ms) => { now += ms; }
+    }),
+    (error: unknown) => error instanceof TraktAuthError
+      && error.message === 'trakt_device_http_503'
+  );
+});
+'''
           test_path.write_text(test_content)
 
           replace_once(
