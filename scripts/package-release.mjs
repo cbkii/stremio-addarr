@@ -19,7 +19,10 @@ const REQUIRED_FILES = [
   'README.md',
   'README_HOST.md',
   'CHANGELOG.md',
+  'docs/CONFIGURATION.md',
   'docs/CONFIGURATION_UI.md',
+  'docs/TROUBLESHOOTING.md',
+  'docs/TRAKT.md',
   '.env.example',
   'assets/logo.png',
   'assets/configure.css',
@@ -93,7 +96,7 @@ execSync(
   { stdio: 'inherit' },
 );
 
-// ── Clean staging ─────────────────────────────────────────────────────────
+// ── Clean staging ────────────────────────────────────────────────────────
 rmSync(STAGING, { recursive: true, force: true });
 
 console.log(`\n✅ Release assets ready:`);
