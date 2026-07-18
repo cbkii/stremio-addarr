@@ -21,15 +21,16 @@ test('README is an end-user entry point and delegates detailed guidance', () => 
   const readme = read('README.md');
   const contributing = read('CONTRIBUTING.md');
 
-  for (const target of [
+  const targets = [
     'README_HOST.md',
     'docs/CONFIGURATION.md',
     'docs/CONFIGURATION_UI.md',
     'docs/TROUBLESHOOTING.md',
     'docs/TRAKT.md',
     'CONTRIBUTING.md'
-  ]) {
-    assert.match(readme, new RegExp(target.replaceAll('.', '\\.')));
+  ];
+  for (const target of targets) {
+    assert.ok(readme.includes(target), 'README.md should reference ' + target);
   }
 
   assert.doesNotMatch(readme, /npm run dev/);
