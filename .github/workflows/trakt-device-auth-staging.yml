@@ -32,7 +32,20 @@ jobs:
           cache: npm
 
       - name: Apply asserted source transformations
-        run: python3 .automation/apply-trakt-device-auth.py
+        run: |
+          set +e
+          python3 .automation/apply-trakt-device-auth.py > .automation/staging-error.log 2>&1
+          status=$?
+          cat .automation/staging-error.log
+          if [[ $status -ne 0 ]]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add .automation/staging-error.log
+            git commit -m 'chore: capture Trakt staging failure [skip ci]'
+            git push origin HEAD:agent/fix-trakt-device-auth
+            exit $status
+          fi
+          rm .automation/staging-error.log
 
       - name: Install locked dependencies
         run: npm ci
