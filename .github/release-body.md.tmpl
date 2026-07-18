@@ -1,9 +1,11 @@
-Use the primary guides for complete and current steps:
+Use the end-user guides for the current installation and recovery steps:
 
-- Install/upgrade guide: [README.md](https://github.com/${REPO}/blob/${TAG}/README.md)
-- Hosting/TLS (Caddy + DuckDNS): [README_HOST.md](https://github.com/${REPO}/blob/${TAG}/README_HOST.md)
+- Install and upgrade: [README.md](https://github.com/${REPO}/blob/${TAG}/README.md)
+- Public HTTPS hosting: [README_HOST.md](https://github.com/${REPO}/blob/${TAG}/README_HOST.md)
+- Configuration reference: [docs/CONFIGURATION.md](https://github.com/${REPO}/blob/${TAG}/docs/CONFIGURATION.md)
+- Troubleshooting: [docs/TROUBLESHOOTING.md](https://github.com/${REPO}/blob/${TAG}/docs/TROUBLESHOOTING.md)
 
-⚡ Quick Install:
+## ⚡ Quick install
 
 ```bash
 gh release download ${TAG} --repo ${REPO} --pattern quick.sh --output quick.sh --clobber
@@ -11,7 +13,7 @@ chmod +x quick.sh
 bash quick.sh install --repo ${REPO} --tag ${TAG}
 ```
 
-🔄 Quick Upgrade:
+## 🔄 Quick upgrade
 
 ```bash
 gh release download ${TAG} --repo ${REPO} --pattern quick.sh --output quick.sh --clobber
@@ -19,13 +21,13 @@ chmod +x quick.sh
 bash quick.sh upgrade --repo ${REPO} --tag ${TAG}
 ```
 
-`--tag` is optional in `quick.sh` (defaults to latest), and version-style tags accept either `vX.Y.Z` or `X.Y.Z`.
-
-Exact URL to paste into Stremio after success:
+`quick.sh` prints the exact protected URLs after a successful run. The Stremio install URL has this form:
 
 ```text
-$PUBLIC_BASE_URL/manifest.json
+https://YOUR_HOSTNAME/YOUR_ADDON_ACCESS_TOKEN/manifest.json
 ```
+
+The unprefixed `/manifest.json` route is intentionally not the install URL.
 
 ---
 
@@ -35,12 +37,15 @@ ${VERSION_NOTES}
 
 ---
 
-## ✅ Minimal verification checklist
+## ✅ Verification checklist
 
-After install or upgrade, verify in this order:
+After install or upgrade:
 
-- [ ] `sudo systemctl is-active stremio-addarr` returns `active`
-- [ ] `curl -fsS http://127.0.0.1:7010/manifest.json >/dev/null` succeeds
-- [ ] `curl -fI $PUBLIC_BASE_URL/manifest.json` returns `200`
-- [ ] `PUBLIC_BASE_URL` exactly matches the Caddy hostname (`https://YOUR_HOSTNAME`)
-- [ ] Stremio installs from `$PUBLIC_BASE_URL/manifest.json`
+- [ ] `sudo systemctl is-active stremio-addarr` returns `active`.
+- [ ] `curl -fsS http://127.0.0.1:7010/healthz | python3 -m json.tool` reports `"ok": true`.
+- [ ] `curl -fsS http://127.0.0.1:7010/status.json | python3 -m json.tool` shows the expected release version and reachable Arr services.
+- [ ] The exact protected manifest URL printed by `quick.sh` returns JSON, for example: `curl -fsS "https://YOUR_HOSTNAME/YOUR_ADDON_ACCESS_TOKEN/manifest.json" | python3 -m json.tool`.
+- [ ] The token-derived Configure URL loads when the UI is enabled: `https://YOUR_HOSTNAME/YOUR_ADDON_ACCESS_TOKEN/configure`.
+- [ ] Stremio installs or refreshes the add-on from the protected manifest URL.
+
+When a check fails, use [docs/TROUBLESHOOTING.md](https://github.com/${REPO}/blob/${TAG}/docs/TROUBLESHOOTING.md) rather than retrying with the obsolete unprotected route.
