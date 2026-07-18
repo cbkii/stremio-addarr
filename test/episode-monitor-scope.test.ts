@@ -17,47 +17,49 @@ function monitorConfig(overrides: Partial<ReturnType<typeof baseConfig>['sonarr'
   return { ...baseConfig().sonarr, ...overrides };
 }
 
-test('Sonarr monitor settings use concise ep/eps scope labels', () => {
+test('Sonarr monitor settings use compact single-line scope labels', () => {
   const expected: Array<[
     ReturnType<typeof baseConfig>['sonarr']['seriesMonitor'],
     string,
     string
   ]> = [
-    ['all', 'all eps', 'new eps: on'],
-    ['future', 'future eps', 'new eps: on'],
-    ['missing', 'missing eps', 'new eps: on'],
-    ['existing', 'existing eps', 'new eps: on'],
-    ['firstSeason', 'first season', 'new eps: on'],
-    ['lastSeason', 'last season', 'new eps: on'],
-    ['latestSeason', 'latest season', 'new eps: on'],
-    ['pilot', 'pilot only', 'new eps: on'],
-    ['recent', 'recent eps', 'new eps: on'],
-    ['monitorSpecials', 'include specials', 'new eps: on'],
-    ['unmonitorSpecials', 'exclude specials', 'new eps: on'],
-    ['none', 'no eps', 'new eps: on'],
-    ['skip', 'leave unchanged', 'new eps: on'],
-    ['ep', 'this ep', 'new eps: off'],
-    ['epfuture', 'this + future eps', 'new eps: on'],
-    ['epseason', 'this ep to season end', 'new eps: off']
+    ['all', 'all eps', '✅new'],
+    ['future', 'future eps', '✅new'],
+    ['missing', 'missing eps', '✅new'],
+    ['existing', 'existing eps', '✅new'],
+    ['firstSeason', 'first season', '✅new'],
+    ['lastSeason', 'last season', '✅new'],
+    ['latestSeason', 'latest season', '✅new'],
+    ['pilot', 'pilot only', '✅new'],
+    ['recent', 'recent eps', '✅new'],
+    ['monitorSpecials', 'include specials', '✅new'],
+    ['unmonitorSpecials', 'exclude specials', '✅new'],
+    ['none', 'no eps', '✅new'],
+    ['skip', 'leave unchanged', '✅new'],
+    ['ep', 'this', '❌new'],
+    ['epfuture', '+future', '✅new'],
+    ['epseason', 'this to season end', '❌new']
   ];
 
   for (const [seriesMonitor, scope, newItems] of expected) {
     const line = seriesMonitorScopeLine(monitorConfig({ seriesMonitor, monitorNewItems: 'auto', epCount: 0 }));
-    assert.equal(line, `📡: ${scope} · ${newItems}`);
+    assert.equal(line, `📡: ${scope} ${newItems}`);
     assert.ok(!line.includes('\n'));
     assert.ok(!line.includes('episode'));
     assert.ok(!line.includes('auto'));
+    assert.ok(!line.includes(' · '));
+    assert.ok(!line.includes('new eps:'));
   }
 });
 
 test('explicit new-item settings are described by outcome', () => {
   assert.equal(
     seriesMonitorScopeLine(monitorConfig({ seriesMonitor: 'epseason', monitorNewItems: 'all' })),
-    '📡: this ep to season end · new eps: on'
+    '📡: this to season end ✅new'
   );
   assert.equal(
     seriesMonitorScopeLine(monitorConfig({ seriesMonitor: 'epfuture', monitorNewItems: 'none' })),
-    '📡: this + future eps · new eps: off'
+    '📡: +future ❌new'
   );
 });
 
@@ -71,15 +73,16 @@ test('all applicable ep-scope modifiers fit on one tile line', () => {
   });
 
   assert.deepEqual(seriesMonitorScopeLabels(config), [
-    'this ep',
-    '≥3 in ⎗8 → this + future',
-    'new eps: off→on if upgraded'
+    'this',
+    '(⥸3 / ⎗8 = +future)',
+    '❌new→✅new'
   ]);
   assert.equal(
     seriesMonitorScopeLine(config),
-    '📡: this ep · ≥3 in ⎗8 → this + future · new eps: off→on if upgraded'
+    '📡: this (⥸3 / ⎗8 = +future) ❌new→✅new'
   );
   assert.ok(!seriesMonitorScopeLine(config).includes('\n'));
+  assert.ok(!seriesMonitorScopeLine(config).includes(' · '));
 });
 
 test('auto remains off when ep upgrades only to season end', () => {
@@ -93,7 +96,7 @@ test('auto remains off when ep upgrades only to season end', () => {
 
   assert.equal(
     seriesMonitorScopeLine(config),
-    '📡: this ep · ≥3 in ⎗8 → season end · new eps: off'
+    '📡: this (⥸3 / ⎗8 = season end) ❌new'
   );
 });
 
@@ -106,7 +109,7 @@ test('disabled ep auto-upgrade settings do not add an inapplicable label', () =>
     epCountMod: 'epseason'
   });
 
-  assert.equal(seriesMonitorScopeLine(config), '📡: this ep · new eps: off');
+  assert.equal(seriesMonitorScopeLine(config), '📡: this ❌new');
 });
 
 test('episode action tile shows every applicable scope label on one line', async () => {
@@ -138,7 +141,7 @@ test('episode action tile shows every applicable scope label on one line', async
     assert.equal(response.status, 200);
     const body = (await response.json()) as { streams: Array<{ description?: string }> };
     const lines = body.streams[0].description?.split('\n') ?? [];
-    assert.ok(lines.includes('📡: this ep · ≥3 in ⎗8 → this + future · new eps: off→on if upgraded'));
+    assert.ok(lines.includes('📡: this (⥸3 / ⎗8 = +future) ❌new→✅new'));
     assert.equal(lines.filter((line) => line.startsWith('📡:')).length, 1);
   });
 });
