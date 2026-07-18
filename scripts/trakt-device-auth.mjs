@@ -85,7 +85,6 @@ async function readEnvFile(envFile) {
 }
 
 async function atomicWriteEnv(envFile, raw) {
-  const directory = path.dirname(envFile);
   const temporary = `${envFile}.tmp-trakt-${process.pid}`;
   const backup = `${envFile}.backup-before-trakt-auth`;
   await fs.copyFile(envFile, backup);
@@ -145,18 +144,36 @@ async function collectCredentials(rl, values) {
     'Exact configured redirect URI',
     values.get('TRAKT_REDIRECT_URI') ?? ''
   );
-  const apiBaseUrl = await promptRequired(
-    rl,
-    'Trakt API base URL',
-    values.get('TRAKT_API_BASE_URL') ?? 'https://api.trakt.tv'
-  );
-  const parsed = new URL(apiBaseUrl);
-  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Trakt API base URL must use HTTP or HTTPS.');
+
+  let apiBaseUrl = '';
+  let suggestedApiBaseUrl = values.get('TRAKT_API_BASE_URL') ?? 'https://api.trakt.tv';
+  while (true) {
+    const candidate = await promptRequired(rl, 'Trakt API base URL', suggestedApiBaseUrl);
+    try {
+      const parsed = new URL(candidate);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        console.log('Trakt API base URL must use HTTP or HTTPS.');
+        suggestedApiBaseUrl = '';
+        continue;
+      }
+      if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+        console.log('Use only the API origin, for example https://api.trakt.tv.');
+        suggestedApiBaseUrl = '';
+        continue;
+      }
+      apiBaseUrl = parsed.origin;
+      break;
+    } catch {
+      console.log('Invalid URL format. Enter a complete URL such as https://api.trakt.tv.');
+      suggestedApiBaseUrl = '';
+    }
+  }
+
   return {
     clientId,
     clientSecret,
     redirectUri,
-    apiBaseUrl: apiBaseUrl.replace(/\/+$/, '')
+    apiBaseUrl
   };
 }
 
