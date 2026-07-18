@@ -47,12 +47,21 @@ jobs:
           fi
           rm .automation/staging-error.log
 
-      - name: Preserve Trakt helper exit codes
+      - name: Finalise Trakt runtime semantics and fixtures
         run: |
+          git show origin/main:test/config.test.ts > test/config.test.ts
           python3 - <<'PY'
           from pathlib import Path
           import re
 
+          def replace_once(path_name, old, new):
+              path = Path(path_name)
+              content = path.read_text()
+              if content.count(old) != 1:
+                  raise SystemExit(f'{path_name}: expected exactly one match for {old[:80]!r}')
+              path.write_text(content.replace(old, new, 1))
+
+          # Preserve non-zero helper return codes through Bash conditionals.
           path = Path('quick.sh')
           content = path.read_text()
           pattern = re.compile(
@@ -76,7 +85,6 @@ jobs:
           content, count = pattern.subn(replacement, content, count=1)
           if count != 1:
               raise SystemExit('configure_trakt_oauth exit-code block not found exactly once')
-
           pattern = re.compile(
               r'  if run_trakt_device_auth; then\n'
               r'    exit 0\n'
@@ -97,6 +105,105 @@ jobs:
           if count != 1:
               raise SystemExit('standalone Trakt exit-code block not found exactly once')
           path.write_text(content)
+
+          # Enabled Trakt configurations require the exact redirect URI from the app.
+          replace_once(
+              'test/config.test.ts',
+              "  process.env.TRAKT_REFRESH_TOKEN = 'refresh-token';\n  process.env.TRAKT_API_BASE_URL = 'https://api.trakt.tv';\n",
+              "  process.env.TRAKT_REFRESH_TOKEN = 'refresh-token';\n  process.env.TRAKT_REDIRECT_URI = 'https://example.invalid/trakt/callback';\n  process.env.TRAKT_API_BASE_URL = 'https://api.trakt.tv';\n"
+          )
+          replace_once(
+              'test/config.test.ts',
+              "  process.env.TRAKT_REFRESH_TOKEN = 'refresh-token';\n  assert.throws(() => loadConfig(), /TRAKT_SYNC_MINS must be at least 40/);\n",
+              "  process.env.TRAKT_REFRESH_TOKEN = 'refresh-token';\n  process.env.TRAKT_REDIRECT_URI = 'https://example.invalid/trakt/callback';\n  assert.throws(() => loadConfig(), /TRAKT_SYNC_MINS must be at least 40/);\n"
+          )
+
+          # Persist provider absolute expiry while separately refreshing early.
+          replace_once(
+              'src/services/trakt-watched.ts',
+              '  tokenExpiresAt?: number;\n',
+              '  tokenExpiresAt?: number;\n  tokenRefreshAt?: number;\n'
+          )
+          replace_once(
+              'src/services/trakt-watched.ts',
+              "  /** Refresh threshold, deliberately before the provider's absolute expiry. */\n  private tokenExpiresAt: number;\n",
+              "  private tokenExpiresAt: number;\n  /** Refresh threshold, deliberately before the provider's absolute expiry. */\n  private tokenRefreshAt: number;\n"
+          )
+          replace_once(
+              'src/services/trakt-watched.ts',
+              '    this.userAgent = `stremio-addarr/${config.version}`;\n    this.tokenExpiresAt = this.initialRefreshThreshold();\n',
+              '    this.userAgent = `stremio-addarr/${config.version}`;\n    const initialTiming = this.initialTokenTiming();\n    this.tokenExpiresAt = initialTiming.expiresAtMs;\n    this.tokenRefreshAt = initialTiming.refreshAtMs;\n'
+          )
+          replace_once(
+              'src/services/trakt-watched.ts',
+              '''  private initialRefreshThreshold(): number {
+            if (!this.accessToken || this.config.traktSync.accessTokenCreatedAt <= 0
+              || this.config.traktSync.accessTokenExpiresIn <= 0) return 0;
+            return traktTokenTiming({
+              access_token: this.accessToken,
+              refresh_token: this.refreshToken,
+              created_at: this.config.traktSync.accessTokenCreatedAt,
+              expires_in: this.config.traktSync.accessTokenExpiresIn
+            }, this.now()).refreshAtMs;
+          }
+          ''',
+              '''  private initialTokenTiming(): { expiresAtMs: number; refreshAtMs: number } {
+            if (!this.accessToken || this.config.traktSync.accessTokenCreatedAt <= 0
+              || this.config.traktSync.accessTokenExpiresIn <= 0) {
+              return { expiresAtMs: 0, refreshAtMs: 0 };
+            }
+            const timing = traktTokenTiming({
+              access_token: this.accessToken,
+              refresh_token: this.refreshToken,
+              created_at: this.config.traktSync.accessTokenCreatedAt,
+              expires_in: this.config.traktSync.accessTokenExpiresIn
+            }, this.now());
+            return { expiresAtMs: timing.expiresAtMs, refreshAtMs: timing.refreshAtMs };
+          }
+          '''
+          )
+          replace_once(
+              'src/services/trakt-watched.ts',
+              '      if (!this.accessToken || this.now() >= this.tokenExpiresAt) {\n',
+              '      if (!this.accessToken || this.now() >= this.tokenRefreshAt) {\n'
+          )
+          replace_once(
+              'src/services/trakt-watched.ts',
+              '''    this.accessToken = response.access_token;
+              this.refreshToken = response.refresh_token;
+              this.tokenExpiresAt = traktTokenTiming(response, this.now()).refreshAtMs;
+          ''',
+              '''    this.accessToken = response.access_token;
+              this.refreshToken = response.refresh_token;
+              const timing = traktTokenTiming(response, this.now());
+              this.tokenExpiresAt = timing.expiresAtMs;
+              this.tokenRefreshAt = timing.refreshAtMs;
+          '''
+          )
+          replace_once(
+              'src/services/trakt-watched.ts',
+              '''      // Legacy v1 state used an obsolete 90-day assumption. Refresh it immediately.
+              this.tokenExpiresAt = parsed.schemaVersion === 2 && typeof parsed.tokenExpiresAt === 'number'
+                ? parsed.tokenExpiresAt
+                : 0;
+          ''',
+              '''      // Legacy v1 state used an obsolete 90-day assumption. Refresh it immediately.
+              if (parsed.schemaVersion === 2 && typeof parsed.tokenExpiresAt === 'number') {
+                this.tokenExpiresAt = parsed.tokenExpiresAt;
+                this.tokenRefreshAt = typeof parsed.tokenRefreshAt === 'number'
+                  ? parsed.tokenRefreshAt
+                  : Math.max(0, parsed.tokenExpiresAt - 5 * 60_000);
+              } else {
+                this.tokenExpiresAt = 0;
+                this.tokenRefreshAt = 0;
+              }
+          '''
+          )
+          replace_once(
+              'src/services/trakt-watched.ts',
+              '      tokenExpiresAt: this.tokenExpiresAt\n',
+              '      tokenExpiresAt: this.tokenExpiresAt,\n      tokenRefreshAt: this.tokenRefreshAt\n'
+          )
           PY
 
       - name: Install locked dependencies
