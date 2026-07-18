@@ -51,16 +51,19 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           path = Path('quick.sh')
           content = path.read_text()
-          old = '''  if ! run_trakt_device_auth; then
-            local rc=$?
-            if [[ "$rc" -ne 2 ]]; then
-              warn "Continuing the install/upgrade without changing Trakt authentication."
-            fi
-          fi
-          '''
-          new = '''  if run_trakt_device_auth; then
+          pattern = re.compile(
+              r'  if ! run_trakt_device_auth; then\n'
+              r'    local rc=\$\?\n'
+              r'    if \[\[ "\$rc" -ne 2 \]\]; then\n'
+              r'      warn "Continuing the install/upgrade without changing Trakt authentication\."\n'
+              r'    fi\n'
+              r'  fi\n'
+          )
+          replacement = '''  if run_trakt_device_auth; then
             return 0
           else
             local rc=$?
@@ -70,17 +73,19 @@ jobs:
             return 0
           fi
           '''
-          if content.count(old) != 1:
+          content, count = pattern.subn(replacement, content, count=1)
+          if count != 1:
               raise SystemExit('configure_trakt_oauth exit-code block not found exactly once')
-          content = content.replace(old, new, 1)
-          old = '''  if run_trakt_device_auth; then
-            exit 0
-          fi
-          rc=$?
-          [[ "$rc" -eq 2 ]] && exit 0
-          exit "$rc"
-          '''
-          new = '''  if run_trakt_device_auth; then
+
+          pattern = re.compile(
+              r'  if run_trakt_device_auth; then\n'
+              r'    exit 0\n'
+              r'  fi\n'
+              r'  rc=\$\?\n'
+              r'  \[\[ "\$rc" -eq 2 \]\] && exit 0\n'
+              r'  exit "\$rc"\n'
+          )
+          replacement = '''  if run_trakt_device_auth; then
             exit 0
           else
             rc=$?
@@ -88,9 +93,10 @@ jobs:
             exit "$rc"
           fi
           '''
-          if content.count(old) != 1:
+          content, count = pattern.subn(replacement, content, count=1)
+          if count != 1:
               raise SystemExit('standalone Trakt exit-code block not found exactly once')
-          path.write_text(content.replace(old, new, 1))
+          path.write_text(content)
           PY
 
       - name: Install locked dependencies
@@ -129,7 +135,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .automation/apply-trakt-device-auth.py .automation/staging-error.log .github/workflows/trakt-device-auth-staging.yml 2>/dev/null || true
+          git rm .automation/apply-trakt-device-auth.py .automation/staging-error.log .automation/ci-error.log .github/workflows/trakt-device-auth-staging.yml 2>/dev/null || true
           git add -A
           git commit -m 'Fix Trakt device authentication and token lifecycle'
           git push origin HEAD:agent/fix-trakt-device-auth
