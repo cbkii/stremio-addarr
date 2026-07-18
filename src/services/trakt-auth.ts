@@ -124,7 +124,7 @@ export async function traktJsonRequest<T>(
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const retryStatuses = new Set(options.retryStatuses ?? [429, 500, 502, 503, 504]);
 
-  let lastError: unknown;
+  let lastError: TraktAuthError | undefined;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const response = await fetchWithTimeout(url, init, fetchImpl, timeoutMs);
@@ -140,28 +140,38 @@ export async function traktJsonRequest<T>(
 
       const retryAfterSec = parseRetryAfter(response.headers.get('retry-after'));
       const code = parseErrorCode(text);
-      const error = new TraktAuthError(`trakt_http_${response.status}`, response.status, code, retryAfterSec, text);
+      const error = new TraktAuthError(
+        `trakt_http_${response.status}`,
+        response.status,
+        code,
+        retryAfterSec,
+        text
+      );
       if (!retryStatuses.has(response.status) || attempt >= maxAttempts) throw error;
 
+      lastError = error;
       const delayMs = retryAfterSec > 0
         ? retryAfterSec * 1000
         : Math.min(2_000, 250 * (2 ** (attempt - 1)));
       await sleep(delayMs);
-      lastError = error;
+      continue;
     } catch (error) {
       if (error instanceof TraktAuthError) throw error;
-      lastError = error;
-      if (attempt >= maxAttempts) {
-        const message = error instanceof Error && error.name === 'AbortError'
-          ? 'trakt_request_timeout'
-          : 'trakt_network_error';
-        throw new TraktAuthError(message, 0, error instanceof Error ? error.message : String(error));
-      }
+
+      const message = error instanceof Error && error.name === 'AbortError'
+        ? 'trakt_request_timeout'
+        : 'trakt_network_error';
+      lastError = new TraktAuthError(
+        message,
+        0,
+        error instanceof Error ? error.message : String(error)
+      );
+      if (attempt >= maxAttempts) throw lastError;
       await sleep(Math.min(2_000, 250 * (2 ** (attempt - 1))));
     }
   }
 
-  throw lastError instanceof Error ? lastError : new TraktAuthError('trakt_request_failed');
+  throw lastError ?? new TraktAuthError('trakt_request_failed');
 }
 
 function validateDeviceCode(value: unknown): TraktDeviceCodeResponse {
@@ -270,6 +280,20 @@ export async function pollTraktDeviceToken(options: TraktDevicePollOptions): Pro
       options.onStatus?.('slow_down', String(intervalSec));
       continue;
     }
+    if (response.status >= 500 && response.status < 600) {
+      transientErrors += 1;
+      options.onStatus?.('server_error', `HTTP ${response.status}`);
+      if (transientErrors >= 3) {
+        throw new TraktAuthError(
+          `trakt_device_http_${response.status}`,
+          response.status,
+          'temporary Trakt server error during device polling',
+          0,
+          text
+        );
+      }
+      continue;
+    }
 
     const code = parseErrorCode(text);
     const messages: Record<number, string> = {
@@ -278,7 +302,13 @@ export async function pollTraktDeviceToken(options: TraktDevicePollOptions): Pro
       410: 'trakt_device_code_expired',
       418: 'trakt_device_authorization_denied'
     };
-    throw new TraktAuthError(messages[response.status] ?? `trakt_device_http_${response.status}`, response.status, code, 0, text);
+    throw new TraktAuthError(
+      messages[response.status] ?? `trakt_device_http_${response.status}`,
+      response.status,
+      code,
+      0,
+      text
+    );
   }
 
   throw new TraktAuthError('trakt_device_code_expired', 410);
