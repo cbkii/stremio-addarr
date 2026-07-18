@@ -1,12 +1,43 @@
 # Trakt watched sync
 
-Trakt watched sync is optional. It lets the add-on hide or identify watched items without relying on Stremio account sessions.
+Trakt watched sync is optional. It lets the add-on identify watched movies and episodes without relying on Stremio account sessions.
 
 For general server settings, see [CONFIGURATION.md](CONFIGURATION.md). For failures, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
-## Recommended setup
+## Current authentication model
 
-Run install or upgrade:
+`stremio-addarr` uses Trakt's **Device Code Flow**, which Trakt recommends for command-line scripts and system services.
+
+The previous out-of-band browser-code flow is no longer used. You do not paste an authorisation code into `quick.sh`.
+
+Official references:
+
+- [Trakt authentication](https://docs.trakt.tv/reference/authentication)
+- [Generate device codes](https://docs.trakt.tv/reference/postoauthdevicecode)
+- [Poll for a device token](https://docs.trakt.tv/reference/postoauthdevicetoken)
+- [Exchange or refresh a token](https://docs.trakt.tv/reference/postoauthtoken)
+- [Required API headers](https://docs.trakt.tv/docs/required-headers)
+- [Rate limits and Retry-After](https://docs.trakt.tv/docs/rate-limiting)
+
+## Create or check the Trakt application
+
+Open:
+
+```text
+https://trakt.tv/oauth/applications
+```
+
+The application must provide:
+
+- a Client ID;
+- a Client Secret;
+- a redirect URI.
+
+The redirect URI is case-sensitive. It must exactly match the value saved as `TRAKT_REDIRECT_URI`. Device activation itself does not redirect to this URI, but Trakt requires it later when the refresh token is exchanged.
+
+## Recommended setup or repair
+
+For a normal install or upgrade, accept the Trakt prompt:
 
 ```bash
 bash quick.sh install
@@ -14,102 +45,118 @@ bash quick.sh install
 bash quick.sh upgrade
 ```
 
-When prompted:
-
-1. Choose **yes** for Trakt watched-sync OAuth.
-2. Open the printed Trakt authorisation URL.
-3. Approve access.
-4. Paste the returned code into the terminal.
-
-The script writes the required values and enables sync:
-
-```dotenv
-TRAKT_SYNC_ENABLED=true
-TRAKT_SYNC_MINS=360
-```
-
-It also stores the client ID, client secret and refresh token without printing them again.
-
-Restart and verify:
+To repair only Trakt without reinstalling or upgrading the add-on:
 
 ```bash
-sudo systemctl restart stremio-addarr
-curl -fsS http://127.0.0.1:7010/status.json | python3 -m json.tool
+gh release download --repo cbkii/stremio-addarr --pattern quick.sh --output quick.sh --clobber
+chmod +x quick.sh
+bash quick.sh trakt
 ```
 
-## Manual setup
+The script:
 
-Create a Trakt API application and obtain:
+1. reads the existing Trakt settings from `/opt/stremio-addarr/.env`;
+2. requests a short device code from Trakt;
+3. prints a direct activation URL such as `https://trakt.tv/activate/ABCD1234`;
+4. polls at Trakt's returned interval and stops at the returned expiry;
+5. handles pending, slow-down, invalid, already-used, expired and denied responses;
+6. validates refresh-token rotation using the exact configured redirect URI;
+7. verifies the resulting bearer token against `/users/settings`;
+8. writes the access token, refresh token and provider expiry metadata atomically;
+9. creates a new authentication-generation marker and discards stale runtime token state;
+10. restarts the service when run through `quick.sh`.
 
-- client ID;
-- client secret;
-- authorisation code.
+No full token is printed after it is received.
 
-Use this redirect URI unless your Trakt application was configured differently:
+## Retry and recovery choices
 
-```text
-urn:ietf:wg:oauth:2.0:oob
-```
+A failed attempt does not silently enable broken credentials.
 
-Open:
+The interactive flow offers:
 
-```text
-https://trakt.tv/oauth/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob
-```
+- request a new device code;
+- edit the Client ID, Client Secret or redirect URI;
+- retry refresh validation;
+- abandon Trakt setup without aborting the rest of an install or upgrade.
 
-Exchange the returned code:
+Common results:
 
-```bash
-curl -fsS -X POST 'https://api.trakt.tv/oauth/token' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "code": "PASTE_AUTHORIZATION_CODE",
-    "client_id": "YOUR_CLIENT_ID",
-    "client_secret": "YOUR_CLIENT_SECRET",
-    "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
-    "grant_type": "authorization_code"
-  }' | python3 -m json.tool
-```
+| Result | Meaning | Action |
+|---|---|---|
+| HTTP 400 while polling | approval is still pending | wait; the script continues |
+| HTTP 429 | polling or API rate limit | the script honours `Retry-After` and slows down |
+| HTTP 404 | invalid device code | request a new code and verify the Client ID |
+| HTTP 409 | device code already consumed | request a new code |
+| HTTP 410 | device code expired | request a new code |
+| HTTP 418 | approval was denied | request a new code when ready |
+| refresh HTTP 400/401 | secret, redirect URI or refresh token is invalid | edit the values or re-authorise |
+| `trakt_reauthorization_required` | Trakt rejected the stored refresh credentials | run `bash quick.sh trakt` |
 
-Copy the returned `refresh_token` into `/opt/stremio-addarr/.env`:
+## Stored settings
+
+A successful device flow writes:
 
 ```dotenv
 TRAKT_SYNC_ENABLED=true
 TRAKT_SYNC_MINS=360
 TRAKT_API_BASE_URL=https://api.trakt.tv
-TRAKT_CLIENT_ID=YOUR_CLIENT_ID
-TRAKT_CLIENT_SECRET=YOUR_CLIENT_SECRET
-TRAKT_REFRESH_TOKEN=YOUR_REFRESH_TOKEN
-TRAKT_REDIRECT_URI=urn:ietf:wg:oauth:2.0:oob
+TRAKT_CLIENT_ID=...
+TRAKT_CLIENT_SECRET=...
+TRAKT_REDIRECT_URI=https://exact-value-from-your-trakt-app.example/callback
+TRAKT_REFRESH_TOKEN=...
+TRAKT_ACCESS_TOKEN=...
+TRAKT_ACCESS_TOKEN_CREATED_AT=...
+TRAKT_ACCESS_TOKEN_EXPIRES_IN=...
+TRAKT_AUTH_GENERATION=...
 ```
 
-Restart:
+`TRAKT_AUTH_GENERATION` prevents an older `TRAKT_SYNC_STATE_FILE` from overriding newly authorised credentials after restart. Runtime refresh-token rotation remains in the state file with mode `0600`.
 
-```bash
-sudo systemctl restart stremio-addarr
-```
+## Runtime behaviour
 
-## Behaviour
-
-- Sync is interval-gated and persisted across restarts.
-- Refresh-token rotation is persisted by the add-on.
-- A temporary Trakt failure does not block Radarr/Sonarr actions.
-- `TRAKT_SYNC_MINS` has a minimum effective interval of 40 minutes.
-- Release-date lookup uses Arr metadata first, Trakt second and optional TMDB fallback last.
+- Provider `created_at` and `expires_in` values determine token lifetime.
+- Access tokens are refreshed before expiry rather than using a hard-coded lifetime.
+- Refresh and API requests retry bounded transient failures and honour `Retry-After`.
+- Concurrent 401 responses share one refresh operation.
+- Rotated refresh tokens are persisted atomically in a private state file.
+- A temporary Trakt failure does not block Radarr or Sonarr actions.
+- `TRAKT_SYNC_MINS` must be at least 40 minutes.
+- Release-date lookup uses the documented Trakt API only when a Client ID is configured; website scraping is deliberately not used.
 
 ## Check sync status
 
 ```bash
-curl -fsS http://127.0.0.1:7010/status.json \
-  | jq '.watched'
+curl -fsS http://127.0.0.1:7010/status.json | jq '.watched'
 ```
 
-Inspect recent sync errors:
+Trigger a local sync and recheck:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:7010/trakt/sync
+curl -fsS http://127.0.0.1:7010/status.json | jq '.watched'
+```
+
+Inspect recent Trakt logs:
 
 ```bash
 sudo journalctl -u stremio-addarr -n 300 --no-pager -o cat \
-  | jq 'select(.message | tostring | test("Trakt|watched"; "i"))'
+  | jq 'select(.message | tostring | test("trakt|watched"; "i"))'
 ```
+
+## Manual device-flow outline
+
+The supported helper is recommended because it implements polling intervals, expiry, retries, secure storage and refresh validation. For diagnostics, the protocol is:
+
+```bash
+curl -fsS -X POST 'https://api.trakt.tv/oauth/device/code' \
+  -H 'Content-Type: application/json' \
+  -H 'trakt-api-version: 2' \
+  -H 'trakt-api-key: YOUR_CLIENT_ID' \
+  -H 'User-Agent: stremio-addarr/manual' \
+  -d '{"client_id":"YOUR_CLIENT_ID"}' | jq .
+```
+
+Display the returned `user_code` and `verification_url`, then poll `/oauth/device/token` using the returned `device_code`, `interval` and `expires_in`. Do not poll faster than `interval`; handle HTTP 429 using `Retry-After`.
 
 ## Disable sync
 
@@ -125,4 +172,4 @@ Then restart:
 sudo systemctl restart stremio-addarr
 ```
 
-Disabling sync does not delete your Trakt account data. Remove local credentials from `.env` separately only when you no longer want the server to retain them.
+Disabling sync does not alter Trakt account data. Remove local credentials separately only when the server should no longer retain them.
