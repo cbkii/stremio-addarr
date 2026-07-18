@@ -1,3 +1,0 @@
-/home/runner/work/stremio-addarr/stremio-addarr/.automation/apply-trakt-device-auth.py:395: SyntaxWarning: invalid escape sequence '\.'
-  quick_test += '''
-scripts/package-release.mjs: expected one match, found 0: "  'docs/CONFIGURATION_UI.md',\n  '.env.example',\n"

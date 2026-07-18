@@ -20,6 +20,7 @@ interface PersistedTraktState {
   refreshToken?: string;
   accessToken?: string;
   tokenExpiresAt?: number;
+  tokenRefreshAt?: number;
 }
 
 interface TraktWatchedMovie {
@@ -45,8 +46,9 @@ export class TraktWatchedLookup implements WatchedLookup {
   private movieWatched = new Set<string>();
   private episodeWatched = new Set<string>();
   private accessToken: string;
-  /** Refresh threshold, deliberately before the provider's absolute expiry. */
   private tokenExpiresAt: number;
+  /** Refresh threshold, deliberately before the provider's absolute expiry. */
+  private tokenRefreshAt: number;
   private refreshToken: string;
   private lastSyncAt = 0;
   private lastSyncError?: string;
@@ -66,7 +68,9 @@ export class TraktWatchedLookup implements WatchedLookup {
     this.now = options.now ?? Date.now;
     this.sleep = options.sleep;
     this.userAgent = `stremio-addarr/${config.version}`;
-    this.tokenExpiresAt = this.initialRefreshThreshold();
+    const initialTiming = this.initialTokenTiming();
+    this.tokenExpiresAt = initialTiming.expiresAtMs;
+    this.tokenRefreshAt = initialTiming.refreshAtMs;
   }
 
   async init(): Promise<void> {
@@ -126,15 +130,18 @@ export class TraktWatchedLookup implements WatchedLookup {
     };
   }
 
-  private initialRefreshThreshold(): number {
+  private initialTokenTiming(): { expiresAtMs: number; refreshAtMs: number } {
     if (!this.accessToken || this.config.traktSync.accessTokenCreatedAt <= 0
-      || this.config.traktSync.accessTokenExpiresIn <= 0) return 0;
-    return traktTokenTiming({
+      || this.config.traktSync.accessTokenExpiresIn <= 0) {
+      return { expiresAtMs: 0, refreshAtMs: 0 };
+    }
+    const timing = traktTokenTiming({
       access_token: this.accessToken,
       refresh_token: this.refreshToken,
       created_at: this.config.traktSync.accessTokenCreatedAt,
       expires_in: this.config.traktSync.accessTokenExpiresIn
-    }, this.now()).refreshAtMs;
+    }, this.now());
+    return { expiresAtMs: timing.expiresAtMs, refreshAtMs: timing.refreshAtMs };
   }
 
   private async ensureSynced(force: boolean): Promise<void> {
@@ -154,7 +161,7 @@ export class TraktWatchedLookup implements WatchedLookup {
     const startedAt = this.now();
     this.logger.info('trakt sync start', { enabled: true });
     try {
-      if (!this.accessToken || this.now() >= this.tokenExpiresAt) {
+      if (!this.accessToken || this.now() >= this.tokenRefreshAt) {
         await this.refreshAccessToken();
       }
       const [movies, shows] = await Promise.all([
@@ -230,18 +237,26 @@ export class TraktWatchedLookup implements WatchedLookup {
 
   private async performRefreshAccessToken(): Promise<void> {
     if (!this.refreshToken) throw new Error('missing_refresh_token');
-    const response = await refreshTraktToken(
-      this.config.traktSync.apiBaseUrl,
-      this.config.traktSync.clientId,
-      this.config.traktSync.clientSecret,
-      this.refreshToken,
-      this.config.traktSync.redirectUri,
-      this.userAgent,
-      {
-        timeoutMs: this.config.requestTimeoutMs,
-        sleep: this.sleep
+    let response: TraktTokenResponse;
+    try {
+      response = await refreshTraktToken(
+        this.config.traktSync.apiBaseUrl,
+        this.config.traktSync.clientId,
+        this.config.traktSync.clientSecret,
+        this.refreshToken,
+        this.config.traktSync.redirectUri,
+        this.userAgent,
+        {
+          timeoutMs: this.config.requestTimeoutMs,
+          sleep: this.sleep
+        }
+      );
+    } catch (error) {
+      if (error instanceof TraktAuthError && (error.status === 400 || error.status === 401)) {
+        throw new Error('trakt_reauthorization_required');
       }
-    );
+      throw error;
+    }
     this.applyToken(response);
 
     try {
@@ -256,7 +271,9 @@ export class TraktWatchedLookup implements WatchedLookup {
   private applyToken(response: TraktTokenResponse): void {
     this.accessToken = response.access_token;
     this.refreshToken = response.refresh_token;
-    this.tokenExpiresAt = traktTokenTiming(response, this.now()).refreshAtMs;
+    const timing = traktTokenTiming(response, this.now());
+    this.tokenExpiresAt = timing.expiresAtMs;
+    this.tokenRefreshAt = timing.refreshAtMs;
   }
 
   private async traktGet<T>(endpoint: string): Promise<T> {
@@ -298,9 +315,15 @@ export class TraktWatchedLookup implements WatchedLookup {
       if (parsed.refreshToken?.trim()) this.refreshToken = parsed.refreshToken.trim();
       if (parsed.accessToken?.trim()) this.accessToken = parsed.accessToken.trim();
       // Legacy v1 state used an obsolete 90-day assumption. Refresh it immediately.
-      this.tokenExpiresAt = parsed.schemaVersion === 2 && typeof parsed.tokenExpiresAt === 'number'
-        ? parsed.tokenExpiresAt
-        : 0;
+      if (parsed.schemaVersion === 2 && typeof parsed.tokenExpiresAt === 'number') {
+        this.tokenExpiresAt = parsed.tokenExpiresAt;
+        this.tokenRefreshAt = typeof parsed.tokenRefreshAt === 'number'
+          ? parsed.tokenRefreshAt
+          : Math.max(0, parsed.tokenExpiresAt - 5 * 60_000);
+      } else {
+        this.tokenExpiresAt = 0;
+        this.tokenRefreshAt = 0;
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         this.logger.warn('Trakt state could not be loaded; using environment credentials', {
@@ -312,8 +335,8 @@ export class TraktWatchedLookup implements WatchedLookup {
 
   private async persistState(): Promise<void> {
     const directory = path.dirname(this.stateFile);
-    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    await fs.chmod(directory, 0o700).catch(() => undefined);
+    const createdDirectory = await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    if (createdDirectory) await fs.chmod(directory, 0o700).catch(() => undefined);
     const temporary = `${this.stateFile}.tmp-${process.pid}-${Date.now()}`;
     const payload = JSON.stringify({
       schemaVersion: 2,
@@ -321,7 +344,8 @@ export class TraktWatchedLookup implements WatchedLookup {
       lastSyncAt: this.lastSyncAt,
       refreshToken: this.refreshToken,
       accessToken: this.accessToken,
-      tokenExpiresAt: this.tokenExpiresAt
+      tokenExpiresAt: this.tokenExpiresAt,
+      tokenRefreshAt: this.tokenRefreshAt
     });
     try {
       const handle = await fs.open(temporary, 'w', 0o600);

@@ -7,7 +7,7 @@ import type { AddActionResult, ArrEpisodeStatus, ArrMovieStatus, ParsedStremioId
 import { RadarrClient } from './radarr.js';
 import { SonarrClient } from './sonarr.js';
 import { TmdbApiLookup, type TmdbLookup } from './tmdb.js';
-import { TraktHtmlLookup, TraktApiLookup, type TraktLookup } from './trakt.js';
+import { NoopTraktLookup, TraktApiLookup, type TraktLookup } from './trakt.js';
 import { NoopWatchedLookup, type WatchedLookup } from './watched.js';
 
 // --- Tile formatting helpers ---
@@ -129,7 +129,9 @@ export class ArrStatusService {
     this.sonarr = new SonarrClient(config);
     this.healthCache = new AsyncTtlCache(config.serviceHealthCacheTtlMs);
     this.watchedLookup = deps?.watchedLookup ?? new NoopWatchedLookup();
-    this.traktLookup = deps?.traktLookup ?? (config.traktSync.clientId ? new TraktApiLookup(config.traktSync.clientId) : new TraktHtmlLookup());
+    this.traktLookup = deps?.traktLookup ?? (config.traktSync.clientId
+      ? new TraktApiLookup(config.traktSync.clientId, config.traktSync.apiBaseUrl, config.version)
+      : new NoopTraktLookup());
   }
 
   private normalizeDateCandidate(value?: string): string | undefined {

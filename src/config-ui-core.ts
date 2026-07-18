@@ -136,7 +136,11 @@ const MANAGED_KEYS = new Set([
   'TRAKT_CLIENT_ID',
   'TRAKT_CLIENT_SECRET',
   'TRAKT_REFRESH_TOKEN',
+  'TRAKT_ACCESS_TOKEN',
+  'TRAKT_ACCESS_TOKEN_CREATED_AT',
+  'TRAKT_ACCESS_TOKEN_EXPIRES_IN',
   'TRAKT_REDIRECT_URI',
+  'TRAKT_AUTH_GENERATION',
   'TMDB_API_READ_ACCESS_TOKEN',
   'TMDB_API_BASE_URL',
   'TMDB_RELEASE_REGION'
@@ -511,11 +515,16 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
   const traktClientId = readStringField(trakt, 'clientId');
   const traktClientSecret = readStringField(trakt, 'clientSecret');
   const traktRefreshToken = readStringField(trakt, 'refreshToken');
-  const hasClientId = Boolean(traktClientId || currentEnv.get('TRAKT_CLIENT_ID') || config.traktSync.clientId);
-  const hasClientSecret = Boolean(traktClientSecret || currentEnv.get('TRAKT_CLIENT_SECRET') || config.traktSync.clientSecret);
-  const hasRefreshToken = Boolean(traktRefreshToken || currentEnv.get('TRAKT_REFRESH_TOKEN') || config.traktSync.refreshToken);
-  if (traktEnabled && (!hasClientId || !hasClientSecret || !hasRefreshToken)) {
-    throw new Error('Trakt client ID, client secret and refresh token are required when Trakt sync is enabled.');
+  const previousClientId = currentEnv.get('TRAKT_CLIENT_ID') || config.traktSync.clientId;
+  const previousClientSecret = currentEnv.get('TRAKT_CLIENT_SECRET') || config.traktSync.clientSecret;
+  const previousRefreshToken = currentEnv.get('TRAKT_REFRESH_TOKEN') || config.traktSync.refreshToken;
+  const previousRedirectUri = currentEnv.get('TRAKT_REDIRECT_URI') || config.traktSync.redirectUri;
+  const redirectUri = readStringField(trakt, 'redirectUri', previousRedirectUri);
+  const effectiveClientId = traktClientId || previousClientId;
+  const effectiveClientSecret = traktClientSecret || previousClientSecret;
+  const effectiveRefreshToken = traktRefreshToken || previousRefreshToken;
+  if (traktEnabled && (!effectiveClientId || !effectiveClientSecret || !effectiveRefreshToken || !redirectUri)) {
+    throw new Error('Trakt client ID, client secret, refresh token and exact application redirect URI are required when Trakt sync is enabled.');
   }
   set('TRAKT_SYNC_ENABLED', traktEnabled);
   set('TRAKT_SYNC_MINS', readIntegerField(trakt, 'syncMins', config.traktSync.syncMins, 40));
@@ -523,7 +532,19 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
   if (traktClientId) set('TRAKT_CLIENT_ID', traktClientId);
   if (traktClientSecret) set('TRAKT_CLIENT_SECRET', traktClientSecret);
   if (traktRefreshToken) set('TRAKT_REFRESH_TOKEN', traktRefreshToken);
-  set('TRAKT_REDIRECT_URI', readStringField(trakt, 'redirectUri', config.traktSync.redirectUri) || 'urn:ietf:wg:oauth:2.0:oob');
+  set('TRAKT_REDIRECT_URI', redirectUri);
+
+  const traktCredentialsChanged =
+    (traktClientId && traktClientId !== previousClientId)
+    || (traktClientSecret && traktClientSecret !== previousClientSecret)
+    || (traktRefreshToken && traktRefreshToken !== previousRefreshToken)
+    || redirectUri !== previousRedirectUri;
+  if (traktCredentialsChanged) {
+    set('TRAKT_ACCESS_TOKEN', '');
+    set('TRAKT_ACCESS_TOKEN_CREATED_AT', 0);
+    set('TRAKT_ACCESS_TOKEN_EXPIRES_IN', 0);
+    set('TRAKT_AUTH_GENERATION', randomUUID().replaceAll('-', ''));
+  }
 
   set('TMDB_API_BASE_URL', normalizeHttpUrl(tmdb['apiBaseUrl'], 'TMDB API URL'));
   const tmdbToken = readStringField(tmdb, 'authToken');
@@ -719,7 +740,7 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
           <label for="trakt-client-secret">Client secret <span class="muted" id="trakt-client-secret-state"></span></label><input id="trakt-client-secret" type="password" placeholder="Leave blank to keep existing">
           <label for="trakt-refresh-token">Refresh token <span class="muted" id="trakt-refresh-state"></span></label><input id="trakt-refresh-token" type="password" placeholder="Leave blank to keep existing">
           <label for="trakt-redirect-uri">Redirect URI</label><input id="trakt-redirect-uri">
-          <p class="muted">Trakt credentials are validated locally on save. The refresh flow runs after restart; the UI does not rotate tokens merely to test them.</p>
+          <p class="muted">Recommended authentication uses <code>bash quick.sh trakt</code>. Manual credentials saved here must include the exact case-sensitive redirect URI from the Trakt application; changed credentials invalidate older runtime token state.</p>
 
           <hr>
           <h2>TMDB fallback</h2>

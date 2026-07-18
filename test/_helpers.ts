@@ -81,7 +81,11 @@ export function baseConfig(): AppConfig {
       clientId: '',
       clientSecret: '',
       refreshToken: '',
-      redirectUri: 'urn:ietf:wg:oauth:2.0:oob',
+      accessToken: '',
+      accessTokenCreatedAt: 0,
+      accessTokenExpiresIn: 0,
+      redirectUri: 'https://example.invalid/trakt/callback',
+      authGeneration: '',
       stateFilePath: '/tmp/stremio-addarr-test-trakt-sync.json'
     },
     tmdb: {

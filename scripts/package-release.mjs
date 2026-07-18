@@ -23,6 +23,7 @@ const REQUIRED_FILES = [
   'docs/TROUBLESHOOTING.md',
   'docs/TRAKT.md',
   'docs/CONFIGURATION_UI.md',
+  'scripts/trakt-device-auth.mjs',
   '.env.example',
   'assets/logo.png',
   'assets/configure.css',
@@ -73,6 +74,7 @@ stage('README.md');
 stage('README_HOST.md');
 stage('CHANGELOG.md');
 stage('docs', 'docs');
+stage('scripts/trakt-device-auth.mjs');
 
 // Runtime web assets (manifest logo and /configure UI)
 stage('assets', 'assets');

@@ -103,7 +103,11 @@ export interface AppConfig {
     clientId: string;
     clientSecret: string;
     refreshToken: string;
+    accessToken: string;
+    accessTokenCreatedAt: number;
+    accessTokenExpiresIn: number;
     redirectUri: string;
+    authGeneration: string;
     stateFilePath: string;
   };
   tmdb: {
@@ -567,6 +571,8 @@ function loadSonarrConfig(): AppConfig['sonarr'] {
 function loadTraktSyncConfig(): AppConfig['traktSync'] {
   const traktSyncEnabled = readBoolean('TRAKT_SYNC_ENABLED', false);
   const traktSyncMinsRaw = Math.floor(readNumber('TRAKT_SYNC_MINS', 360));
+  const accessTokenCreatedAt = Math.max(0, Math.floor(readNumber('TRAKT_ACCESS_TOKEN_CREATED_AT', 0)));
+  const accessTokenExpiresIn = Math.max(0, Math.floor(readNumber('TRAKT_ACCESS_TOKEN_EXPIRES_IN', 0)));
   const config = {
     enabled: traktSyncEnabled,
     syncMins: traktSyncMinsRaw,
@@ -574,7 +580,11 @@ function loadTraktSyncConfig(): AppConfig['traktSync'] {
     clientId: readString('TRAKT_CLIENT_ID'),
     clientSecret: readString('TRAKT_CLIENT_SECRET'),
     refreshToken: readString('TRAKT_REFRESH_TOKEN'),
-    redirectUri: readString('TRAKT_REDIRECT_URI', 'urn:ietf:wg:oauth:2.0:oob'),
+    accessToken: readString('TRAKT_ACCESS_TOKEN'),
+    accessTokenCreatedAt,
+    accessTokenExpiresIn,
+    redirectUri: readString('TRAKT_REDIRECT_URI'),
+    authGeneration: readString('TRAKT_AUTH_GENERATION'),
     stateFilePath: readString('TRAKT_SYNC_STATE_FILE', path.resolve(process.cwd(), 'data/trakt-sync-state.json'))
   };
 
@@ -582,6 +592,7 @@ function loadTraktSyncConfig(): AppConfig['traktSync'] {
     readRequiredString('TRAKT_CLIENT_ID');
     readRequiredString('TRAKT_CLIENT_SECRET');
     readRequiredString('TRAKT_REFRESH_TOKEN');
+    readRequiredString('TRAKT_REDIRECT_URI');
     if (config.syncMins < 40) throw new Error('TRAKT_SYNC_MINS must be at least 40.');
   }
 

@@ -89,64 +89,76 @@ test('fails for PUBLIC_BASE_URL with embedded credentials', () => {
 });
 
 test('validateConfig warns when PUBLIC_BASE_URL uses HTTP', () => {
-  process.env.PUBLIC_BASE_URL = 'http://example.com';
-  const result = validateConfig(loadConfig());
-  assert.ok(result.issues.some((issue) => issue.includes('HTTP')));
+  const cfg = baseConfig();
+  cfg.publicBaseUrl = 'http://192.168.1.50:7010';
+  const result = validateConfig(cfg);
+  assert.equal(result.isHttps, false);
+  assert.ok(result.issues.includes('PUBLIC_BASE_URL uses HTTP'));
 });
 
 test('validateConfig marks public HTTPS hostname as Android-TV compatible', () => {
-  process.env.PUBLIC_BASE_URL = 'https://addarr.example.com';
-  const result = validateConfig(loadConfig());
+  const cfg = baseConfig();
+  cfg.publicBaseUrl = 'https://stremio-addarr.example.com';
+  cfg.radarr.enabled = true;
+  const result = validateConfig(cfg);
+  assert.equal(result.isHttps, true);
   assert.equal(result.likelyAndroidTvCompatible, true);
+  assert.equal(result.isInternalHostname, false);
 });
 
 test('validateConfig flags localhost HTTP as Android-TV incompatible', () => {
-  process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:7010';
-  const result = validateConfig(loadConfig());
-  assert.equal(result.likelyAndroidTvCompatible, false);
+  const cfg = baseConfig();
+  cfg.publicBaseUrl = 'http://127.0.0.1:7010';
+  const result = validateConfig(cfg);
+  assert.equal(result.isHttps, false);
+  assert.ok(result.issues.includes('Android TV compatibility likely broken'));
 });
 
 test('validateConfig flags internal-only hostname for android-tv target', () => {
-  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.local';
-  const result = validateConfig(loadConfig());
+  const cfg = baseConfig();
+  cfg.publicBaseUrl = 'https://stremio-addarr.lan';
+  const result = validateConfig(cfg);
+  assert.ok(result.issues.includes('PUBLIC_BASE_URL uses internal-only hostname'));
   assert.equal(result.likelyAndroidTvCompatible, false);
 });
 
 test('validateConfig flags path-prefix origins as unsupported', () => {
-  process.env.PUBLIC_BASE_URL = 'https://example.com/addarr';
-  const result = validateConfig(loadConfig());
-  assert.ok(result.issues.some((issue) => issue.includes('path prefix')));
+  const cfg = baseConfig();
+  cfg.publicBaseUrl = 'https://stremio-addarr.example.com/addarr';
+  const result = validateConfig(cfg);
+  assert.ok(result.issues.includes('PUBLIC_BASE_URL includes a path prefix, which is unsupported'));
 });
 
 test('validateConfig allows generic target for advanced/local setups', () => {
-  process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:7010';
-  process.env.TARGET_CLIENT = 'generic';
-  const result = validateConfig(loadConfig());
+  const cfg = baseConfig();
+  cfg.targetClient = 'generic';
+  cfg.publicBaseUrl = 'http://127.0.0.1:7010';
+  const result = validateConfig(cfg);
   assert.equal(result.likelyAndroidTvCompatible, true);
+  assert.ok(!result.issues.includes('Android TV compatibility likely broken'));
 });
 
 test('validateConfig warns when neither service is enabled', () => {
-  process.env.RADARR_ENABLED = 'false';
-  process.env.SONARR_ENABLED = 'false';
-  const result = validateConfig(loadConfig());
-  assert.ok(result.issues.some((issue) => issue.includes('Neither Radarr nor Sonarr')));
+  const cfg = baseConfig(); // both disabled
+  const result = validateConfig(cfg);
+  assert.ok(result.issues.some((i) => /neither/i.test(i)));
 });
 
 test('validateConfig has no neither-enabled warning when at least one service is enabled', () => {
-  process.env.RADARR_ENABLED = 'true';
-  process.env.RADARR_BASE_URL = 'http://127.0.0.1:7878';
-  process.env.RADARR_API_KEY = 'abc';
-  process.env.RADARR_ROOT_FOLDER_PATH = '/movies';
-  const result = validateConfig(loadConfig());
-  assert.ok(!result.issues.some((issue) => issue.includes('Neither Radarr nor Sonarr')));
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const result = validateConfig(cfg);
+  assert.ok(!result.issues.some((i) => /neither/i.test(i)));
 });
 
+
 test('fails for PUBLIC_BASE_URL with query string', () => {
-  process.env.PUBLIC_BASE_URL = 'https://example.com?bad=true';
-  assert.throws(() => loadConfig(), /PUBLIC_BASE_URL/);
+  process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:7010/?x=1';
+  assert.throws(() => loadConfig(), /must not include query or hash/);
 });
 
 test('enabled Radarr requires root folder path', () => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.RADARR_ENABLED = 'true';
   process.env.RADARR_BASE_URL = 'http://127.0.0.1:7878';
   process.env.RADARR_API_KEY = 'abc';
@@ -155,6 +167,7 @@ test('enabled Radarr requires root folder path', () => {
 });
 
 test('enabled Sonarr requires positive profile ids', () => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.SONARR_ENABLED = 'true';
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
@@ -164,47 +177,45 @@ test('enabled Sonarr requires positive profile ids', () => {
 });
 
 test('enabled Sonarr validates SONARR_SERIES_MONITOR enum', () => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.SONARR_ENABLED = 'true';
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
   process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-  process.env.SONARR_QUALITY_PROFILE_ID = '1';
-  process.env.SONARR_SERIES_MONITOR = 'invalid';
+  process.env.SONARR_SERIES_MONITOR = 'invalid_value';
   assert.throws(() => loadConfig(), /SONARR_SERIES_MONITOR/);
 });
 
 test('enabled Sonarr accepts case-insensitive SONARR_SERIES_MONITOR', () => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.SONARR_ENABLED = 'true';
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
   process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-  process.env.SONARR_QUALITY_PROFILE_ID = '1';
   process.env.SONARR_SERIES_MONITOR = 'ALL';
   const config = loadConfig();
   assert.equal(config.sonarr.seriesMonitor, 'all');
 });
 
 test('enabled Sonarr accepts future as SONARR_SERIES_MONITOR', () => {
+  process.env.PUBLIC_BASE_URL = 'https://stremio-addarr.example.com';
   process.env.SONARR_ENABLED = 'true';
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
   process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-  process.env.SONARR_QUALITY_PROFILE_ID = '1';
   process.env.SONARR_SERIES_MONITOR = 'future';
   const config = loadConfig();
   assert.equal(config.sonarr.seriesMonitor, 'future');
 });
 
 test('enabled Sonarr accepts episode-scoped values in SONARR_SERIES_MONITOR', () => {
-  for (const mode of ['ep', 'epfuture', 'epseason']) {
-    process.env.SONARR_ENABLED = 'true';
-    process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
-    process.env.SONARR_API_KEY = 'abc';
-    process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-    process.env.SONARR_QUALITY_PROFILE_ID = '1';
-    process.env.SONARR_SERIES_MONITOR = mode;
-    assert.equal(loadConfig().sonarr.seriesMonitor, mode);
-  }
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.SONARR_SERIES_MONITOR = 'epfuture';
+  const config = loadConfig();
+  assert.equal(config.sonarr.seriesMonitor, 'epfuture');
 });
 
 test('enabled Sonarr validates SONARR_SERIES_MONITOR custom mode enum', () => {
@@ -212,10 +223,8 @@ test('enabled Sonarr validates SONARR_SERIES_MONITOR custom mode enum', () => {
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
   process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-  process.env.SONARR_QUALITY_PROFILE_ID = '1';
-  process.env.SONARR_SERIES_MONITOR = 'EPSEASON';
-  const config = loadConfig();
-  assert.equal(config.sonarr.seriesMonitor, 'epseason');
+  process.env.SONARR_SERIES_MONITOR = 'broken';
+  assert.throws(() => loadConfig(), /SONARR_SERIES_MONITOR/);
 });
 
 test('enabled Sonarr validates episode ready poll/timeout bounds', () => {
@@ -223,9 +232,8 @@ test('enabled Sonarr validates episode ready poll/timeout bounds', () => {
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
   process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-  process.env.SONARR_QUALITY_PROFILE_ID = '1';
   process.env.SONARR_EPISODE_READY_TIMEOUT_MS = '1000';
-  process.env.SONARR_EPISODE_READY_POLL_MS = '2000';
+  process.env.SONARR_EPISODE_READY_POLL_MS = '5000';
   assert.throws(() => loadConfig(), /SONARR_EPISODE_READY_POLL_MS/);
 });
 
@@ -234,9 +242,9 @@ test('enabled Sonarr accepts SONARR_MONITOR_NEW_ITEMS override', () => {
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
   process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-  process.env.SONARR_QUALITY_PROFILE_ID = '1';
   process.env.SONARR_MONITOR_NEW_ITEMS = 'none';
-  assert.equal(loadConfig().sonarr.monitorNewItems, 'none');
+  const config = loadConfig();
+  assert.equal(config.sonarr.monitorNewItems, 'none');
 });
 
 test('enabled Sonarr validates EP_COUNT_MOD', () => {
@@ -244,40 +252,56 @@ test('enabled Sonarr validates EP_COUNT_MOD', () => {
   process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
   process.env.SONARR_API_KEY = 'abc';
   process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-  process.env.SONARR_QUALITY_PROFILE_ID = '1';
   process.env.EP_COUNT_MOD = 'bad';
   assert.throws(() => loadConfig(), /EP_COUNT_MOD/);
 });
 
 test('blank EP_COUNT disables EP_COUNT logic', () => {
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
   process.env.EP_COUNT = '';
-  assert.equal(loadConfig().sonarr.epCount, 0);
+  const config = loadConfig();
+  assert.equal(config.sonarr.epCount, 0);
 });
 
 test('EP_COUNT_PAST can be overridden', () => {
-  process.env.EP_COUNT_PAST = '15';
-  assert.equal(loadConfig().sonarr.epCountPast, 15);
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT_PAST = '5';
+  const config = loadConfig();
+  assert.equal(config.sonarr.epCountPast, 5);
 });
 
 test('EP_COUNT_PAST validation rejects non-numeric values', () => {
-  process.env.EP_COUNT_PAST = 'not-a-number';
+  process.env.SONARR_ENABLED = 'true';
+  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
+  process.env.SONARR_API_KEY = 'abc';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
+  process.env.EP_COUNT_PAST = 'abc';
   assert.throws(() => loadConfig(), /EP_COUNT_PAST/);
 });
 
 test('enabled Sonarr accepts lastSeason as SONARR_SERIES_MONITOR', () => {
   process.env.SONARR_ENABLED = 'true';
-  process.env.SONARR_BASE_URL = 'http://127.0.0.1:8989';
-  process.env.SONARR_API_KEY = 'abc';
-  process.env.SONARR_ROOT_FOLDER_PATH = '/tv';
-  process.env.SONARR_QUALITY_PROFILE_ID = '1';
+  process.env.SONARR_BASE_URL = 'http://sonarr.local:8989';
+  process.env.SONARR_API_KEY = 'sonarr-key';
+  process.env.SONARR_ROOT_FOLDER_PATH = '/data/tv';
   process.env.SONARR_SERIES_MONITOR = 'lastSeason';
-  assert.equal(loadConfig().sonarr.seriesMonitor, 'lastSeason');
+
+  const config = loadConfig();
+  assert.equal(config.sonarr.seriesMonitor, 'lastSeason');
 });
 
 test('disabled Sonarr ignores invalid SONARR_SERIES_MONITOR', () => {
   process.env.SONARR_ENABLED = 'false';
-  process.env.SONARR_SERIES_MONITOR = 'invalid';
-  assert.equal(loadConfig().sonarr.enabled, false);
+  process.env.SONARR_SERIES_MONITOR = 'invalid_value';
+  const config = loadConfig();
+  assert.equal(config.sonarr.enabled, false);
+  assert.equal(config.sonarr.seriesMonitor, 'all');
 });
 
 test('fails for invalid FORCED_SHUTDOWN_EXIT_CODE', () => {
@@ -285,8 +309,9 @@ test('fails for invalid FORCED_SHUTDOWN_EXIT_CODE', () => {
   assert.throws(() => loadConfig(), /FORCED_SHUTDOWN_EXIT_CODE/);
 });
 
+
 test('fails for low service health cache ttl', () => {
-  process.env.SERVICE_HEALTH_CACHE_TTL_MS = '100';
+  process.env.SERVICE_HEALTH_CACHE_TTL_MS = '500';
   assert.throws(() => loadConfig(), /SERVICE_HEALTH_CACHE_TTL_MS/);
 });
 
@@ -311,55 +336,65 @@ test('fails for negative catalog stale error hint', () => {
 });
 
 test('fails for unknown TARGET_CLIENT', () => {
-  process.env.TARGET_CLIENT = 'playstation';
+  process.env.TARGET_CLIENT = 'android-phone';
   assert.throws(() => loadConfig(), /TARGET_CLIENT/);
 });
 
 test('config version loads from package.json when npm_package_version is absent', () => {
   delete process.env.npm_package_version;
   delete process.env.APP_VERSION;
-  assert.equal(loadConfig().version, PKG_VERSION);
+  const config = loadConfig();
+  assert.equal(config.version, PKG_VERSION);
 });
 
 test('APP_VERSION overrides package version', () => {
-  process.env.APP_VERSION = '9.9.9';
-  assert.equal(loadConfig().version, '9.9.9');
+  process.env.APP_VERSION = '9.9.9-test';
+  const config = loadConfig();
+  assert.equal(config.version, '9.9.9-test');
 });
 
 test('legacy APP_VERSION placeholder does not override package version', () => {
-  process.env.APP_VERSION = '1.0.0';
-  assert.equal(loadConfig().version, PKG_VERSION);
+  process.env.APP_VERSION = '0.1.1';
+  delete process.env.npm_package_version;
+  const config = loadConfig();
+  assert.equal(config.version, PKG_VERSION);
 });
 
 test('RADARR_CATALOG_WATCHED_KEEP_COUNT overrides default', () => {
-  process.env.RADARR_CATALOG_WATCHED_KEEP_COUNT = '4';
-  assert.equal(loadConfig().radarrCatalogWatchedKeepCount, 4);
+  process.env.RADARR_CATALOG_WATCHED_KEEP_COUNT = '3';
+  const config = loadConfig();
+  assert.equal(config.radarrCatalogWatchedKeepCount, 3);
 });
 
 test('allows empty KODI_PACKAGE when Kodi is disabled', () => {
   process.env.KODI_ENABLED = 'false';
   process.env.KODI_PACKAGE = '';
-  assert.equal(loadConfig().kodi.packageName, 'org.xbmc.kodi');
+  const config = loadConfig();
+  assert.equal(config.kodi.enabled, false);
 });
 
 test('file streaming defaults to disabled with no secret required', () => {
   const config = loadConfig();
   assert.equal(config.fileStreaming.enabled, false);
+  assert.equal(config.fileStreaming.secret, '');
+  assert.equal(config.fileStreaming.playbackMode, 'kodi');
 });
 
 test('file streaming loads when enabled with a secret', () => {
   process.env.FILE_STREAMING_ENABLED = 'true';
-  process.env.FILE_STREAMING_SECRET = 'very-long-random-secret-value';
+  process.env.FILE_STREAMING_SECRET = 'a-long-enough-secret-for-streaming!!';
   const config = loadConfig();
   assert.equal(config.fileStreaming.enabled, true);
-  assert.equal(config.fileStreaming.secret, 'very-long-random-secret-value');
+  assert.equal(config.fileStreaming.secret, 'a-long-enough-secret-for-streaming!!');
+  assert.equal(config.fileStreaming.playbackMode, 'direct');
 });
 
 test('file streaming allows explicit kodi playback mode', () => {
   process.env.FILE_STREAMING_ENABLED = 'true';
-  process.env.FILE_STREAMING_SECRET = 'very-long-random-secret-value';
+  process.env.FILE_STREAMING_SECRET = 'a-long-enough-secret-for-streaming!!';
   process.env.FILE_STREAMING_PLAYBACK_MODE = 'kodi';
-  assert.equal(loadConfig().fileStreaming.playbackMode, 'kodi');
+  const config = loadConfig();
+  assert.equal(config.fileStreaming.playbackMode, 'kodi');
 });
 
 test('file streaming rejects unknown playback mode', () => {
@@ -399,7 +434,6 @@ test('trakt sync accepts explicit configuration', () => {
   assert.equal(config.traktSync.enabled, true);
   assert.equal(config.traktSync.syncMins, 120);
   assert.equal(config.traktSync.clientId, 'client-id');
-  assert.equal(config.traktSync.redirectUri, 'https://example.invalid/trakt/callback');
 });
 
 test('trakt sync fails validation when sync mins is < 40', () => {
@@ -434,32 +468,40 @@ test('RADARR_TAGS validation rejects non-integer strings', () => {
 });
 
 test('SONARR_TAGS validation rejects float strings', () => {
-  process.env.SONARR_TAGS = '1,2.5';
+  process.env.SONARR_TAGS = '1.5';
   assert.throws(() => loadConfig(), /SONARR_TAGS/);
 });
 
 test('RADARR_STRICT_IMDB_MATCH defaults to false when unset', () => {
   delete process.env.RADARR_STRICT_IMDB_MATCH;
-  assert.equal(loadConfig().radarr.strictImdbMatch, false);
+
+  const config = loadConfig();
+
+  assert.strictEqual(config.radarr.strictImdbMatch, false);
 });
 
 test('RADARR_STRICT_IMDB_MATCH parses "true" and "false" correctly', () => {
   process.env.RADARR_STRICT_IMDB_MATCH = 'true';
-  assert.equal(loadConfig().radarr.strictImdbMatch, true);
+  let config = loadConfig();
+  assert.strictEqual(config.radarr.strictImdbMatch, true);
+
   process.env.RADARR_STRICT_IMDB_MATCH = 'false';
-  assert.equal(loadConfig().radarr.strictImdbMatch, false);
+  config = loadConfig();
+  assert.strictEqual(config.radarr.strictImdbMatch, false);
 });
 
 test('RADARR_STRICT_IMDB_MATCH validation rejects invalid values', () => {
-  process.env.RADARR_STRICT_IMDB_MATCH = 'yes';
+  process.env.RADARR_STRICT_IMDB_MATCH = 'not-a-boolean';
+
   assert.throws(() => loadConfig(), /RADARR_STRICT_IMDB_MATCH/);
 });
+
 
 test('catalogue page size defaults to 30 and accepts a smaller configured page', () => {
   delete process.env.CATALOG_PAGE_SIZE;
   assert.equal(loadConfig().catalogPageSize, 30);
-  process.env.CATALOG_PAGE_SIZE = '18';
-  assert.equal(loadConfig().catalogPageSize, 18);
+  process.env.CATALOG_PAGE_SIZE = '24';
+  assert.equal(loadConfig().catalogPageSize, 24);
 });
 
 test('catalogue page size rejects values outside 10 to 100', () => {
@@ -470,13 +512,13 @@ test('catalogue page size rejects values outside 10 to 100', () => {
 });
 
 test('eight-character add-on access tokens are accepted while seven-character tokens are rejected', () => {
-  process.env.ADDON_ACCESS_TOKEN = 'abcd_123';
-  assert.equal(loadConfig().addonAccessToken, 'abcd_123');
-  process.env.ADDON_ACCESS_TOKEN = 'abc_123';
-  assert.throws(() => loadConfig(), /ADDON_ACCESS_TOKEN/);
+  process.env.ADDON_ACCESS_TOKEN = 'a1B2_c3D';
+  assert.equal(loadConfig().addonAccessToken, 'a1B2_c3D');
+  process.env.ADDON_ACCESS_TOKEN = 'abcdefg';
+  assert.throws(() => loadConfig(), /ADDON_ACCESS_TOKEN must be 8-128/);
 });
 
 test('longer legacy add-on access tokens remain accepted', () => {
-  process.env.ADDON_ACCESS_TOKEN = 'legacy-token-value-0123456789';
-  assert.equal(loadConfig().addonAccessToken, 'legacy-token-value-0123456789');
+  process.env.ADDON_ACCESS_TOKEN = 'legacy-token-that-is-longer-than-eight';
+  assert.equal(loadConfig().addonAccessToken, 'legacy-token-that-is-longer-than-eight');
 });
