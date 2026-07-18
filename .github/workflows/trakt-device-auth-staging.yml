@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/fix-trakt-device-auth
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -14,6 +17,7 @@ concurrency:
 
 jobs:
   apply-test-commit:
+    if: github.head_ref == 'agent/fix-trakt-device-auth' || github.ref_name == 'agent/fix-trakt-device-auth'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
