@@ -128,10 +128,61 @@ async function promptRequired(rl, label, current, options = {}) {
   }
 }
 
+function redirectSuggestion(values) {
+  const configured = (values.get('TRAKT_REDIRECT_URI') ?? '').trim();
+  if (configured) return { value: configured, source: 'configured' };
+
+  const publicBaseUrl = (values.get('PUBLIC_BASE_URL') ?? '').trim();
+  try {
+    const parsed = new URL(publicBaseUrl);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      return { value: '', source: 'none' };
+    }
+    return { value: `${parsed.origin}/trakt/callback`, source: 'public-base-url' };
+  } catch {
+    return { value: '', source: 'none' };
+  }
+}
+
+function printBeginnerApplicationSteps(values, suggestion) {
+  const publicBaseUrl = (values.get('PUBLIC_BASE_URL') ?? '').trim();
+  console.log('\nCreate or check the Trakt application first:');
+  console.log('  1. Open https://trakt.tv/oauth/applications');
+  console.log('  2. Create a new application, or open the application already used by stremio-addarr.');
+  console.log('  3. A clear application name is: stremio-addarr');
+  if (suggestion.value) {
+    console.log(`  4. Set the Redirect URI to exactly: ${suggestion.value}`);
+  } else {
+    console.log('  4. Set a Redirect URI, then enter that exact value below.');
+  }
+  if (publicBaseUrl) {
+    console.log(`  5. If Trakt asks for a website URL, use: ${publicBaseUrl}`);
+  } else {
+    console.log('  5. If Trakt asks for a website URL, use your public stremio-addarr HTTPS URL.');
+  }
+  console.log('  6. Save the application, then copy its Client ID and Client Secret.');
+
+  if (suggestion.source === 'public-base-url') {
+    console.log('\nDuckDNS/Caddy compatibility:');
+    console.log('  - The suggested Redirect URI reuses PUBLIC_BASE_URL and its existing trusted HTTPS hostname.');
+    console.log('  - Device Code Flow does not open or call /trakt/callback.');
+    console.log('  - Do not add a Caddy route, rewrite or callback handler for this path.');
+  } else if (suggestion.source === 'configured') {
+    console.log('\nExisting redirect preserved:');
+    console.log('  - Keep this value if it exactly matches the Trakt application.');
+    console.log('  - Existing values such as urn:ietf:wg:oauth:2.0:oob remain supported when registered there.');
+    console.log('  - Do not replace a working registered value merely because the HTTPS example looks newer.');
+  } else {
+    console.log('\nNo HTTPS PUBLIC_BASE_URL was available for an automatic suggestion.');
+    console.log('Configure DuckDNS/Caddy first, or enter the exact Redirect URI already registered in Trakt.');
+  }
+}
+
 async function collectCredentials(rl, values) {
+  const suggestion = redirectSuggestion(values);
+  printBeginnerApplicationSteps(values, suggestion);
+
   console.log('\nTrakt application credentials');
-  console.log('Create or inspect the application at https://trakt.tv/oauth/applications');
-  console.log('The redirect URI is case-sensitive and must exactly match the URI in that application.');
   const clientId = await promptRequired(rl, 'Client ID', values.get('TRAKT_CLIENT_ID') ?? '');
   const clientSecret = await promptRequired(
     rl,
@@ -141,23 +192,25 @@ async function collectCredentials(rl, values) {
   );
   const redirectUri = await promptRequired(
     rl,
-    'Exact configured redirect URI',
-    values.get('TRAKT_REDIRECT_URI') ?? ''
+    'Redirect URI copied exactly from the Trakt application',
+    suggestion.value
   );
+  console.log(`Using Redirect URI: ${redirectUri}`);
+  console.log('It is used to validate token refresh; Device Code Flow will not browse to this address.');
 
   let apiBaseUrl = '';
   let suggestedApiBaseUrl = values.get('TRAKT_API_BASE_URL') ?? 'https://api.trakt.tv';
   while (true) {
-    const candidate = await promptRequired(rl, 'Trakt API base URL', suggestedApiBaseUrl);
+    const candidate = await promptRequired(rl, 'Trakt API URL (press Enter for the recommended default)', suggestedApiBaseUrl);
     try {
       const parsed = new URL(candidate);
       if (!['http:', 'https:'].includes(parsed.protocol)) {
-        console.log('Trakt API base URL must use HTTP or HTTPS.');
+        console.log('Trakt API URL must use HTTP or HTTPS.');
         suggestedApiBaseUrl = '';
         continue;
       }
       if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
-        console.log('Use only the API origin, for example https://api.trakt.tv.');
+        console.log('Use only the API origin, normally https://api.trakt.tv.');
         suggestedApiBaseUrl = '';
         continue;
       }
@@ -213,12 +266,13 @@ async function validateRefreshToken(rl, credentials, deviceToken, userAgent) {
     } catch (error) {
       console.error(`Refresh validation failed: ${describeError(error)}`);
       console.error('The most common cause is a redirect URI or client secret that does not exactly match the Trakt application.');
+      console.error('The callback path does not need to exist in Caddy; only the registered text must match exactly.');
       const action = await chooseRetry(rl, 'Choose how to continue.', 'refresh');
       if (action === 'retry') continue;
       if (action === 'new') return null;
       if (action === 'skip') return 'skip';
       current.clientSecret = await promptRequired(rl, 'Client secret (input is visible)', '', { secret: true });
-      current.redirectUri = await promptRequired(rl, 'Exact configured redirect URI', current.redirectUri);
+      current.redirectUri = await promptRequired(rl, 'Redirect URI copied exactly from the Trakt application', current.redirectUri);
     }
   }
 }
@@ -326,6 +380,7 @@ async function main() {
         );
         console.log('\nTrakt authentication succeeded.');
         console.log(`  Client ID: ${mask(credentials.clientId)}`);
+        console.log(`  Redirect URI: ${credentials.redirectUri}`);
         console.log('  Access and refresh tokens: stored securely in .env (not printed)');
         console.log(`  Previous runtime state reset: ${persisted.resetFile}`);
         console.log('  Watched sync: enabled');
