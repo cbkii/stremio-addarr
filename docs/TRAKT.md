@@ -1,43 +1,70 @@
 # Trakt watched sync
 
-Trakt watched sync is optional. It lets the add-on identify watched movies and episodes without relying on Stremio account sessions.
+Trakt watched sync is optional. It lets `stremio-addarr` identify watched movies and episodes without relying on Stremio account sessions.
 
-For general server settings, see [CONFIGURATION.md](CONFIGURATION.md). For failures, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+For general server settings, see [CONFIGURATION.md](CONFIGURATION.md). For public DuckDNS/Caddy hosting, see [../README_HOST.md](../README_HOST.md). For failures, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
-## Current authentication model
+## Beginner setup: DuckDNS and Caddy
 
-`stremio-addarr` uses Trakt's **Device Code Flow**, which Trakt recommends for command-line scripts and system services.
+Most users should use the same trusted HTTPS hostname already configured as `PUBLIC_BASE_URL`.
 
-The previous out-of-band browser-code flow is no longer used. You do not paste an authorisation code into `quick.sh`.
+Example:
 
-Official references:
-
-- [Trakt authentication](https://docs.trakt.tv/reference/authentication)
-- [Generate device codes](https://docs.trakt.tv/reference/postoauthdevicecode)
-- [Poll for a device token](https://docs.trakt.tv/reference/postoauthdevicetoken)
-- [Exchange or refresh a token](https://docs.trakt.tv/reference/postoauthtoken)
-- [Required API headers](https://docs.trakt.tv/docs/required-headers)
-- [Rate limits and Retry-After](https://docs.trakt.tv/docs/rate-limiting)
-
-## Create or check the Trakt application
-
-Open:
-
-```text
-https://trakt.tv/oauth/applications
+```dotenv
+PUBLIC_BASE_URL=https://myaddarr.duckdns.org
+TRAKT_REDIRECT_URI=https://myaddarr.duckdns.org/trakt/callback
 ```
 
-The application must provide:
+This is compatible with the normal DuckDNS/Caddy setup because it reuses the hostname and TLS certificate you already configured.
 
-- a Client ID;
-- a Client Secret;
-- a redirect URI.
+Important:
 
-The redirect URI is case-sensitive. It must exactly match the value saved as `TRAKT_REDIRECT_URI`. Device activation itself does not redirect to this URI, but Trakt requires it later when the refresh token is exchanged.
+- Device Code Flow does **not** browse to or call `/trakt/callback`.
+- You do **not** need to add a Caddy route, rewrite, handler or reverse-proxy exception for that path.
+- The redirect URI is retained as an exact registered OAuth application value for refresh-token validation.
+- Existing registered values remain supported. If your existing Trakt application uses `urn:ietf:wg:oauth:2.0:oob`, keep that exact value instead of replacing it merely because the HTTPS example looks newer.
 
-## Recommended setup or repair
+`bash quick.sh trakt` reads `PUBLIC_BASE_URL` and automatically suggests:
 
-For a normal install or upgrade, accept the Trakt prompt:
+```text
+<PUBLIC_BASE_URL>/trakt/callback
+```
+
+Press **Enter** to accept the suggestion only after entering that same exact value in the Trakt application.
+
+## Create the Trakt application
+
+1. Open <https://trakt.tv/oauth/applications>.
+2. Create a new application, or open the application already used by `stremio-addarr`.
+3. Use a clear name such as `stremio-addarr`.
+4. Set **Redirect URI**:
+   - new DuckDNS/Caddy setup: `https://YOUR_SUBDOMAIN.duckdns.org/trakt/callback`;
+   - existing application: keep its currently registered redirect URI exactly, including case.
+5. If Trakt asks for a website URL, use `PUBLIC_BASE_URL`, for example `https://YOUR_SUBDOMAIN.duckdns.org`.
+6. Save the application.
+7. Copy the **Client ID** and **Client Secret**.
+
+The helper explains these steps again and displays the exact suggestion derived from your installed `.env`.
+
+## Connect or repair Trakt
+
+Download the current helper when necessary:
+
+```bash
+gh release download --repo cbkii/stremio-addarr \
+  --pattern quick.sh \
+  --output quick.sh \
+  --clobber
+chmod +x quick.sh
+```
+
+Run only the Trakt setup/repair flow:
+
+```bash
+bash quick.sh trakt
+```
+
+For a normal install or upgrade, accept the optional Trakt prompt from:
 
 ```bash
 bash quick.sh install
@@ -45,56 +72,80 @@ bash quick.sh install
 bash quick.sh upgrade
 ```
 
-To repair only Trakt without reinstalling or upgrading the add-on:
+The helper:
 
-```bash
-gh release download --repo cbkii/stremio-addarr --pattern quick.sh --output quick.sh --clobber
-chmod +x quick.sh
-bash quick.sh trakt
+1. reads `/opt/stremio-addarr/.env`;
+2. preserves an existing registered redirect URI;
+3. otherwise derives a DuckDNS/Caddy-friendly suggestion from `PUBLIC_BASE_URL`;
+4. gives exact beginner application-creation instructions;
+5. asks for the Client ID and Client Secret;
+6. requests a short Device Code from Trakt;
+7. prints a direct activation URL such as `https://trakt.tv/activate/ABCD1234`;
+8. polls only at Trakt's returned interval and stops at its returned expiry;
+9. validates refresh-token rotation using the exact registered redirect URI;
+10. verifies the authorised account through `/users/settings`;
+11. stores tokens and provider expiry metadata atomically;
+12. clears stale runtime token state and restarts the service.
+
+Full access and refresh tokens are never printed after receipt.
+
+## What to enter at each prompt
+
+| Prompt | Beginner value |
+|---|---|
+| Client ID | Copy from the saved Trakt application. |
+| Client Secret | Copy from the same application. Input is visible in the terminal. |
+| Redirect URI | Press Enter for the suggested DuckDNS value after registering it, or keep the existing registered value exactly. |
+| Trakt API URL | Press Enter to keep `https://api.trakt.tv`. Change this only for an intentional advanced setup. |
+
+After the device code appears, open the displayed activation URL on a phone or computer, sign in to Trakt and approve access. The terminal continues automatically.
+
+## Existing OOB applications
+
+The previous bug was silently assuming that every user had registered:
+
+```dotenv
+TRAKT_REDIRECT_URI=urn:ietf:wg:oauth:2.0:oob
 ```
 
-The script:
+The URN itself is not rejected by `stremio-addarr`. It remains compatible when it is the exact redirect URI registered in your Trakt application.
 
-1. reads the existing Trakt settings from `/opt/stremio-addarr/.env`;
-2. requests a short device code from Trakt;
-3. prints a direct activation URL such as `https://trakt.tv/activate/ABCD1234`;
-4. polls at Trakt's returned interval and stops at the returned expiry;
-5. handles pending, slow-down, invalid, already-used, expired and denied responses;
-6. validates refresh-token rotation using the exact configured redirect URI;
-7. verifies the resulting bearer token against `/users/settings`;
-8. writes the access token, refresh token and provider expiry metadata atomically;
-9. creates a new authentication-generation marker and discards stale runtime token state;
-10. restarts the service when run through `quick.sh`.
+The corrected behaviour is:
 
-No full token is printed after it is received.
+- preserve any existing configured value;
+- never silently replace it;
+- suggest the DuckDNS/Caddy HTTPS value only for a new setup with no redirect configured;
+- require the submitted value to match the Trakt application exactly for refresh validation.
 
-## Retry and recovery choices
+## Retry and recovery
 
-A failed attempt does not silently enable broken credentials.
+A failed attempt does not enable incomplete credentials. The helper offers:
 
-The interactive flow offers:
-
-- request a new device code;
-- edit the Client ID, Client Secret or redirect URI;
 - retry refresh validation;
-- abandon Trakt setup without aborting the rest of an install or upgrade.
+- edit the Client Secret or redirect URI;
+- request a new device code;
+- edit all application credentials;
+- skip Trakt without aborting the rest of an install or upgrade.
 
 Common results:
 
 | Result | Meaning | Action |
 |---|---|---|
-| HTTP 400 while polling | approval is still pending | wait; the script continues |
-| HTTP 429 | polling or API rate limit | the script honours `Retry-After` and slows down |
+| HTTP 400 while polling | approval is pending | wait; polling continues |
+| HTTP 429 | rate limit or slow-down | the helper honours `Retry-After` |
+| temporary 5xx | Trakt service problem | retried up to three consecutive times |
 | HTTP 404 | invalid device code | request a new code and verify the Client ID |
-| HTTP 409 | device code already consumed | request a new code |
+| HTTP 409 | device code already used | request a new code |
 | HTTP 410 | device code expired | request a new code |
-| HTTP 418 | approval was denied | request a new code when ready |
-| refresh HTTP 400/401 | secret, redirect URI or refresh token is invalid | edit the values or re-authorise |
-| `trakt_reauthorization_required` | Trakt rejected the stored refresh credentials | run `bash quick.sh trakt` |
+| HTTP 418 | approval denied | request a new code when ready |
+| refresh HTTP 400/401 | secret, redirect URI or refresh token mismatch | edit values or re-authorise |
+| `trakt_reauthorization_required` | stored refresh credentials were rejected | run `bash quick.sh trakt` |
+
+A refresh error does not mean Caddy needs a callback route. First compare the redirect URI in `/opt/stremio-addarr/.env` with the Trakt application character-for-character.
 
 ## Stored settings
 
-A successful device flow writes:
+A successful flow writes:
 
 ```dotenv
 TRAKT_SYNC_ENABLED=true
@@ -102,7 +153,7 @@ TRAKT_SYNC_MINS=360
 TRAKT_API_BASE_URL=https://api.trakt.tv
 TRAKT_CLIENT_ID=...
 TRAKT_CLIENT_SECRET=...
-TRAKT_REDIRECT_URI=https://exact-value-from-your-trakt-app.example/callback
+TRAKT_REDIRECT_URI=https://myaddarr.duckdns.org/trakt/callback
 TRAKT_REFRESH_TOKEN=...
 TRAKT_ACCESS_TOKEN=...
 TRAKT_ACCESS_TOKEN_CREATED_AT=...
@@ -110,20 +161,20 @@ TRAKT_ACCESS_TOKEN_EXPIRES_IN=...
 TRAKT_AUTH_GENERATION=...
 ```
 
-`TRAKT_AUTH_GENERATION` prevents an older `TRAKT_SYNC_STATE_FILE` from overriding newly authorised credentials after restart. Runtime refresh-token rotation remains in the state file with mode `0600`.
+`TRAKT_AUTH_GENERATION` prevents an older runtime state file from overriding newly authorised credentials. Runtime refresh-token rotation remains in the state file with mode `0600`.
 
 ## Runtime behaviour
 
-- Provider `created_at` and `expires_in` values determine token lifetime.
-- Access tokens are refreshed before expiry rather than using a hard-coded lifetime.
+- Trakt's `created_at` and `expires_in` values determine token lifetime.
+- Access tokens refresh before expiry.
 - Refresh and API requests retry bounded transient failures and honour `Retry-After`.
 - Concurrent 401 responses share one refresh operation.
-- Rotated refresh tokens are persisted atomically in a private state file.
-- A temporary Trakt failure does not block Radarr or Sonarr actions.
+- Rotated tokens are persisted atomically.
+- Temporary Trakt failure does not block Radarr or Sonarr actions.
 - `TRAKT_SYNC_MINS` must be at least 40 minutes.
-- Release-date lookup uses the documented Trakt API only when a Client ID is configured; website scraping is deliberately not used.
+- Release-date lookup uses documented Trakt API methods; website scraping is not used.
 
-## Check sync status
+## Verify watched sync
 
 ```bash
 curl -fsS http://127.0.0.1:7010/status.json | jq '.watched'
@@ -136,27 +187,12 @@ curl -fsS -X POST http://127.0.0.1:7010/trakt/sync
 curl -fsS http://127.0.0.1:7010/status.json | jq '.watched'
 ```
 
-Inspect recent Trakt logs:
+Inspect recent logs:
 
 ```bash
 sudo journalctl -u stremio-addarr -n 300 --no-pager -o cat \
   | jq 'select(.message | tostring | test("trakt|watched"; "i"))'
 ```
-
-## Manual device-flow outline
-
-The supported helper is recommended because it implements polling intervals, expiry, retries, secure storage and refresh validation. For diagnostics, the protocol is:
-
-```bash
-curl -fsS -X POST 'https://api.trakt.tv/oauth/device/code' \
-  -H 'Content-Type: application/json' \
-  -H 'trakt-api-version: 2' \
-  -H 'trakt-api-key: YOUR_CLIENT_ID' \
-  -H 'User-Agent: stremio-addarr/manual' \
-  -d '{"client_id":"YOUR_CLIENT_ID"}' | jq .
-```
-
-Display the returned `user_code` and `verification_url`, then poll `/oauth/device/token` using the returned `device_code`, `interval` and `expires_in`. Do not poll faster than `interval`; handle HTTP 429 using `Retry-After`.
 
 ## Disable sync
 
@@ -172,4 +208,13 @@ Then restart:
 sudo systemctl restart stremio-addarr
 ```
 
-Disabling sync does not alter Trakt account data. Remove local credentials separately only when the server should no longer retain them.
+Disabling sync does not change Trakt account data.
+
+## Official references
+
+- [Trakt authentication](https://docs.trakt.tv/reference/authentication)
+- [Generate device codes](https://docs.trakt.tv/reference/postoauthdevicecode)
+- [Poll for a device token](https://docs.trakt.tv/reference/postoauthdevicetoken)
+- [Exchange or refresh a token](https://docs.trakt.tv/reference/postoauthtoken)
+- [Required API headers](https://docs.trakt.tv/docs/required-headers)
+- [Rate limits and Retry-After](https://docs.trakt.tv/docs/rate-limiting)
