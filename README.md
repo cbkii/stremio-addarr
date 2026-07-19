@@ -93,6 +93,24 @@ Use **Save server settings** to update the server configuration. Restart the ser
 
 For setting descriptions and manual `.env` editing, see **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**. For UI-specific behaviour, see **[docs/CONFIGURATION_UI.md](docs/CONFIGURATION_UI.md)**.
 
+## Optional Trakt watched sync
+
+Beginners should configure or repair Trakt from the server terminal:
+
+```bash
+bash quick.sh trakt
+```
+
+For a new Trakt application, the helper reuses your existing DuckDNS/Caddy HTTPS hostname and suggests:
+
+```text
+https://YOUR_HOSTNAME/trakt/callback
+```
+
+Register that exact value in the Trakt application, then press Enter to accept it in the helper. Device Code Flow never visits that callback path, so **do not add a Caddy route or rewrite for it**.
+
+If an existing Trakt application already uses another registered value, including `urn:ietf:wg:oauth:2.0:oob`, keep it exactly. See **[docs/TRAKT.md](docs/TRAKT.md)** for the complete beginner walkthrough.
+
 ## Install in Stremio
 
 Paste the protected manifest URL printed by `quick.sh` into Stremio:
@@ -187,7 +205,7 @@ curl -fsS http://127.0.0.1:7010/status.json \
 - **[Configuration reference](docs/CONFIGURATION.md)** — common settings, tokens, monitoring, playback and manual `.env` changes.
 - **[Configuration UI](docs/CONFIGURATION_UI.md)** — dashboard authentication, saving and Android TV navigation.
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** — startup failures, 404s, Caddy, logs and Arr connectivity.
-- **[Trakt watched sync](docs/TRAKT.md)** — guided and manual OAuth setup.
+- **[Trakt watched sync](docs/TRAKT.md)** — guided Device Code setup, DuckDNS redirect guidance and repair.
 - **[Changelog](CHANGELOG.md)** — unreleased and released behaviour changes.
 - **[Contributing and development](CONTRIBUTING.md)** — local development, tests, packaging and pull requests.
 
