@@ -1,4 +1,4 @@
-name: !00.Release
+name: 00Release
 
 # ─── Supported release triggers ───────────────────────────────────────────
 # 1. Tag push:           push a semver tag like v1.2.3
