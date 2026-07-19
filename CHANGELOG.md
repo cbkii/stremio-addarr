@@ -4,7 +4,8 @@
 
 ### Fixed
 
-- Replace the broken Trakt OOB authorization-code setup with Trakt Device Code Flow, exact interval/expiry polling, bounded retries and a standalone `bash quick.sh trakt` repair mode.
+- Replace the broken pasted-code Trakt setup and universal OOB assumption with Trakt Device Code Flow, exact interval/expiry polling, bounded retries and a standalone `bash quick.sh trakt` repair mode.
+- Preserve existing registered Trakt redirect values, while deriving a beginner-friendly `<PUBLIC_BASE_URL>/trakt/callback` suggestion for new DuckDNS/Caddy installations without requiring a callback route.
 - Prevent stale persisted Trakt state from overriding newly authorised credentials after restart.
 - Use provider token expiry metadata, proactive refresh, `Retry-After`, required Trakt headers and atomic `0600` token-state persistence.
 - Serve the configuration UI at both `/configure` and the Stremio-derived `/<ADDON_ACCESS_TOKEN>/configure` path.
