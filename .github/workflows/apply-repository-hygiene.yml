@@ -1,0 +1,140 @@
+name: Apply repository hygiene cleanup
+
+on:
+  push:
+    branches:
+      - chore/repository-hygiene
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repository-hygiene-cleanup
+  cancel-in-progress: false
+
+jobs:
+  clean-validate-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/repository-hygiene
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply asserted cleanup
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          def replace_once(path_name: str, old: str, new: str) -> None:
+              path = Path(path_name)
+              content = path.read_text()
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path_name}: expected one match, found {count}: {old!r}")
+              path.write_text(content.replace(old, new, 1))
+
+          package_path = Path('package.json')
+          package = json.loads(package_path.read_text())
+          scripts = package['scripts']
+          scripts.pop('check', None)
+          scripts.pop('test:ci', None)
+          scripts['test'] = 'tsx --test --test-reporter=spec test/*.test.ts'
+          scripts['ci'] = 'npm run typecheck && npm test && npm run build && npm run lint:manifest'
+          package_path.write_text(json.dumps(package, indent=2) + '\n')
+
+          replace_once(
+              '.github/workflows/ci.yml',
+              "      - name: Catalog-focused regression tests\n        run: npm run test:catalog\n\n      - name: Full CI checks (typecheck, tests, build)\n        run: npm run ci\n",
+              "      - name: Quality gates\n        run: npm run ci\n"
+          )
+
+          replace_once(
+              '.github/workflows/release.yml',
+              "      - name: Catalog-focused regression tests\n        run: npm run test:catalog\n\n      - name: Full CI checks (typecheck, tests, build)\n        run: npm run ci\n",
+              "      - name: Quality gates\n        run: npm run ci\n"
+          )
+
+          replace_once(
+              'CONTRIBUTING.md',
+              "npm run typecheck\nnpm run test:ci\nnpm run test:catalog\n",
+              "npm run typecheck\nnpm test\nnpm run test:catalog\n"
+          )
+
+          replace_once(
+              'test/quick-script.test.ts',
+              "  assert.match(helper, /Use only the API origin/);\n",
+              "  assert.match(helper, /Use only the API origin/);\n"
+              "  assert.match(helper, /values\\.get\\('PUBLIC_BASE_URL'\\)/);\n"
+              "  assert.match(helper, /\\$\\{parsed\\.origin\\}\\/trakt\\/callback/);\n"
+              "  assert.match(helper, /Existing values such as urn:ietf:wg:oauth:2\\.0:oob remain supported/);\n"
+              "  assert.match(helper, /Do not add a Caddy route, rewrite or callback handler/);\n"
+              "  assert.match(helper, /Device Code Flow does not open or call \\/trakt\\/callback/);\n"
+          )
+
+          documentation = Path('test/documentation.test.ts')
+          documentation.write_text(documentation.read_text() + r'''
+
+test('Trakt beginner documentation matches the supported DuckDNS and Caddy flow', () => {
+  const readme = read('README.md');
+  const envExample = read('.env.example');
+  const traktGuide = read('docs/TRAKT.md');
+
+  assert.match(readme, /bash quick\.sh trakt/);
+  assert.match(envExample, /https:\/\/myaddarr\.duckdns\.org\/trakt\/callback/);
+  assert.match(envExample, /no Caddy route\/rewrite is/);
+  assert.match(envExample, /urn:ietf:wg:oauth:2\.0:oob remain/);
+  assert.match(traktGuide, /Beginner setup: DuckDNS and Caddy/);
+  assert.match(traktGuide, /You do \*\*not\*\* need to add a Caddy route/);
+  assert.match(traktGuide, /Existing OOB applications/);
+  assert.match(traktGuide, /What to enter at each prompt/);
+});
+''')
+
+          beginner_test = Path('test/trakt-beginner-setup.test.ts')
+          if not beginner_test.exists():
+              raise SystemExit('expected test/trakt-beginner-setup.test.ts to exist')
+          beginner_test.unlink()
+
+          changelog = Path('CHANGELOG.md')
+          text = changelog.read_text()
+          marker = '### Changed\n\n'
+          if marker not in text:
+              raise SystemExit('CHANGELOG.md: Changed section not found')
+          text = text.replace(
+              marker,
+              marker + '- Simplify maintained quality gates by removing duplicate catalogue runs and obsolete npm aliases, and consolidate task-specific tests into durable security and documentation suites.\n',
+              1
+          )
+          changelog.write_text(text)
+          PY
+
+          git mv test/release-hardening.test.ts test/security-boundaries.test.ts
+          git mv test/config-ui-hardening.test.ts test/config-ui-security.test.ts
+
+      - name: Validate clean maintained suite
+        run: |
+          npm ci
+          bash -n quick.sh
+          npm run ci
+          npm run package:release
+          git diff --check
+          test ! -e test/trakt-beginner-setup.test.ts
+          test -e test/security-boundaries.test.ts
+          test -e test/config-ui-security.test.ts
+
+      - name: Commit product cleanup and remove staging workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/apply-repository-hygiene.yml
+          git add -A
+          git commit -m 'chore: remove redundant CI and stale test scaffolding'
+          git push origin HEAD:chore/repository-hygiene
