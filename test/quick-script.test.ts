@@ -36,6 +36,7 @@ test('quick.sh exposes retryable standalone Trakt device authentication', () => 
   assert.match(helper, /Invalid URL format/);
   assert.match(helper, /Use only the API origin/);
   assert.doesNotMatch(quick + helper, /oauth\/authorize/);
-  assert.doesNotMatch(quick + helper, /urn:ietf:wg:oauth:2\.0:oob/);
+  assert.match(helper, /Existing values such as urn:ietf:wg:oauth:2\.0:oob remain supported/);
+  assert.doesNotMatch(quick, /TRAKT_REDIRECT_URI=.*urn:ietf:wg:oauth:2\.0:oob/);
   assert.doesNotThrow(() => execFileSync('node', ['--check', 'scripts/trakt-device-auth.mjs'], { cwd: root, stdio: 'pipe' }));
 });
