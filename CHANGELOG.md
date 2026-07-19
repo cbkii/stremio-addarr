@@ -18,6 +18,7 @@
 
 ### Changed
 
+- Simplify maintained quality gates by removing duplicate catalogue runs and obsolete npm aliases, and consolidate task-specific tests into durable security and documentation suites.
 - Remove unsupported Trakt website scraping; release-date fallback now uses documented Trakt API methods only when a Client ID is configured.
 - Add an interactive token wizard to `quick.sh`: keep an existing token, specify an 8-character value, or generate a random 8-character value.
 - Retain support for longer legacy tokens while making short TV-friendly tokens the default for new installations.
