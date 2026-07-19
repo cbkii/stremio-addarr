@@ -104,7 +104,6 @@ test('malformed percent-encoded cookies fail authentication without crashing', a
   });
 });
 
-
 test('probe credentials are reused only for the configured origin', () => {
   assert.equal(
     credentialForProbeOrigin('http://radarr.local/api', '', 'http://radarr.local', 'stored-secret'),

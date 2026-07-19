@@ -288,10 +288,7 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Catalog-focused regression tests
-        run: npm run test:catalog
-
-      - name: Full CI checks (typecheck, tests, build)
+      - name: Quality gates
         run: npm run ci
 
       # ── Package ───────────────────────────────────────────────────────

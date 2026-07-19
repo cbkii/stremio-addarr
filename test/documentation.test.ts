@@ -51,3 +51,18 @@ test('release archive requires the split end-user guides', () => {
     assert.match(packager, new RegExp(guide.replaceAll('.', '\\.')));
   }
 });
+
+test('Trakt beginner documentation matches the supported DuckDNS and Caddy flow', () => {
+  const readme = read('README.md');
+  const envExample = read('.env.example');
+  const traktGuide = read('docs/TRAKT.md');
+
+  assert.match(readme, /bash quick\.sh trakt/);
+  assert.match(envExample, /https:\/\/myaddarr\.duckdns\.org\/trakt\/callback/);
+  assert.match(envExample, /no Caddy route\/rewrite is/);
+  assert.match(envExample, /urn:ietf:wg:oauth:2\.0:oob remain/);
+  assert.match(traktGuide, /Beginner setup: DuckDNS and Caddy/);
+  assert.match(traktGuide, /You do \*\*not\*\* need to add a Caddy route/);
+  assert.match(traktGuide, /Existing OOB applications/);
+  assert.match(traktGuide, /What to enter at each prompt/);
+});

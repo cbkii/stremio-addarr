@@ -60,7 +60,7 @@ Useful focused commands:
 
 ```bash
 npm run typecheck
-npm run test:ci
+npm test
 npm run test:catalog
 npm run build
 npm run lint:manifest
