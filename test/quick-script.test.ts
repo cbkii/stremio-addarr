@@ -37,6 +37,8 @@ test('quick.sh exposes retryable standalone Trakt device authentication', () => 
   assert.match(helper, /Use only the API origin/);
   assert.match(helper, /values\.get\('PUBLIC_BASE_URL'\)/);
   assert.match(helper, /\$\{parsed\.origin\}\/trakt\/callback/);
+  assert.match(helper, /Set the Redirect URI to exactly/);
+  assert.match(helper, /press Enter for the recommended default/);
   assert.match(helper, /Existing values such as urn:ietf:wg:oauth:2\.0:oob remain supported/);
   assert.match(helper, /Do not add a Caddy route, rewrite or callback handler/);
   assert.match(helper, /Device Code Flow does not open or call \/trakt\/callback/);
