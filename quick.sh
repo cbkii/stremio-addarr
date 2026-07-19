@@ -20,9 +20,12 @@ if [[ -z "$MODE" || "$MODE" == "-h" || "$MODE" == "--help" ]]; then
 Usage:
   bash quick.sh install [--repo owner/name] [--tag vX.Y.Z] [--svc-user USER] [--svc-group GROUP]
   bash quick.sh upgrade [--repo owner/name] [--tag vX.Y.Z] [--svc-user USER] [--svc-group GROUP] [--no-trakt]
+  bash quick.sh trakt
 
 Flags:
-  --no-trakt  Skip the Trakt OAuth setup prompt (useful on repeated upgrade runs)
+  --no-trakt  Skip the Trakt device-auth prompt during install/upgrade.
+
+The trakt mode repairs only Trakt authentication on an existing installation.
 
 Defaults:
   --repo cbkii/stremio-addarr
@@ -60,8 +63,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$MODE" != "install" && "$MODE" != "upgrade" ]]; then
-  echo "First argument must be install or upgrade."
+if [[ "$MODE" != "install" && "$MODE" != "upgrade" && "$MODE" != "trakt" ]]; then
+  echo "First argument must be install, upgrade or trakt."
   exit 1
 fi
 
@@ -456,115 +459,56 @@ configure_tokens() {
   fi
 }
 
+run_trakt_device_auth() {
+  local helper="$INSTALL_DIR/scripts/trakt-device-auth.mjs"
+  local version="unknown"
+  if [[ ! -f "$INSTALL_DIR/.env" ]]; then
+    fail "Trakt setup requires an existing environment file: $INSTALL_DIR/.env"
+    return 1
+  fi
+  if [[ ! -f "$helper" ]]; then
+    fail "Trakt device-auth helper is missing: $helper"
+    echo "Install or upgrade to the current release, then retry: bash quick.sh trakt"
+    return 1
+  fi
+  version="$(node -p "try { require('$INSTALL_DIR/package.json').version } catch { 'unknown' }")"
+
+  say "Trakt Device Code Flow"
+  if node "$helper" --env "$INSTALL_DIR/.env" --version "$version"; then
+    ok "Trakt credentials were authorised and stored."
+    if systemctl is-active --quiet stremio-addarr 2>/dev/null; then
+      run_step "Restart stremio-addarr to apply Trakt credentials" sudo systemctl restart stremio-addarr
+      wait_for_service stremio-addarr || true
+    else
+      warn "Service is not active. Start it after reviewing $INSTALL_DIR/.env."
+    fi
+    return 0
+  fi
+
+  local rc=$?
+  if [[ "$rc" -eq 2 ]]; then
+    warn "Trakt setup skipped; existing Trakt settings were left unchanged."
+    return 2
+  fi
+  fail "Trakt device authentication did not complete."
+  echo "Retry without reinstalling: bash quick.sh trakt"
+  return "$rc"
+}
+
 configure_trakt_oauth() {
-  say "Optional Trakt OAuth setup"
-  if ! prompt_confirm "Configure Trakt watched-sync OAuth in this quick run?"; then
-    warn "Skipping Trakt OAuth setup."
+  say "Optional Trakt watched-sync setup"
+  if ! prompt_confirm "Configure or repair Trakt using Device Code Flow in this quick run?"; then
+    warn "Skipping Trakt setup. Run 'bash quick.sh trakt' later to configure or repair it."
     return 0
   fi
-
-  load_env_file
-
-  local trakt_client_id="${TRAKT_CLIENT_ID:-}"
-  local trakt_client_secret="${TRAKT_CLIENT_SECRET:-}"
-  local trakt_api_base_url="${TRAKT_API_BASE_URL:-https://api.trakt.tv}"
-  local trakt_redirect_uri="${TRAKT_REDIRECT_URI:-urn:ietf:wg:oauth:2.0:oob}"
-  local code=""
-  local response_file="$TMP_DIR/trakt-token.json"
-  local token_http_code=""
-  local refresh_token=""
-  local access_token=""
-  local short_refresh=""
-  local short_access=""
-
-  if [[ -z "$trakt_client_id" ]]; then
-    ask "Enter TRAKT_CLIENT_ID:"
-    read -r -p "${C_YELLOW}${C_BOLD}TRAKT_CLIENT_ID: ${C_RESET}" trakt_client_id
-    upsert_env_key "TRAKT_CLIENT_ID" "$trakt_client_id"
-  fi
-  if [[ -z "$trakt_client_secret" ]]; then
-    ask "Enter TRAKT_CLIENT_SECRET:"
-    read -r -p "${C_YELLOW}${C_BOLD}TRAKT_CLIENT_SECRET: ${C_RESET}" trakt_client_secret
-    upsert_env_key "TRAKT_CLIENT_SECRET" "$trakt_client_secret"
-  fi
-
-  # Validate credentials are present before building the auth URL
-  if [[ -z "$trakt_client_id" || -z "$trakt_client_secret" ]]; then
-    fail "TRAKT_CLIENT_ID and TRAKT_CLIENT_SECRET are required for OAuth. Skipping."
+  if run_trakt_device_auth; then
     return 0
-  fi
-
-  upsert_env_key "TRAKT_API_BASE_URL" "$trakt_api_base_url"
-  upsert_env_key "TRAKT_REDIRECT_URI" "$trakt_redirect_uri"
-
-  # Intentionally minimal URL-encode: only handles the characters present in the
-  # known OOB redirect URI (urn:ietf:wg:oauth:2.0:oob). If TRAKT_REDIRECT_URI is
-  # ever changed to a different value, this encoding logic must be revisited.
-  local encoded_redirect_uri
-  encoded_redirect_uri="$(printf '%s' "$trakt_redirect_uri" | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's/\//%2F/g')"
-  local auth_url="https://trakt.tv/oauth/authorize?response_type=code&client_id=${trakt_client_id}&redirect_uri=${encoded_redirect_uri}"
-  say "Complete Trakt authorization"
-  echo "1) Open this URL in any browser and approve access:"
-  echo "   $auth_url"
-  echo "2) Copy the authorization code shown by Trakt."
-  ask "Paste authorization code:"
-  read -r -p "${C_YELLOW}${C_BOLD}Authorization code: ${C_RESET}" code
-
-  # Trim leading/trailing whitespace from pasted code
-  code="${code#"${code%%[![:space:]]*}"}"
-  code="${code%"${code##*[![:space:]]}"}"
-
-  if [[ -z "$code" ]]; then
-    fail "Authorization code was empty. Skipping Trakt OAuth."
-    return 0
-  fi
-
-  say "Exchange authorization code for refresh token"
-  cmd "curl -sS -X POST ${trakt_api_base_url}/oauth/token -H Content-Type: application/json ..."
-  token_http_code="$(
-    curl -sS -o "$response_file" -w '%{http_code}' \
-      -X POST "${trakt_api_base_url}/oauth/token" \
-      -H 'Content-Type: application/json' \
-      -d "{\"code\":\"${code}\",\"client_id\":\"${trakt_client_id}\",\"client_secret\":\"${trakt_client_secret}\",\"redirect_uri\":\"${trakt_redirect_uri}\",\"grant_type\":\"authorization_code\"}"
-  )"
-
-  if [[ "$token_http_code" != "200" ]]; then
-    fail "Trakt token exchange failed (HTTP ${token_http_code})."
-    cat "$response_file"
-    warn "You can re-run quick.sh and choose Trakt OAuth setup again."
-    return 0
-  fi
-
-  refresh_token="$(node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(j.refresh_token||'');" "$response_file")"
-  access_token="$(node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(j.access_token||'');" "$response_file")"
-
-  if [[ -z "$refresh_token" ]]; then
-    fail "Trakt token response did not include refresh_token."
-    cat "$response_file"
-    return 0
-  fi
-
-  upsert_env_key "TRAKT_REFRESH_TOKEN" "$refresh_token"
-  upsert_env_key "TRAKT_ACCESS_TOKEN" "${access_token:-}"
-  upsert_env_key "TRAKT_SYNC_ENABLED" "true"
-  # Only set TRAKT_SYNC_MINS if it does not already have a valid numeric value;
-  # an existing blank value is treated as absent to prevent the service from
-  # crashing with "must be a number".
-  if ! grep -Eq '^[[:space:]]*TRAKT_SYNC_MINS=[[:space:]]*[0-9]+' "$INSTALL_DIR/.env"; then
-    upsert_env_key "TRAKT_SYNC_MINS" "360"
-  fi
-
-  short_refresh="${refresh_token:0:6}...${refresh_token: -4}"
-  short_access="${access_token:0:6}...${access_token: -4}"
-  ok "Stored Trakt OAuth tokens in .env (refresh=${short_refresh}, access=${short_access})."
-
-  # Restart the service so TRAKT_* values (including TRAKT_SYNC_MINS) are picked up.
-  # systemd does not hot-reload EnvironmentFile, so a restart is required.
-  if systemctl is-active --quiet stremio-addarr 2>/dev/null; then
-    run_step "Restart stremio-addarr to apply Trakt OAuth config" sudo systemctl restart stremio-addarr
-    wait_for_service stremio-addarr || true
   else
-    warn "Service was not active; skipping restart. Start it manually after reviewing .env."
+    local rc=$?
+    if [[ "$rc" -ne 2 ]]; then
+      warn "Continuing the install/upgrade without changing Trakt authentication."
+    fi
+    return 0
   fi
 }
 
@@ -602,6 +546,20 @@ wait_for_service() {
   fi
   return 1
 }
+
+if [[ "$MODE" == "trakt" ]]; then
+  say "Repair Trakt authentication for the existing stremio-addarr installation"
+  for dependency in node sudo systemctl; do
+    check_cmd "$dependency"
+  done
+  if run_trakt_device_auth; then
+    exit 0
+  else
+    rc=$?
+    [[ "$rc" -eq 2 ]] && exit 0
+    exit "$rc"
+  fi
+fi
 
 run_verification() {
   local desc="$1"; shift

@@ -428,6 +428,7 @@ test('trakt sync accepts explicit configuration', () => {
   process.env.TRAKT_CLIENT_ID = 'client-id';
   process.env.TRAKT_CLIENT_SECRET = 'client-secret';
   process.env.TRAKT_REFRESH_TOKEN = 'refresh-token';
+  process.env.TRAKT_REDIRECT_URI = 'https://example.invalid/trakt/callback';
   process.env.TRAKT_API_BASE_URL = 'https://api.trakt.tv';
   const config = loadConfig();
   assert.equal(config.traktSync.enabled, true);
@@ -441,6 +442,7 @@ test('trakt sync fails validation when sync mins is < 40', () => {
   process.env.TRAKT_CLIENT_ID = 'client-id';
   process.env.TRAKT_CLIENT_SECRET = 'client-secret';
   process.env.TRAKT_REFRESH_TOKEN = 'refresh-token';
+  process.env.TRAKT_REDIRECT_URI = 'https://example.invalid/trakt/callback';
   assert.throws(() => loadConfig(), /TRAKT_SYNC_MINS must be at least 40/);
 });
 

@@ -24,3 +24,19 @@ test('quick.sh exposes protected URLs and an exact-eight token flow', () => {
 test('quick.sh safely handles a missing environment file', () => {
   assert.match(quick, /\[\[ -f "\$INSTALL_DIR\/\.env" \]\] \|\|/);
 });
+
+test('quick.sh exposes retryable standalone Trakt device authentication', () => {
+  const helper = readFileSync(path.join(root, 'scripts/trakt-device-auth.mjs'), 'utf8');
+  assert.match(quick, /bash quick\.sh trakt/);
+  assert.match(quick, /trakt-device-auth\.mjs/);
+  assert.match(helper, /requestTraktDeviceCode/);
+  assert.match(helper, /pollTraktDeviceToken/);
+  assert.match(helper, /retry refresh/);
+  assert.match(helper, /new device code/);
+  assert.match(helper, /Invalid URL format/);
+  assert.match(helper, /Use only the API origin/);
+  assert.doesNotMatch(quick + helper, /oauth\/authorize/);
+  assert.match(helper, /Existing values such as urn:ietf:wg:oauth:2\.0:oob remain supported/);
+  assert.doesNotMatch(quick, /TRAKT_REDIRECT_URI=.*urn:ietf:wg:oauth:2\.0:oob/);
+  assert.doesNotThrow(() => execFileSync('node', ['--check', 'scripts/trakt-device-auth.mjs'], { cwd: root, stdio: 'pipe' }));
+});

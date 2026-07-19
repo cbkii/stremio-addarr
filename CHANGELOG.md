@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Replace the broken pasted-code Trakt setup and universal OOB assumption with Trakt Device Code Flow, exact interval/expiry polling, bounded retries and a standalone `bash quick.sh trakt` repair mode.
+- Preserve existing registered Trakt redirect values, while deriving a beginner-friendly `<PUBLIC_BASE_URL>/trakt/callback` suggestion for new DuckDNS/Caddy installations without requiring a callback route.
+- Prevent stale persisted Trakt state from overriding newly authorised credentials after restart.
+- Use provider token expiry metadata, proactive refresh, `Retry-After`, required Trakt headers and atomic `0600` token-state persistence.
 - Serve the configuration UI at both `/configure` and the Stremio-derived `/<ADDON_ACCESS_TOKEN>/configure` path.
 - Correct `quick.sh` verification and final output to use the protected manifest URL instead of the obsolete `/manifest.json` route.
 - Correct the release-note verification checklist to use `/healthz`, `/status.json`, the protected manifest path and the token-derived Configure path.
@@ -14,6 +18,7 @@
 
 ### Changed
 
+- Remove unsupported Trakt website scraping; release-date fallback now uses documented Trakt API methods only when a Client ID is configured.
 - Add an interactive token wizard to `quick.sh`: keep an existing token, specify an 8-character value, or generate a random 8-character value.
 - Retain support for longer legacy tokens while making short TV-friendly tokens the default for new installations.
 - Restore configurable catalogue page sizes from 10 to 100 with a Pi-friendly default of 30.

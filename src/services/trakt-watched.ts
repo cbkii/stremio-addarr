@@ -4,18 +4,23 @@ import type { Logger } from '../logger.js';
 import type { AppConfig } from '../config.js';
 import type { WatchedLookup, WatchedLookupDiagnostics } from './watched.js';
 import { normalizeImdbId } from '../lib/imdb.js';
-
-interface TraktTokenResponse {
-  access_token?: string;
-  refresh_token?: string;
-  expires_in?: number;
-}
+import {
+  TraktAuthError,
+  refreshTraktToken,
+  traktApiHeaders,
+  traktJsonRequest,
+  traktTokenTiming,
+  type TraktTokenResponse
+} from './trakt-auth.js';
 
 interface PersistedTraktState {
+  schemaVersion?: number;
+  authGeneration?: string;
   lastSyncAt?: number;
   refreshToken?: string;
   accessToken?: string;
   tokenExpiresAt?: number;
+  tokenRefreshAt?: number;
 }
 
 interface TraktWatchedMovie {
@@ -27,26 +32,45 @@ interface TraktWatchedShow {
   seasons?: Array<{ number?: number; episodes?: Array<{ number?: number }> }>;
 }
 
-// Trakt access tokens expire after 90 days.
-const TRAKT_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+export interface TraktWatchedOptions {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
 
 export class TraktWatchedLookup implements WatchedLookup {
   private readonly syncMs: number;
   private readonly stateFile: string;
+  private readonly now: () => number;
+  private readonly sleep?: (ms: number) => Promise<void>;
+  private readonly userAgent: string;
   private movieWatched = new Set<string>();
   private episodeWatched = new Set<string>();
-  private accessToken = '';
-  private tokenExpiresAt = 0;
+  private accessToken: string;
+  private tokenExpiresAt: number;
+  /** Refresh threshold, deliberately before the provider's absolute expiry. */
+  private tokenRefreshAt: number;
   private refreshToken: string;
   private lastSyncAt = 0;
   private lastSyncError?: string;
   private runningSync: Promise<void> | null = null;
+  private runningRefresh: Promise<void> | null = null;
   private snapshotReady = false;
 
-  constructor(private readonly config: AppConfig, private readonly logger: Logger) {
+  constructor(
+    private readonly config: AppConfig,
+    private readonly logger: Logger,
+    options: TraktWatchedOptions = {}
+  ) {
     this.syncMs = config.traktSync.syncMins * 60_000;
     this.stateFile = config.traktSync.stateFilePath;
     this.refreshToken = config.traktSync.refreshToken;
+    this.accessToken = config.traktSync.accessToken;
+    this.now = options.now ?? Date.now;
+    this.sleep = options.sleep;
+    this.userAgent = `stremio-addarr/${config.version}`;
+    const initialTiming = this.initialTokenTiming();
+    this.tokenExpiresAt = initialTiming.expiresAtMs;
+    this.tokenRefreshAt = initialTiming.refreshAtMs;
   }
 
   async init(): Promise<void> {
@@ -89,11 +113,9 @@ export class TraktWatchedLookup implements WatchedLookup {
   async isEpisodeWatched(imdbId: string, season?: number, episode?: number): Promise<boolean> {
     if (!this.config.traktSync.enabled) return false;
     const normalized = normalizeImdbId(imdbId);
-    if (!normalized) return false;
-    if (season == null || episode == null) return false;
+    if (!normalized || season == null || episode == null) return false;
     await this.ensureSynced(false);
-    const key = this.episodeKey(normalized, season, episode);
-    return this.episodeWatched.has(key);
+    return this.episodeWatched.has(this.episodeKey(normalized, season, episode));
   }
 
   getDiagnostics(): WatchedLookupDiagnostics {
@@ -108,9 +130,23 @@ export class TraktWatchedLookup implements WatchedLookup {
     };
   }
 
+  private initialTokenTiming(): { expiresAtMs: number; refreshAtMs: number } {
+    if (!this.accessToken || this.config.traktSync.accessTokenCreatedAt <= 0
+      || this.config.traktSync.accessTokenExpiresIn <= 0) {
+      return { expiresAtMs: 0, refreshAtMs: 0 };
+    }
+    const timing = traktTokenTiming({
+      access_token: this.accessToken,
+      refresh_token: this.refreshToken,
+      created_at: this.config.traktSync.accessTokenCreatedAt,
+      expires_in: this.config.traktSync.accessTokenExpiresIn
+    }, this.now());
+    return { expiresAtMs: timing.expiresAtMs, refreshAtMs: timing.refreshAtMs };
+  }
+
   private async ensureSynced(force: boolean): Promise<void> {
     if (!this.config.traktSync.enabled) return;
-    const now = Date.now();
+    const now = this.now();
     if (!force && this.snapshotReady && this.lastSyncAt > 0 && (now - this.lastSyncAt) < this.syncMs) return;
     if (this.runningSync) return this.runningSync;
     this.runningSync = this.runSync();
@@ -122,10 +158,10 @@ export class TraktWatchedLookup implements WatchedLookup {
   }
 
   private async runSync(): Promise<void> {
-    const startedAt = Date.now();
+    const startedAt = this.now();
     this.logger.info('trakt sync start', { enabled: true });
     try {
-      if (!this.accessToken || Date.now() >= this.tokenExpiresAt) {
+      if (!this.accessToken || this.now() >= this.tokenRefreshAt) {
         await this.refreshAccessToken();
       }
       const [movies, shows] = await Promise.all([
@@ -142,76 +178,109 @@ export class TraktWatchedLookup implements WatchedLookup {
         const imdb = normalizeImdbId(item.show?.ids?.imdb);
         if (!imdb) continue;
         for (const season of item.seasons ?? []) {
-          const seasonNumber = season.number;
-          if (seasonNumber == null) continue;
+          if (season.number == null) continue;
           for (const ep of season.episodes ?? []) {
-            const episodeNumber = ep.number;
-            if (episodeNumber == null) continue;
-            nextEpisodeWatched.add(this.episodeKey(imdb, seasonNumber, episodeNumber));
+            if (ep.number == null) continue;
+            nextEpisodeWatched.add(this.episodeKey(imdb, season.number, ep.number));
           }
         }
       }
 
       this.movieWatched = nextMovieWatched;
       this.episodeWatched = nextEpisodeWatched;
-      this.lastSyncAt = Date.now();
+      this.lastSyncAt = this.now();
       this.lastSyncError = undefined;
       this.snapshotReady = true;
 
       try {
         await this.persistState();
-      } catch (err) {
+      } catch (error) {
         this.logger.warn('trakt sync metadata persistence failed (snapshot valid in-memory)', {
-          error: err instanceof Error ? err.message : String(err)
+          error: error instanceof Error ? error.message : String(error)
         });
       }
 
       this.logger.info('trakt sync complete', {
-        durationMs: Date.now() - startedAt,
+        durationMs: this.now() - startedAt,
         movieCount: this.movieWatched.size,
         episodeCount: this.episodeWatched.size
       });
     } catch (error) {
-      this.lastSyncError = error instanceof Error ? error.message : String(error);
-      this.logger.warn('trakt sync failed', { durationMs: Date.now() - startedAt, error: this.lastSyncError });
+      this.lastSyncError = this.describeAuthError(error);
+      this.logger.warn('trakt sync failed', {
+        durationMs: this.now() - startedAt,
+        error: this.lastSyncError
+      });
     }
   }
 
-  private async refreshAccessToken(): Promise<void> {
-    if (!this.refreshToken) throw new Error('missing_refresh_token');
-    const response = await this.fetchJson<TraktTokenResponse>(`${this.config.traktSync.apiBaseUrl}/oauth/token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'refresh_token',
-        refresh_token: this.refreshToken,
-        client_id: this.config.traktSync.clientId,
-        client_secret: this.config.traktSync.clientSecret,
-        redirect_uri: this.config.traktSync.redirectUri
-      })
-    });
-    if (!response.access_token || !response.refresh_token) {
-      throw new Error('invalid_token_refresh_response');
+  private describeAuthError(error: unknown): string {
+    if (error instanceof TraktAuthError) {
+      if ((error.status === 400 || error.status === 401)
+        && /invalid|grant|token|unauthor/i.test(`${error.code} ${error.responseText}`)) {
+        return 'trakt_reauthorization_required';
+      }
+      return error.code ? `${error.message}: ${error.code}` : error.message;
     }
-    this.accessToken = response.access_token;
-    this.refreshToken = response.refresh_token;
-    this.tokenExpiresAt = Date.now() + (response.expires_in ?? TRAKT_TOKEN_TTL_MS / 1000) * 1000;
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private async refreshAccessToken(): Promise<void> {
+    if (this.runningRefresh) return this.runningRefresh;
+    this.runningRefresh = this.performRefreshAccessToken();
+    try {
+      await this.runningRefresh;
+    } finally {
+      this.runningRefresh = null;
+    }
+  }
+
+  private async performRefreshAccessToken(): Promise<void> {
+    if (!this.refreshToken) throw new Error('missing_refresh_token');
+    let response: TraktTokenResponse;
+    try {
+      response = await refreshTraktToken(
+        this.config.traktSync.apiBaseUrl,
+        this.config.traktSync.clientId,
+        this.config.traktSync.clientSecret,
+        this.refreshToken,
+        this.config.traktSync.redirectUri,
+        this.userAgent,
+        {
+          timeoutMs: this.config.requestTimeoutMs,
+          sleep: this.sleep
+        }
+      );
+    } catch (error) {
+      if (error instanceof TraktAuthError && (error.status === 400 || error.status === 401)) {
+        throw new Error('trakt_reauthorization_required');
+      }
+      throw error;
+    }
+    this.applyToken(response);
 
     try {
       await this.persistState();
-    } catch (err) {
+    } catch (error) {
       this.logger.warn('trakt token refresh persistence failed', {
-        error: err instanceof Error ? err.message : String(err)
+        error: error instanceof Error ? error.message : String(error)
       });
     }
+  }
+
+  private applyToken(response: TraktTokenResponse): void {
+    this.accessToken = response.access_token;
+    this.refreshToken = response.refresh_token;
+    const timing = traktTokenTiming(response, this.now());
+    this.tokenExpiresAt = timing.expiresAtMs;
+    this.tokenRefreshAt = timing.refreshAtMs;
   }
 
   private async traktGet<T>(endpoint: string): Promise<T> {
     try {
       return await this.doTraktGet<T>(endpoint);
     } catch (error) {
-      // On 401 the token may have been revoked early; refresh once and retry.
-      if (error instanceof Error && error.message === 'http_401') {
+      if (error instanceof TraktAuthError && error.status === 401) {
         await this.refreshAccessToken();
         return this.doTraktGet<T>(endpoint);
       }
@@ -220,55 +289,77 @@ export class TraktWatchedLookup implements WatchedLookup {
   }
 
   private doTraktGet<T>(endpoint: string): Promise<T> {
-    return this.fetchJson<T>(`${this.config.traktSync.apiBaseUrl}${endpoint}`, {
-      method: 'GET',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${this.accessToken}`,
-        'trakt-api-key': this.config.traktSync.clientId,
-        'trakt-api-version': '2'
+    return traktJsonRequest<T>(
+      `${this.config.traktSync.apiBaseUrl}${endpoint}`,
+      {
+        method: 'GET',
+        headers: traktApiHeaders(this.config.traktSync.clientId, this.userAgent, this.accessToken)
+      },
+      {
+        timeoutMs: this.config.requestTimeoutMs,
+        sleep: this.sleep
       }
-    });
-  }
-
-  private async fetchJson<T>(url: string, init: RequestInit): Promise<T> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
-    try {
-      const response = await fetch(url, { ...init, signal: controller.signal });
-      if (!response.ok) {
-        throw new Error(`http_${response.status}`);
-      }
-      return await response.json() as T;
-    } finally {
-      clearTimeout(timeout);
-    }
+    );
   }
 
   private async loadState(): Promise<void> {
     try {
       const raw = await fs.readFile(this.stateFile, 'utf8');
       const parsed = JSON.parse(raw) as PersistedTraktState;
-      this.lastSyncAt = typeof parsed.lastSyncAt === 'number' ? parsed.lastSyncAt : 0;
-      if (parsed.refreshToken?.trim()) {
-        this.refreshToken = parsed.refreshToken.trim();
+      if (this.config.traktSync.authGeneration
+        && parsed.authGeneration !== this.config.traktSync.authGeneration) {
+        this.logger.info('ignored stale Trakt state after credential generation changed');
+        return;
       }
-      this.accessToken = typeof parsed.accessToken === 'string' ? parsed.accessToken : '';
-      this.tokenExpiresAt = typeof parsed.tokenExpiresAt === 'number' ? parsed.tokenExpiresAt : 0;
-    } catch {
-      this.lastSyncAt = 0;
+      this.lastSyncAt = typeof parsed.lastSyncAt === 'number' ? parsed.lastSyncAt : 0;
+      if (parsed.refreshToken?.trim()) this.refreshToken = parsed.refreshToken.trim();
+      if (parsed.accessToken?.trim()) this.accessToken = parsed.accessToken.trim();
+      // Legacy v1 state used an obsolete 90-day assumption. Refresh it immediately.
+      if (parsed.schemaVersion === 2 && typeof parsed.tokenExpiresAt === 'number') {
+        this.tokenExpiresAt = parsed.tokenExpiresAt;
+        this.tokenRefreshAt = typeof parsed.tokenRefreshAt === 'number'
+          ? parsed.tokenRefreshAt
+          : Math.max(0, parsed.tokenExpiresAt - 5 * 60_000);
+      } else {
+        this.tokenExpiresAt = 0;
+        this.tokenRefreshAt = 0;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.logger.warn('Trakt state could not be loaded; using environment credentials', {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
   }
 
   private async persistState(): Promise<void> {
-    const dir = path.dirname(this.stateFile);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(this.stateFile, JSON.stringify({
+    const directory = path.dirname(this.stateFile);
+    const createdDirectory = await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    if (createdDirectory) await fs.chmod(directory, 0o700).catch(() => undefined);
+    const temporary = `${this.stateFile}.tmp-${process.pid}-${Date.now()}`;
+    const payload = JSON.stringify({
+      schemaVersion: 2,
+      authGeneration: this.config.traktSync.authGeneration,
       lastSyncAt: this.lastSyncAt,
       refreshToken: this.refreshToken,
       accessToken: this.accessToken,
-      tokenExpiresAt: this.tokenExpiresAt
-    }), 'utf8');
+      tokenExpiresAt: this.tokenExpiresAt,
+      tokenRefreshAt: this.tokenRefreshAt
+    });
+    try {
+      const handle = await fs.open(temporary, 'w', 0o600);
+      try {
+        await handle.writeFile(payload, 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await fs.rename(temporary, this.stateFile);
+      await fs.chmod(this.stateFile, 0o600);
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+    }
   }
 
   private episodeKey(imdbId: string, season: number, episode: number): string {
