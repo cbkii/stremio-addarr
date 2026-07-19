@@ -35,3 +35,157 @@ jobs:
 
       - name: Release packaging smoke test
         run: npm run package:release
+
+  # BEGIN ONE-SHOT ACTIONS REGISTRY PURGE
+  purge-obsolete-actions:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Delete runs and disable workflows whose files no longer exist
+        id: purge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t LIVE_PATHS < <(
+            git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml' | sort -u
+          )
+
+          is_live_path() {
+            local candidate="$1"
+            printf '%s\n' "${LIVE_PATHS[@]}" | grep -Fxq -- "$candidate"
+          }
+
+          obsolete_workflows=0
+          disabled_workflows=0
+          deleted_runs=0
+          failed_operations=0
+          : > "$RUNNER_TEMP/obsolete-workflows.tsv"
+
+          while IFS=$'\t' read -r workflow_id workflow_name workflow_path workflow_state; do
+            [[ -n "$workflow_id" ]] || continue
+            if is_live_path "$workflow_path"; then
+              echo "Keeping live workflow: ${workflow_name} (${workflow_path})"
+              continue
+            fi
+
+            obsolete_workflows=$((obsolete_workflows + 1))
+            printf '%s\t%s\t%s\t%s\n' \
+              "$workflow_id" "$workflow_name" "$workflow_path" "$workflow_state" \
+              >> "$RUNNER_TEMP/obsolete-workflows.tsv"
+            echo "Purging obsolete workflow: ${workflow_name} (${workflow_path}, id=${workflow_id})"
+
+            mapfile -t run_ids < <(
+              gh api --paginate \
+                "repos/${REPO}/actions/workflows/${workflow_id}/runs?per_page=100" \
+                --jq '.workflow_runs[].id'
+            )
+
+            for run_id in "${run_ids[@]}"; do
+              [[ -n "$run_id" ]] || continue
+              if gh api --method DELETE "repos/${REPO}/actions/runs/${run_id}"; then
+                deleted_runs=$((deleted_runs + 1))
+              else
+                echo "::warning::Failed to delete workflow run ${run_id}"
+                failed_operations=$((failed_operations + 1))
+              fi
+            done
+
+            if [[ "$workflow_state" == "active" ]]; then
+              if gh api --method PUT "repos/${REPO}/actions/workflows/${workflow_id}/disable"; then
+                disabled_workflows=$((disabled_workflows + 1))
+              else
+                echo "::warning::Failed to disable workflow ${workflow_id}"
+                failed_operations=$((failed_operations + 1))
+              fi
+            fi
+
+            remaining_runs=$(gh api \
+              "repos/${REPO}/actions/workflows/${workflow_id}/runs?per_page=1" \
+              --jq '.total_count')
+            if [[ "$remaining_runs" != "0" ]]; then
+              echo "::warning::Workflow ${workflow_id} still has ${remaining_runs} run(s)"
+              failed_operations=$((failed_operations + 1))
+            fi
+          done < <(
+            gh api --paginate "repos/${REPO}/actions/workflows?per_page=100" \
+              --jq '.workflows[] | [.id, .name, .path, .state] | @tsv'
+          )
+
+          {
+            echo '### Obsolete Actions cleanup'
+            echo "- Live workflow files kept: ${#LIVE_PATHS[@]}"
+            echo "- Obsolete workflow registrations processed: ${obsolete_workflows}"
+            echo "- Registrations disabled during this run: ${disabled_workflows}"
+            echo "- Historical runs deleted: ${deleted_runs}"
+            echo "- Failed operations: ${failed_operations}"
+            echo
+            echo 'Live workflow files:'
+            printf -- '- `%s`\n' "${LIVE_PATHS[@]}"
+            if [[ -s "$RUNNER_TEMP/obsolete-workflows.tsv" ]]; then
+              echo
+              echo 'Purged registrations:'
+              awk -F '\t' '{printf "- `%s` — %s (`%s`)\n", $1, $2, $3}' \
+                "$RUNNER_TEMP/obsolete-workflows.tsv"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "obsolete_workflows=${obsolete_workflows}"
+            echo "disabled_workflows=${disabled_workflows}"
+            echo "deleted_runs=${deleted_runs}"
+            echo "failed_operations=${failed_operations}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$failed_operations" != "0" ]]; then
+            echo "::error::The Actions purge completed with ${failed_operations} failed operation(s)."
+            exit 1
+          fi
+
+      - name: Remove one-shot purge code and its merged branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OBSOLETE_WORKFLOWS: ${{ steps.purge.outputs.obsolete_workflows }}
+          DELETED_RUNS: ${{ steps.purge.outputs.deleted_runs }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/ci.yml')
+          content = path.read_text()
+          start = '  # BEGIN ONE-SHOT ACTIONS REGISTRY PURGE\n'
+          end = '  # END ONE-SHOT ACTIONS REGISTRY PURGE\n'
+          if content.count(start) != 1 or content.count(end) != 1:
+              raise SystemExit('one-shot purge markers are missing or duplicated')
+          before, remainder = content.split(start, 1)
+          _, after = remainder.split(end, 1)
+          path.write_text(before.rstrip() + '\n' + after.lstrip())
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/ci.yml
+          git commit -m "chore: complete Actions purge (${OBSOLETE_WORKFLOWS} workflows, ${DELETED_RUNS} runs) [skip ci]"
+          git push origin HEAD:main
+
+          branch='chore/purge-obsolete-actions-registry'
+          encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$branch")
+          gh api --method DELETE "repos/${REPO}/git/refs/heads/${encoded}" \
+            || echo "::warning::Could not delete merged cleanup branch ${branch}"
+  # END ONE-SHOT ACTIONS REGISTRY PURGE
