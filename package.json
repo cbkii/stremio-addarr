@@ -14,9 +14,7 @@
     "start": "node dist/src/index.js",
     "test": "tsx --test --test-reporter=spec test/*.test.ts",
     "test:catalog": "tsx --test --test-name-pattern=catalog test/catalog.test.ts test/addon.test.ts",
-    "preci": "node scripts/finalise-release-workflow-cleanup.mjs apply",
     "ci": "npm run typecheck && npm test && npm run build && npm run lint:manifest",
-    "postci": "node scripts/finalise-release-workflow-cleanup.mjs finalise",
     "package:release": "node scripts/package-release.mjs",
     "lint:manifest": "node scripts/lint-manifest.mjs"
   },
