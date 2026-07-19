@@ -54,13 +54,27 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Delete obsolete workflow runs in parallel and disable registrations
+      - name: Purge runs for workflow files no longer present
         id: purge
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+
+          report_unexpected_failure() {
+            local status=$?
+            if [[ "$status" != "0" ]]; then
+              gh pr comment 72 --body \
+                "❌ Actions purge stopped unexpectedly with exit code ${status} near shell line ${BASH_LINENO[0]:-unknown}. The temporary CI block was retained for diagnosis." \
+                >/dev/null 2>&1 || true
+            fi
+          }
+          trap report_unexpected_failure EXIT
+
+          gh pr comment 72 --body \
+            "🔄 Actions registry purge retry started. Registrations that disappear after their final run is deleted are now treated as successful cleanup." \
+            >/dev/null 2>&1 || true
 
           live_paths_file="$RUNNER_TEMP/live-workflows.txt"
           obsolete_file="$RUNNER_TEMP/obsolete-workflows.tsv"
@@ -86,9 +100,18 @@ jobs:
             printf '%s\t%s\t%s\t%s\n' \
               "$workflow_id" "$workflow_name" "$workflow_path" "$workflow_state" \
               >> "$obsolete_file"
-            gh api --paginate \
+
+            per_workflow_runs="$RUNNER_TEMP/runs-${workflow_id}.txt"
+            if gh api --paginate \
               "repos/${REPO}/actions/workflows/${workflow_id}/runs?per_page=100" \
-              --jq '.workflow_runs[].id' >> "$run_ids_file"
+              --jq '.workflow_runs[].id' > "$per_workflow_runs" 2>/dev/null; then
+              cat "$per_workflow_runs" >> "$run_ids_file"
+            elif gh api "repos/${REPO}/actions/workflows/${workflow_id}" >/dev/null 2>&1; then
+              printf 'run-enumeration\t%s\t%s\n' "$workflow_id" "$workflow_path" \
+                >> "$failed_file"
+            else
+              echo "Registration disappeared before run enumeration: ${workflow_path}"
+            fi
           done < <(
             gh api --paginate "repos/${REPO}/actions/workflows?per_page=100" \
               --jq '.workflows[] | [.id, .name, .path, .state] | @tsv'
@@ -102,15 +125,11 @@ jobs:
               printf '%s\n' "$run_id" >> "$deleted_file"
               return 0
             fi
-
-            # A prior attempt may have deleted the run between enumeration and this call.
             if ! gh api "repos/${REPO}/actions/runs/${run_id}" >/dev/null 2>&1; then
               printf '%s\n' "$run_id" >> "$deleted_file"
               return 0
             fi
-
             printf 'run-delete\t%s\n' "$run_id" >> "$failed_file"
-            return 0
           }
           export -f delete_run
           export GH_TOKEN REPO deleted_file failed_file
@@ -127,18 +146,26 @@ jobs:
               if gh api --method PUT \
                 "repos/${REPO}/actions/workflows/${workflow_id}/disable" >/dev/null 2>&1; then
                 disabled_workflows=$((disabled_workflows + 1))
-              else
+              elif gh api "repos/${REPO}/actions/workflows/${workflow_id}" >/dev/null 2>&1; then
                 printf 'workflow-disable\t%s\t%s\n' "$workflow_id" "$workflow_path" \
                   >> "$failed_file"
+              else
+                echo "Registration disappeared while disabling: ${workflow_path}"
               fi
             fi
 
-            remaining_runs=$(gh api \
+            if remaining_runs=$(gh api \
               "repos/${REPO}/actions/workflows/${workflow_id}/runs?per_page=1" \
-              --jq '.total_count')
-            if [[ "$remaining_runs" != "0" ]]; then
-              printf 'runs-remaining\t%s\t%s\t%s\n' \
-                "$workflow_id" "$workflow_path" "$remaining_runs" >> "$failed_file"
+              --jq '.total_count' 2>/dev/null); then
+              if [[ "$remaining_runs" != "0" ]]; then
+                printf 'runs-remaining\t%s\t%s\t%s\n' \
+                  "$workflow_id" "$workflow_path" "$remaining_runs" >> "$failed_file"
+              fi
+            elif gh api "repos/${REPO}/actions/workflows/${workflow_id}" >/dev/null 2>&1; then
+              printf 'verification-query\t%s\t%s\n' "$workflow_id" "$workflow_path" \
+                >> "$failed_file"
+            else
+              echo "Verified by absence: ${workflow_path}"
             fi
           done < "$obsolete_file"
 
@@ -163,7 +190,7 @@ jobs:
             if [[ -s "$obsolete_file" ]]; then
               echo
               echo 'Purged registrations:'
-              awk -F '\t' '{printf "- `%s` — %s (`%s`, state `%s`)\n", $1, $2, $3, $4}' \
+              awk -F '\t' '{printf "- `%s` — %s (`%s`, prior state `%s`)\n", $1, $2, $3, $4}' \
                 "$obsolete_file"
             fi
             if [[ -s "$failed_file" ]]; then
@@ -174,11 +201,10 @@ jobs:
           } > "$summary_file"
 
           cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
-          gh pr comment 72 --body-file "$summary_file" || true
+          gh pr comment 72 --body-file "$summary_file" >/dev/null 2>&1 || true
 
           {
             echo "obsolete_workflows=${obsolete_count}"
-            echo "disabled_workflows=${disabled_workflows}"
             echo "deleted_runs=${deleted_run_count}"
             echo "failed_operations=${failed_count}"
           } >> "$GITHUB_OUTPUT"
@@ -187,6 +213,8 @@ jobs:
             echo "::error::The Actions purge completed with ${failed_count} failed operation(s)."
             exit 1
           fi
+
+          trap - EXIT
 
       - name: Restore normal CI and remove cleanup branches
         env:
@@ -220,7 +248,8 @@ jobs:
 
           for branch in \
             'chore/purge-obsolete-actions-registry' \
-            'chore/finish-actions-registry-purge'; do
+            'chore/finish-actions-registry-purge' \
+            'chore/fix-actions-purge-registration-race'; do
             encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$branch")
             gh api --method DELETE "repos/${REPO}/git/refs/heads/${encoded}" >/dev/null 2>&1 \
               || true
