@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - chore/repository-hygiene
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -14,6 +18,7 @@ concurrency:
 
 jobs:
   clean-validate-commit:
+    if: github.head_ref == 'chore/repository-hygiene' || github.ref_name == 'chore/repository-hygiene'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
