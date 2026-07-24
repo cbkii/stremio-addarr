@@ -17,7 +17,7 @@ replace_once(
 )
 replace_once(
     'src/services/status.ts',
-    '        knownTitle: added.detail\n      })',
-    "        knownTitle: added.detail?.split(' · ', 1)[0]\n      })",
+    "        knownMovieId: added.itemId,\n        knownTitle: added.detail\n      })",
+    "        knownMovieId: added.itemId,\n        knownTitle: added.detail?.split(' · ', 1)[0]\n      })",
 )
 print('Radarr title hand-off fixed without changing the public action result.')
