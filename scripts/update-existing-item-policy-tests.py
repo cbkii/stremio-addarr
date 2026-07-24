@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -136,5 +137,16 @@ replace_once(
     "signedActionUrl(baseUrl, cfg, 'add-search', 'series', 'tt1111111')",
     "signedActionUrl(baseUrl, cfg, 'add-search', 'series', 'tt1111111:1:1')",
 )
+
+# This script is invoked once through npm's `preci` lifecycle and removes its
+# temporary lifecycle hook before the implementation commit is created.
+package_path = Path('package.json')
+package = json.loads(package_path.read_text(encoding='utf-8'))
+scripts = package.get('scripts', {})
+if scripts.get('preci') != 'python3 scripts/update-existing-item-policy-tests.py':
+    raise SystemExit('package.json: temporary preci hook is missing or unexpected')
+del scripts['preci']
+package_path.write_text(json.dumps(package, indent=2) + '\n', encoding='utf-8')
+Path(__file__).unlink()
 
 print('Legacy action tests migrated to exact-search semantics.')
