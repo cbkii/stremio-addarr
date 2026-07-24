@@ -308,6 +308,14 @@ jobs:
             exit "$status"
           fi
 
+      - name: Upload implementation validation diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: existing-item-policy-validation
+          path: validation-error.txt
+          if-no-files-found: error
+
       - name: Remove temporary helper and publish implementation
         run: |
           set -euo pipefail
