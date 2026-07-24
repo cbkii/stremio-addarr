@@ -10,6 +10,26 @@ if SOURCE_MARKER not in source_path.read_text(encoding='utf-8'):
     print('Final hardening is not applied in this workspace; diagnostic validation skipped.')
     raise SystemExit(0)
 
+# Arr normally returns the created resource, but older versions and test doubles
+# may return an empty body. Use the returned ID when available; otherwise let the
+# exact-search phase perform its fresh lookup instead of dereferencing undefined.
+for path, replacements in {
+    'src/services/radarr.ts': {
+        'itemId: created.id': 'itemId: created?.id',
+    },
+    'src/services/sonarr.ts': {
+        '        created.id\n      );': '        created?.id\n      );',
+        'itemId: created.id': 'itemId: created?.id',
+    },
+}.items():
+    file_path = Path(path)
+    content = file_path.read_text(encoding='utf-8')
+    for old, new in replacements.items():
+        if content.count(old) != 1:
+            raise SystemExit(f'{path}: expected one occurrence of {old!r}, found {content.count(old)}')
+        content = content.replace(old, new, 1)
+    file_path.write_text(content, encoding='utf-8')
+
 package_path = Path('package.json')
 package = json.loads(package_path.read_text(encoding='utf-8'))
 scripts = package.get('scripts', {})
