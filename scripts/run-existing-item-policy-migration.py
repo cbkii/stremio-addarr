@@ -16,10 +16,12 @@ replacements = {
         'assert.equal(addOptions.searchForMissingEpisodes, true);',
     'assert.equal(payload.addOptions.searchForMissingEpisodes, false);':
         'assert.equal(addOptions.searchForMissingEpisodes, false);',
+    '      episodeReadyTimeoutMs: 1_000,\\n      episodeReadyPollMs: 1,':
+        '      episodeReadyTimeoutMs: 1_000,\\n      episodeReadyPollMs: 250,',
 }
 for old, new in replacements.items():
     if helper.count(old) != 1:
-        raise SystemExit(f'expected exactly one stale Sonarr addOptions assertion, found {helper.count(old)}: {old}')
+        raise SystemExit(f'expected exactly one stale migration value, found {helper.count(old)}: {old}')
     helper = helper.replace(old, new, 1)
 helper_path.write_text(helper, encoding='utf-8')
 
