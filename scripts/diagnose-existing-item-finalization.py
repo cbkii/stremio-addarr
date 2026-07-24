@@ -31,8 +31,20 @@ for command in commands:
     completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     output.extend(completed.stdout.splitlines())
     if completed.returncode != 0:
-        print(f"Finalization validation failed: {' '.join(command)}")
-        print('\n'.join(output[-120:]))
+        heading = f"Finalization validation failed: {' '.join(command)}"
+        diagnostic = heading + '\n\n' + '\n'.join(output[-240:]) + '\n'
+        print(heading)
+
+        # Publish only the diagnostic. Restore the branch checkout first so none
+        # of the unvalidated hardening transformation can leak into the branch.
+        subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
+        diagnostic_path = Path('finalization-diagnostic.txt')
+        diagnostic_path.write_text(diagnostic, encoding='utf-8')
+        subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
+        subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+        subprocess.run(['git', 'add', 'finalization-diagnostic.txt'], check=True)
+        subprocess.run(['git', 'commit', '-m', 'chore: capture finalization failure [skip ci]'], check=True)
+        subprocess.run(['git', 'push', 'origin', 'HEAD:agent/preserve-existing-arr-settings'], check=True)
         raise SystemExit(completed.returncode)
 
 print('Finalization diagnostic validation passed; continuing with canonical CI.')
