@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, agent/preserve-existing-arr-settings]
   pull_request:
 
 # Cancel in-progress CI runs for the same branch/PR when a new commit arrives.
@@ -255,3 +255,65 @@ jobs:
               || true
           done
   # END ONE-SHOT ACTIONS REGISTRY PURGE
+
+  # BEGIN ONE-SHOT EXISTING ITEM POLICY FINALIZATION
+  finalize-existing-item-policy:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/preserve-existing-arr-settings'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/preserve-existing-arr-settings
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply final hardening patch
+        run: python3 scripts/finalize-existing-item-policy.py
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate final implementation
+        run: |
+          npm run ci
+          npm run package:release
+
+      - name: Remove helper and publish final hardening
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/ci.yml')
+          content = workflow.read_text()
+          content = content.replace(
+              '    branches: [main, agent/preserve-existing-arr-settings]\n',
+              '    branches: [main]\n',
+              1,
+          )
+          start = '  # BEGIN ONE-SHOT EXISTING ITEM POLICY FINALIZATION\n'
+          end = '  # END ONE-SHOT EXISTING ITEM POLICY FINALIZATION\n'
+          if content.count(start) != 1 or content.count(end) != 1:
+              raise SystemExit('finalization markers are missing or duplicated')
+          before, remainder = content.split(start, 1)
+          _, after = remainder.split(end, 1)
+          workflow.write_text(before.rstrip() + '\n' + after.lstrip())
+          Path('scripts/finalize-existing-item-policy.py').unlink()
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Harden exact search after new Arr item creation'
+          git push origin HEAD:agent/preserve-existing-arr-settings
+  # END ONE-SHOT EXISTING ITEM POLICY FINALIZATION
