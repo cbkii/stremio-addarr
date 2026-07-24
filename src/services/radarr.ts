@@ -11,8 +11,7 @@ import type {
   RadarrHistoryRecord,
   RadarrLookupRecord,
   RadarrMovieRecord,
-  RadarrQueueRecord,
-  RadarrReleaseRecord
+  RadarrQueueRecord
 } from '../types.js';
 
 interface MoviesSnapshot {
@@ -30,18 +29,18 @@ export class RadarrClient {
 
   constructor(
     private readonly config: AppConfig,
-    http?: JsonHttpClient,
+    injectedHttp?: JsonHttpClient,
     private readonly tmdbLookup?: TmdbLookup
   ) {
     this.logger = createLogger(config.logLevel);
     this.http =
-      http ??
+      injectedHttp ??
       new JsonHttpClient({
         baseUrl: config.radarr.baseUrl,
         apiKey: config.radarr.apiKey,
         timeoutMs: config.requestTimeoutMs,
-        retries: config.requestRetries,
-        retryDelayMs: config.requestRetryDelayMs
+        logger: this.logger,
+        serviceName: 'radarr'
       });
     this.moviesSnapshotCache = new AsyncTtlCache<MoviesSnapshot>(config.statusCacheTtlMs);
     this.queueCache = new AsyncTtlCache<RadarrQueueRecord[]>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
@@ -111,7 +110,7 @@ export class RadarrClient {
       const releaseDate = this.pickMovieReleaseDate(existing.physicalRelease, existing.digitalRelease, existing.inCinemas);
       if (existing.hasFile || existing.movieFile) {
         const rawFileName = existing.movieFile?.relativePath ?? existing.movieFile?.path;
-        const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
+        const fileName = rawFileName ? rawFileName.split(/[\/]/).pop() : undefined;
         return {
           state: 'downloaded',
           ...common,
@@ -136,14 +135,18 @@ export class RadarrClient {
     }
   }
 
-  private pickMovieReleaseDate(...values: Array<string | undefined>): string | undefined {
-    const valid = values
+  private pickMovieReleaseDate(physicalRelease?: string, digitalRelease?: string, inCinemas?: string): string | undefined {
+    const release = this.pickEarliestDate(physicalRelease, digitalRelease);
+    return release ?? this.pickEarliestDate(inCinemas);
+  }
+
+  private pickEarliestDate(...values: Array<string | undefined>): string | undefined {
+    const parsed = values
       .filter((value): value is string => Boolean(value))
-      .map((value) => ({ value, parsed: Date.parse(value) }))
-      .filter((item) => Number.isFinite(item.parsed));
-    if (valid.length === 0) return undefined;
-    valid.sort((a, b) => a.parsed - b.parsed);
-    return valid[0]?.value;
+      .map((value) => ({ value, ms: Date.parse(value) }))
+      .filter((value) => Number.isFinite(value.ms))
+      .sort((a, b) => a.ms - b.ms);
+    return parsed[0]?.value;
   }
 
   async addMovieByImdbId(imdbId: string): Promise<AddActionResult> {
@@ -162,15 +165,12 @@ export class RadarrClient {
     if (existing) {
       const profile = await this.qualityProfileName(existing.qualityProfileId);
       this.logger.info('radarr add skipped', { imdbId, reason: 'already_exists', movieId: existing.id });
-      const existingSummary = existing.hasFile || existing.movieFile
-        ? 'Movie is already downloaded.'
-        : 'Movie is already added.';
       return {
         ok: true,
         service: 'radarr',
         title: 'Already in Radarr',
-        summary: profile ? `${existingSummary} Existing profile: ${profile}.` : existingSummary,
-        detail: existing.title,
+        summary: existing.hasFile || existing.movieFile ? 'Movie is already downloaded.' : 'Movie is already added.',
+        detail: `${existing.title}${profile ? ` · ${profile}` : ''}`,
         alreadyExisted: true,
         itemId: existing.id
       };
@@ -434,6 +434,8 @@ export class RadarrClient {
     return snapshot.movies;
   }
 
+
+
   async listRecentMovieImports(limit: number, offset = 0): Promise<RadarrHistoryRecord[]> {
     if (!this.config.radarr.enabled) return [];
     const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
@@ -465,34 +467,68 @@ export class RadarrClient {
     }
   }
 
+  async listMovieQueueDetails(): Promise<RadarrQueueRecord[]> {
+    if (!this.config.radarr.enabled) return [];
+    return this.queueCache.getOrSet('details', async () => {
+      const detailsPath = '/api/v3/queue/details?page=1&pageSize=250&includeUnknownMovieItems=true';
+      let records: RadarrQueueRecord[] = [];
+
+      try {
+        const details = await this.http.get<{ records?: RadarrQueueRecord[] } | RadarrQueueRecord[]>(detailsPath);
+        records = Array.isArray(details) ? details : (details.records ?? []);
+      } catch {
+        records = await this.listQueueRecords();
+      }
+
+      return records;
+    });
+  }
+
+  private async fetchStremioCinemetaMovie(imdbId: string): Promise<{ title: string; year?: number } | undefined> {
+    if (typeof globalThis.fetch !== 'function') {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
+
+    try {
+      const response = await globalThis.fetch(`https://v3-cinemeta.strem.io/meta/movie/${encodeURIComponent(imdbId)}.json`, {
+        signal: controller.signal
+      });
+      if (!response.ok) return undefined;
+      const data = await response.json();
+      const meta = data?.meta;
+      if (meta?.name) {
+        const parsedYear = meta.year ? parseInt(String(meta.year), 10) : undefined;
+        const year = Number.isFinite(parsedYear) ? parsedYear : undefined;
+        return {
+          title: meta.name,
+          year
+        };
+      }
+    } catch {
+      return undefined;
+    } finally {
+      clearTimeout(timeout);
+    }
+    return undefined;
+  }
+
+  private normalizeTitle(title?: string): string {
+    if (!title) return '';
+    return title
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+  }
+
   private async lookupMovie(imdbId: string): Promise<RadarrLookupRecord[]> {
     const response = await this.http.get<RadarrLookupRecord | RadarrLookupRecord[]>(
       `/api/v3/movie/lookup/imdb?imdbId=${encodeURIComponent(imdbId)}`
     );
-    return Array.isArray(response) ? response : [response];
-  }
-
-  private normalizeTitle(value: string): string {
-    return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  }
-
-  private async fetchStremioCinemetaMovie(imdbId: string): Promise<{ title?: string; year?: number } | undefined> {
-    try {
-      const response = await fetch(`https://v3-cinemeta.strem.io/meta/movie/${encodeURIComponent(imdbId)}.json`, {
-        signal: AbortSignal.timeout(Math.min(this.config.requestTimeoutMs, 5000))
-      });
-      if (!response.ok) return undefined;
-      const body = (await response.json()) as { meta?: { name?: string; releaseInfo?: string; year?: number } };
-      const year = typeof body.meta?.year === 'number'
-        ? body.meta.year
-        : Number.parseInt(body.meta?.releaseInfo ?? '', 10);
-      return {
-        title: body.meta?.name,
-        year: Number.isFinite(year) ? year : undefined
-      };
-    } catch {
-      return undefined;
-    }
+    return Array.isArray(response) ? response : (response ? [response] : []);
   }
 
   async ping(): Promise<{ reachable: boolean; detail?: string }> {
@@ -508,14 +544,20 @@ export class RadarrClient {
   }
 
   private mapError(error: unknown): string {
-    if (error instanceof HttpTimeoutError) return 'timeout';
+    if (error instanceof HttpTimeoutError) {
+      return 'timeout';
+    }
     if (error instanceof HttpError) {
       if (error.status === 401 || error.status === 403) return 'auth_error';
       if (error.status === 404) return 'not_found';
       return `http_${error.status}`;
     }
-    if (error instanceof TypeError && /fetch|network|ECONNREFUSED/i.test(error.message)) return 'unreachable';
-    if (error instanceof Error) return error.message;
+    if (error instanceof TypeError && /fetch|network|ECONNREFUSED/i.test(error.message)) {
+      return 'unreachable';
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
     return 'unknown_error';
   }
 }

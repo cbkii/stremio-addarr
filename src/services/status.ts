@@ -439,7 +439,7 @@ export class ArrStatusService {
       ? await this.radarr.triggerMovieSearch(parsed.imdbId, {
         existingBeforeAction: added.alreadyExisted === true,
         knownMovieId: added.itemId,
-        knownTitle: added.detail
+        knownTitle: added.detail?.split(' · ', 1)[0]
       })
       : await this.sonarr.triggerEpisodeSearch(parsed.imdbId, parsed.season, parsed.episode, {
         existingBeforeAction: added.alreadyExisted === true,
