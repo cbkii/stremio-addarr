@@ -14,20 +14,10 @@ set -e
 
 if [[ "$status" != "0" ]]; then
   {
-    echo 'Temporary diagnostic for draft PR #76.'
+    echo 'Existing-item policy implementation validation failed.'
     echo
-    echo '```text'
-    tail -n 400 "$log_file"
-    echo '```'
-  } > "${RUNNER_TEMP:-/tmp}/validation-issue.md"
-
-  if [[ -n "${GH_TOKEN:-}" ]] && command -v gh >/dev/null 2>&1; then
-    gh issue create \
-      --repo cbkii/stremio-addarr \
-      --title 'TEMP: PR #76 existing-item validation failure' \
-      --body-file "${RUNNER_TEMP:-/tmp}/validation-issue.md" \
-      >/dev/null || true
-  fi
+    tail -n 500 "$log_file"
+  } > validation-error.txt
   exit "$status"
 fi
 
