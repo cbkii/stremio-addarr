@@ -79,6 +79,9 @@ test('root and token-derived Configure routes serve the TV page without exposing
       assert.doesNotMatch(html, /type="checkbox"/);
       assert.equal((html.match(/data-boolean-select="true"/g) ?? []).length, 8);
       assert.match(html, /id="radarr-enabled"[^>]*><option value="true">Enabled<\/option><option value="false">Disabled<\/option>/);
+      assert.match(html, /id="radarr-existing-policy"/);
+      assert.match(html, /id="sonarr-existing-policy"/);
+      assert.match(html, /Preserve existing settings \(recommended\)/);
       assert.ok(!html.includes('value="radarr-key"'));
       assert.ok(!html.includes('value="sonarr-key"'));
     }
@@ -146,6 +149,8 @@ test('save validates and atomically updates only managed environment keys', asyn
     payload.radarr.rootFolderPath = '/media/movies';
     payload.radarr.qualityProfileId = 7;
     payload.radarr.tags = '1,3';
+    payload.radarr.existingItemPolicy = 'apply-config';
+    payload.sonarr.existingItemPolicy = 'extend';
     payload.sonarr.apiKey = '';
     payload.trakt.clientId = '';
     payload.trakt.clientSecret = '';
@@ -176,6 +181,8 @@ test('save validates and atomically updates only managed environment keys', asyn
     assert.match(saved, /RADARR_API_KEY=new-radarr-secret/);
     assert.match(saved, /RADARR_QUALITY_PROFILE_ID=7/);
     assert.match(saved, /RADARR_TAGS=1,3/);
+    assert.match(saved, /RADARR_EXISTING_ITEM_POLICY=apply-config/);
+    assert.match(saved, /SONARR_EXISTING_ITEM_POLICY=extend/);
 
     const stat = await fs.stat(envFile);
     assert.equal(stat.mode & 0o777, 0o600);

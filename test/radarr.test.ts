@@ -223,121 +223,50 @@ test('downloading state takes precedence over missing', async () => {
   assert.equal(status.state, 'downloading');
 });
 
-test('triggerMovieSearch posts MoviesSearch command for existing movie', async () => {
+test('triggerMovieSearch preserves an existing unmonitored profile and queues exact MoviesSearch', async () => {
   const cfg = baseConfig();
   cfg.radarr.enabled = true;
-  const posts: unknown[] = [];
-  const http = {
-    async get<T>(path: string): Promise<T> {
-      if (path === '/api/v3/movie') return [{ id: 5, imdbId: 'tt88', monitored: true }] as T;
-      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
-      throw new Error(`Unexpected GET ${path}`);
-    },
-    async post<T>(_path: string, body: unknown): Promise<T> {
-      posts.push(body);
-      return {} as T;
-    },
-    async put<T>(_path: string): Promise<T> {
-      return {} as T;
-    }
-  };
-  const client = new RadarrClient(cfg, http as never);
-  const result = await client.triggerMovieSearch('tt88');
-  assert.equal(result.ok, true);
-  assert.deepEqual(posts[0], { name: 'MoviesSearch', movieIds: [5] });
-});
-
-test('triggerMovieSearch grabs top approved release before command search', async () => {
-  const cfg = baseConfig();
-  cfg.radarr.enabled = true;
+  cfg.radarr.qualityProfileId = 1;
+  cfg.radarr.existingItemPolicy = 'preserve';
   const calls: Array<{ path: string; body?: unknown }> = [];
   const http = {
     async get<T>(path: string): Promise<T> {
-      if (path === '/api/v3/movie') return [{ id: 5, imdbId: 'tt88', monitored: true }] as T;
-      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
-      if (path === '/api/v3/release?movieId=5') {
-        return [{ guid: 'abc', indexerId: 9, approved: true, rejected: false }] as T;
-      }
+      if (path === '/api/v3/movie') return [{ id: 5, imdbId: 'tt88', tmdbId: 88, monitored: false, qualityProfileId: 4, title: 'Movie 88' }] as T;
+      if (path === '/api/v3/qualityprofile') return [{ id: 4, name: 'Existing P4' }] as T;
       throw new Error(`Unexpected GET ${path}`);
     },
     async post<T>(path: string, body: unknown): Promise<T> {
       calls.push({ path, body });
-      return {} as T;
-    },
-    async put<T>(_path: string): Promise<T> {
-      return {} as T;
-    }
-  };
-  const client = new RadarrClient(cfg, http as never);
-  const result = await client.triggerMovieSearch('tt88');
-  assert.equal(result.ok, true);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.path, '/api/v3/release');
-  assert.deepEqual(calls[0]?.body, { guid: 'abc', indexerId: 9, movieId: 5 });
-});
-
-test('triggerMovieSearch prefers download-allowed release with highest weight and passes downloadClientId', async () => {
-  const cfg = baseConfig();
-  cfg.radarr.enabled = true;
-  const calls: Array<{ path: string; body?: unknown }> = [];
-  const http = {
-    async get<T>(path: string): Promise<T> {
-      if (path === '/api/v3/movie') return [{ id: 5, imdbId: 'tt88', monitored: true }] as T;
-      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
-      if (path === '/api/v3/release?movieId=5') {
-        return [
-          { guid: 'low', indexerId: 3, approved: true, rejected: false, downloadAllowed: true, releaseWeight: 10 },
-          { guid: 'best', indexerId: 7, approved: true, rejected: false, downloadAllowed: true, releaseWeight: 100, downloadClientId: 44 },
-          { guid: 'blocked', indexerId: 9, approved: true, rejected: false, downloadAllowed: false, releaseWeight: 999 }
-        ] as T;
-      }
-      throw new Error(`Unexpected GET ${path}`);
-    },
-    async post<T>(path: string, body: unknown): Promise<T> {
-      calls.push({ path, body });
-      return {} as T;
-    },
-    async put<T>(_path: string): Promise<T> {
-      return {} as T;
-    }
-  };
-  const client = new RadarrClient(cfg, http as never);
-  const result = await client.triggerMovieSearch('tt88');
-  assert.equal(result.ok, true);
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], {
-    path: '/api/v3/release',
-    body: { guid: 'best', indexerId: 7, movieId: 5, downloadClientId: 44 }
-  });
-});
-
-test('triggerMovieSearch enables movie monitored before searching', async () => {
-  const cfg = baseConfig();
-  cfg.radarr.enabled = true;
-  const calls: Array<{ path: string; body?: unknown }> = [];
-  const http = {
-    async get<T>(path: string): Promise<T> {
-      if (path === '/api/v3/movie') return [{ id: 6, imdbId: 'tt89', monitored: false }] as T;
-      if (path.startsWith('/api/v3/queue?')) return { records: [] } as T;
-      throw new Error(`Unexpected GET ${path}`);
+      return { id: 101, name: 'MoviesSearch', status: 'queued' } as T;
     },
     async put<T>(path: string, body: unknown): Promise<T> {
       calls.push({ path, body });
       return {} as T;
-    },
-    async post<T>(path: string, body: unknown): Promise<T> {
-      calls.push({ path, body });
-      return {} as T;
     }
   };
-
   const client = new RadarrClient(cfg, http as never);
-  const result = await client.triggerMovieSearch('tt89');
+  const result = await client.triggerMovieSearch('tt88');
   assert.equal(result.ok, true);
-  assert.deepEqual(calls, [
-    { path: '/api/v3/movie/editor', body: { movieIds: [6], monitored: true } },
-    { path: '/api/v3/command', body: { name: 'MoviesSearch', movieIds: [6] } }
-  ]);
+  assert.equal(result.commandId, 101);
+  assert.deepEqual(calls, [{ path: '/api/v3/command', body: { name: 'MoviesSearch', movieIds: [5] } }]);
+  assert.match(result.detail ?? '', /preserved/i);
+});
+
+test('triggerMovieSearch rejects an invalid command acknowledgement', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/movie') return [{ id: 6, imdbId: 'tt89', monitored: true, title: 'Movie 89' }] as T;
+      if (path === '/api/v3/qualityprofile') return [] as T;
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(): Promise<T> { return {} as T; },
+    async put<T>(): Promise<T> { return {} as T; }
+  };
+  const result = await new RadarrClient(cfg, http as never).triggerMovieSearch('tt89');
+  assert.equal(result.ok, false);
+  assert.match(result.title, /not accepted/i);
 });
 
 test('queue failure does not downgrade movie status to unavailable', async () => {

@@ -5,17 +5,19 @@ import { createLogger } from '../logger.js';
 import type { TmdbLookup } from './tmdb.js';
 import type {
   AddActionResult,
+  ArrCommandResponse,
   ArrMovieStatus,
+  ArrQualityProfile,
   RadarrHistoryRecord,
   RadarrLookupRecord,
   RadarrMovieRecord,
-  RadarrReleaseRecord,
   RadarrQueueRecord
 } from '../types.js';
 
 interface MoviesSnapshot {
   movies: RadarrMovieRecord[];
   byImdbId: Map<string, RadarrMovieRecord>;
+  byTmdbId: Map<number, RadarrMovieRecord>;
 }
 
 export class RadarrClient {
@@ -23,6 +25,7 @@ export class RadarrClient {
   private readonly logger: ReturnType<typeof createLogger>;
   private readonly moviesSnapshotCache: AsyncTtlCache<MoviesSnapshot>;
   private readonly queueCache: AsyncTtlCache<RadarrQueueRecord[]>;
+  private readonly qualityProfileCache: AsyncTtlCache<ArrQualityProfile[]>;
 
   constructor(
     private readonly config: AppConfig,
@@ -41,19 +44,48 @@ export class RadarrClient {
       });
     this.moviesSnapshotCache = new AsyncTtlCache<MoviesSnapshot>(config.statusCacheTtlMs);
     this.queueCache = new AsyncTtlCache<RadarrQueueRecord[]>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
+    this.qualityProfileCache = new AsyncTtlCache<ArrQualityProfile[]>(Math.max(config.statusCacheTtlMs, 60_000));
   }
 
   private async getMoviesSnapshot(): Promise<MoviesSnapshot> {
     return this.moviesSnapshotCache.getOrSet('snapshot', async () => {
       const movies = await this.http.get<RadarrMovieRecord[]>('/api/v3/movie');
       const byImdbId = new Map<string, RadarrMovieRecord>();
+      const byTmdbId = new Map<number, RadarrMovieRecord>();
       for (const movie of movies) {
-        if (movie.imdbId) {
-          byImdbId.set(movie.imdbId, movie);
-        }
+        if (movie.imdbId) byImdbId.set(movie.imdbId.toLowerCase(), movie);
+        if (movie.tmdbId != null) byTmdbId.set(movie.tmdbId, movie);
       }
-      return { movies, byImdbId };
+      return { movies, byImdbId, byTmdbId };
     });
+  }
+
+  private async findMovieByImdbId(imdbId: string, fresh = false): Promise<RadarrMovieRecord | undefined> {
+    if (fresh) this.moviesSnapshotCache.clear();
+    const snapshot = await this.getMoviesSnapshot();
+    const direct = snapshot.byImdbId.get(imdbId.toLowerCase());
+    if (direct) return direct;
+    if (this.tmdbLookup) {
+      try {
+        const tmdbId = await this.tmdbLookup.getMovieTmdbId(imdbId);
+        if (tmdbId != null) return snapshot.byTmdbId.get(tmdbId);
+      } catch {
+        // Safe fallback: an unavailable optional mapper must not break status.
+      }
+    }
+    return undefined;
+  }
+
+  private async qualityProfileName(profileId?: number): Promise<string | undefined> {
+    if (profileId == null) return undefined;
+    try {
+      const profiles = await this.qualityProfileCache.getOrSet('profiles', () =>
+        this.http.get<ArrQualityProfile[]>('/api/v3/qualityprofile')
+      );
+      return profiles.find((profile) => profile.id === profileId)?.name ?? `Profile ${profileId}`;
+    } catch {
+      return `Profile ${profileId}`;
+    }
   }
 
   async getMovieStatus(imdbId: string): Promise<ArrMovieStatus> {
@@ -62,23 +94,28 @@ export class RadarrClient {
     }
 
     try {
-      const snapshot = await this.getMoviesSnapshot();
-      const existing = snapshot.byImdbId.get(imdbId);
-      if (!existing) {
-        return { state: 'not_added' };
-      }
+      const existing = await this.findMovieByImdbId(imdbId);
+      if (!existing) return { state: 'not_added' };
+
+      const qualityProfileName = await this.qualityProfileName(existing.qualityProfileId);
+      const common = {
+        movieId: existing.id,
+        monitored: existing.monitored,
+        title: existing.title,
+        year: existing.year,
+        qualityProfileId: existing.qualityProfileId,
+        qualityProfileName,
+        existingItemPolicy: this.config.radarr.existingItemPolicy
+      };
       const releaseDate = this.pickMovieReleaseDate(existing.physicalRelease, existing.digitalRelease, existing.inCinemas);
       if (existing.hasFile || existing.movieFile) {
         const rawFileName = existing.movieFile?.relativePath ?? existing.movieFile?.path;
-        const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
+        const fileName = rawFileName ? rawFileName.split(/[\/]/).pop() : undefined;
         return {
           state: 'downloaded',
-          movieId: existing.id,
+          ...common,
           movieFileId: existing.movieFile?.id,
-          monitored: existing.monitored,
           hasFile: true,
-          title: existing.title,
-          year: existing.year,
           releaseDate,
           fileName,
           fileSizeBytes: existing.movieFile?.size
@@ -86,18 +123,10 @@ export class RadarrClient {
       }
 
       let isDownloading = false;
-      try {
-        isDownloading = await this.isMovieQueued(existing.id);
-      } catch {
-        isDownloading = false;
-      }
-      if (isDownloading) {
-        return { state: 'downloading', movieId: existing.id, monitored: existing.monitored, hasFile: false, title: existing.title, year: existing.year, releaseDate };
-      }
-      if (existing.monitored) {
-        return { state: 'missing', movieId: existing.id, monitored: true, hasFile: false, title: existing.title, year: existing.year, releaseDate };
-      }
-      return { state: 'added', movieId: existing.id, monitored: false, hasFile: false, title: existing.title, year: existing.year, releaseDate };
+      try { isDownloading = await this.isMovieQueued(existing.id); } catch { isDownloading = false; }
+      if (isDownloading) return { state: 'downloading', ...common, hasFile: false, releaseDate };
+      if (existing.monitored) return { state: 'missing', ...common, monitored: true, hasFile: false, releaseDate };
+      return { state: 'added', ...common, monitored: false, hasFile: false, releaseDate };
     } catch (error) {
       return {
         state: 'unavailable',
@@ -132,15 +161,18 @@ export class RadarrClient {
     }
 
     this.logger.info('radarr add start', { imdbId });
-    const current = await this.getMovieStatus(imdbId);
-    if (current.state === 'downloaded' || current.state === 'added' || current.state === 'missing' || current.state === 'downloading') {
-      this.logger.info('radarr add skipped', { imdbId, reason: 'already_exists', state: current.state });
+    const existing = await this.findMovieByImdbId(imdbId, true);
+    if (existing) {
+      const profile = await this.qualityProfileName(existing.qualityProfileId);
+      this.logger.info('radarr add skipped', { imdbId, reason: 'already_exists', movieId: existing.id });
       return {
         ok: true,
         service: 'radarr',
         title: 'Already in Radarr',
-        summary: current.state === 'downloaded' ? 'Movie is already downloaded.' : 'Movie is already added.',
-        alreadyExisted: true
+        summary: existing.hasFile || existing.movieFile ? 'Movie is already downloaded.' : 'Movie is already added.',
+        detail: `${existing.title}${profile ? ` · ${profile}` : ''}`,
+        alreadyExisted: true,
+        itemId: existing.id
       };
     }
 
@@ -207,12 +239,13 @@ export class RadarrClient {
       minimumAvailability: this.config.radarr.minimumAvailability,
       tags: this.config.radarr.tags,
       addOptions: {
-        searchForMovie: this.config.radarr.searchOnAdd
+        searchForMovie: false
       }
     };
 
+    let created: RadarrMovieRecord;
     try {
-      await this.http.post('/api/v3/movie', payload);
+      created = await this.http.post<RadarrMovieRecord>('/api/v3/movie', payload);
     } catch (error) {
       if (
         error instanceof HttpError &&
@@ -239,99 +272,116 @@ export class RadarrClient {
       year: match.year,
       tmdbId: match.tmdbId,
       matchMethod,
-      searchOnAdd: this.config.radarr.searchOnAdd
+      searchOnAdd: false
     });
 
     return {
       ok: true,
       service: 'radarr',
       title: 'Added to Radarr',
-      summary: this.config.radarr.searchOnAdd ? 'Movie added and search triggered.' : 'Movie added.',
-      detail: match.title
+      summary: 'Movie added.',
+      detail: match.title,
+      itemId: created?.id
     };
   }
 
-  async triggerMovieSearch(imdbId: string): Promise<AddActionResult> {
+  async triggerMovieSearch(
+    imdbId: string,
+    options: { existingBeforeAction?: boolean; knownMovieId?: number; knownTitle?: string } = { existingBeforeAction: true }
+  ): Promise<AddActionResult> {
     this.logger.info('radarr search start', { imdbId });
-    const status = await this.getMovieStatus(imdbId);
-    if (status.state === 'unavailable') {
-      this.logger.warn('radarr search failed', { imdbId, reason: 'unavailable' });
+    let existing: RadarrMovieRecord | undefined = options.knownMovieId != null
+      ? { id: options.knownMovieId, imdbId, title: options.knownTitle ?? imdbId }
+      : undefined;
+    try {
+      existing ??= await this.findMovieByImdbId(imdbId, true);
+    } catch (error) {
       return {
         ok: false,
         service: 'radarr',
         title: 'Radarr unavailable',
-        summary: status.reason ?? 'Radarr status check failed.'
+        summary: error instanceof Error ? error.message : 'Radarr lookup failed.'
       };
     }
-    if (status.state === 'not_added') {
-      this.logger.warn('radarr search failed', { imdbId, reason: 'not_added' });
-      return {
-        ok: false,
-        service: 'radarr',
-        title: 'Not in Radarr',
-        summary: 'Movie is not added yet.'
-      };
+    if (!existing) {
+      return { ok: false, service: 'radarr', title: 'Not in Radarr', summary: 'Movie is not added yet.' };
     }
-    if (status.state === 'downloaded') {
-      this.logger.info('radarr search skipped', { imdbId, reason: 'already_downloaded' });
+    if (existing.hasFile || existing.movieFile) {
       return {
         ok: true,
         service: 'radarr',
         title: 'Already downloaded',
         summary: 'Movie file already exists.',
+        detail: existing.title,
         alreadyExisted: true
       };
     }
-    if (!status.movieId) {
-      this.logger.warn('radarr search failed', { imdbId, reason: 'no_movie_id' });
+
+    let policyDetail: string;
+    let command: ArrCommandResponse;
+    try {
+      policyDetail = options.existingBeforeAction === false
+        ? 'Configured settings applied to the new movie.'
+        : await this.applyExistingMoviePolicy(existing);
+      command = await this.http.post<ArrCommandResponse>('/api/v3/command', {
+        name: 'MoviesSearch',
+        movieIds: [existing.id]
+      });
+    } catch (error) {
       return {
         ok: false,
         service: 'radarr',
-        title: 'Search skipped',
-        summary: 'Could not resolve Radarr movie id.'
+        title: 'Radarr action failed',
+        summary: error instanceof Error ? error.message : 'Radarr rejected the movie policy or search request.',
+        detail: existing.title
+      };
+    }
+    const commandName = command?.name?.trim().toLowerCase();
+    if (!Number.isInteger(command?.id) || Number(command.id) <= 0 || (commandName != null && commandName !== 'moviessearch')) {
+      return {
+        ok: false,
+        service: 'radarr',
+        title: 'Search was not accepted',
+        summary: 'Radarr did not return a valid targeted MoviesSearch acknowledgement.',
+        detail: existing.title
       };
     }
 
-    if (status.monitored === false) {
-      await this.http.put('/api/v3/movie/editor', { movieIds: [status.movieId], monitored: true });
-    }
-
-    const grabbed = await this.tryGrabTopRelease(status.movieId);
-    if (!grabbed) {
-      await this.http.post('/api/v3/command', {
-        name: 'MoviesSearch',
-        movieIds: [status.movieId]
-      });
-    }
     this.invalidateCache();
-    this.logger.info('radarr search queued', { imdbId, movieId: status.movieId, method: grabbed ? 'release_grab' : 'command_search' });
+    this.logger.info('radarr search queued', { imdbId, movieId: existing.id, commandId: command.id });
     return {
       ok: true,
       service: 'radarr',
-      title: 'Search triggered',
-      summary: grabbed ? 'Radarr release grabbed for download.' : 'Radarr movie search queued.'
+      title: 'Movie search queued',
+      summary: `Targeted search queued for ${existing.title}.`,
+      detail: policyDetail,
+      commandId: command.id
     };
   }
 
-  private async tryGrabTopRelease(movieId: number): Promise<boolean> {
-    try {
-      const releases = await this.http.get<RadarrReleaseRecord[]>(`/api/v3/release?movieId=${movieId}`);
-      const candidate = releases
-        .filter((item) => item.approved && !item.rejected && item.downloadAllowed !== false && item.guid && item.indexerId != null)
-        .sort((a, b) => (b.releaseWeight ?? Number.NEGATIVE_INFINITY) - (a.releaseWeight ?? Number.NEGATIVE_INFINITY))[0];
-      if (!candidate?.guid || candidate.indexerId == null) {
-        return false;
+  private async applyExistingMoviePolicy(existing: RadarrMovieRecord): Promise<string> {
+    const policy = this.config.radarr.existingItemPolicy;
+    if (policy === 'preserve') return 'Existing profile and monitoring settings were preserved.';
+
+    if (policy === 'extend') {
+      if (existing.monitored === false) {
+        await this.http.put('/api/v3/movie/editor', { movieIds: [existing.id], monitored: true });
+        return 'Existing profile was preserved; movie monitoring was enabled.';
       }
-      await this.http.post('/api/v3/release', {
-        guid: candidate.guid,
-        indexerId: candidate.indexerId,
-        movieId,
-        ...(candidate.downloadClientId != null ? { downloadClientId: candidate.downloadClientId } : {})
-      });
-      return true;
-    } catch {
-      return false;
+      return 'Existing profile and monitoring settings were preserved.';
     }
+
+    await this.http.put('/api/v3/movie/editor', {
+      movieIds: [existing.id],
+      monitored: true,
+      qualityProfileId: this.config.radarr.qualityProfileId,
+      minimumAvailability: this.config.radarr.minimumAvailability,
+      rootFolderPath: this.config.radarr.rootFolderPath,
+      tags: this.config.radarr.tags,
+      applyTags: 'replace',
+      moveFiles: false
+    });
+    return `Configured Radarr settings were applied (Profile ${this.config.radarr.qualityProfileId}).`;
   }
 
   invalidateCache(): void {

@@ -126,7 +126,7 @@ test('episode action tile shows every applicable scope label on one line', async
     const requestPath = parsed.pathname + parsed.search;
     if (requestPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
     if (requestPath === '/api/v3/series') {
-      return new Response('[{"id":10,"imdbId":"tt7654321","title":"Mock Show"}]', { status: 200 });
+      return new Response('[{"id":10,"imdbId":"tt7654321","title":"Mock Show","monitored":true,"qualityProfileId":4,"monitorNewItems":"all","seasons":[{"seasonNumber":2,"monitored":true}]}]', { status: 200 });
     }
     if (requestPath.startsWith('/api/v3/episode?seriesId=10')) {
       return new Response('[{"id":42,"seasonNumber":2,"episodeNumber":5,"monitored":true,"hasFile":false}]', { status: 200 });
@@ -141,7 +141,9 @@ test('episode action tile shows every applicable scope label on one line', async
     assert.equal(response.status, 200);
     const body = (await response.json()) as { streams: Array<{ description?: string }> };
     const lines = body.streams[0].description?.split('\n') ?? [];
-    assert.ok(lines.includes('📡: this (⥸3 / ⎗8 = +future) ❌new→✅new'));
+    assert.ok(lines.includes('🛡️: existing settings kept'));
+    assert.ok(lines.includes('📡: series on ep on ✅new'));
+    assert.ok(lines.includes('🎚️: Profile 4'));
     assert.equal(lines.filter((line) => line.startsWith('📡:')).length, 1);
   });
 });

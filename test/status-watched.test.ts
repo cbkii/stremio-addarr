@@ -92,7 +92,7 @@ test('movie downloaded description mentions WATCHED and stays within 5 lines', a
   const tiles = await service.buildTiles(parseStremioId('movie', 'tt1234567'));
   const lines = (tiles[0]?.description ?? '').split('\n');
   assert.ok(lines.some(l => l.includes('WATCHED')), 'description should mention WATCHED');
-  assert.ok(lines.length <= 5);
+  assert.ok(lines.length <= 7);
 });
 
 test('movie missing description mentions UNWATCHED and includes a search action', async () => {
@@ -117,7 +117,7 @@ test('movie missing description mentions UNWATCHED and includes a search action'
   const lines = (tiles[0]?.description ?? '').split('\n');
   assert.ok(lines.some(l => l.includes('UNWATCHED')), 'description should mention UNWATCHED');
   assert.ok(lines.some(l => l.includes('SEARCH')), 'description should include a search action prompt');
-  assert.ok(lines.length <= 5);
+  assert.ok(lines.length <= 7);
 });
 
 test('episode downloaded description mentions WATCHED and stays within 5 lines', async () => {
@@ -141,7 +141,7 @@ test('episode downloaded description mentions WATCHED and stays within 5 lines',
   const tiles = await service.buildTiles(parseStremioId('series', 'tt7654321:2:5'));
   const lines = (tiles[0]?.description ?? '').split('\n');
   assert.ok(lines.some(l => l.includes('WATCHED')), 'description should mention WATCHED');
-  assert.ok(lines.length <= 5);
+  assert.ok(lines.length <= 7);
 });
 
 test('episode missing description mentions UNWATCHED and includes a search action', async () => {
@@ -167,7 +167,7 @@ test('episode missing description mentions UNWATCHED and includes a search actio
   const lines = (tiles[0]?.description ?? '').split('\n');
   assert.ok(lines.some(l => l.includes('UNWATCHED')), 'description should mention UNWATCHED');
   assert.ok(lines.some(l => l.includes('SEARCH')), 'description should include a search action prompt');
-  assert.ok(lines.length <= 5);
+  assert.ok(lines.length <= 7);
 });
 
 test('shows ?📅 when neither Arr nor Trakt has a valid movie date', async () => {
@@ -345,7 +345,7 @@ test('series_not_added shows episode+date from Trakt in description', async () =
   const desc = tiles[0]?.description ?? '';
   assert.ok(desc.includes('Not in Sonarr'));
   assert.ok(desc.includes('S03E07 (22 Mar 24)'));
-  assert.ok(desc.split('\n').length <= 5);
+  assert.ok(desc.split('\n').length <= 7);
 });
 
 test('series_not_added shows episode identifier even when no date available', async () => {
@@ -369,7 +369,7 @@ test('series_not_added shows episode identifier even when no date available', as
   assert.ok(desc.includes('Not in Sonarr'));
   // Episode identifier always shown even without a date.
   assert.ok(desc.includes('S03E07'));
-  assert.ok(desc.split('\n').length <= 5);
+  assert.ok(desc.split('\n').length <= 7);
 });
 
 test('formats datetime release in configured TZ when possible', async () => {

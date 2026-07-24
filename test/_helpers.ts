@@ -54,7 +54,8 @@ export function baseConfig(): AppConfig {
       minimumAvailability: 'announced',
       tags: [],
       searchOnAdd: true,
-      strictImdbMatch: false
+      strictImdbMatch: false,
+      existingItemPolicy: 'preserve'
     },
     sonarr: {
       enabled: false,
@@ -66,13 +67,14 @@ export function baseConfig(): AppConfig {
       languageProfileId: null,
       seriesMonitor: 'all',
       monitorNewItems: 'auto',
-      episodeReadyTimeoutMs: 60_000,
-      episodeReadyPollMs: 1_500,
+      episodeReadyTimeoutMs: 1_000,
+      episodeReadyPollMs: 250,
       epCount: 2,
       epCountPast: 8,
       epCountMod: 'epfuture',
       tags: [],
-      searchOnAdd: true
+      searchOnAdd: true,
+      existingItemPolicy: 'preserve'
     },
     traktSync: {
       enabled: false,
