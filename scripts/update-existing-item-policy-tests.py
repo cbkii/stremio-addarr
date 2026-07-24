@@ -21,6 +21,14 @@ def replace_once(path: str, old: str, new: str) -> None:
     write(path, text.replace(old, new, 1))
 
 
+def replace_first(path: str, old: str, new: str) -> None:
+    text = read(path)
+    count = text.count(old)
+    if count < 1:
+        raise SystemExit(f'{path}: expected at least one occurrence, found {count}: {old[:100]!r}')
+    write(path, text.replace(old, new, 1))
+
+
 def sub_once(path: str, pattern: str, replacement: str) -> None:
     text = read(path)
     updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
@@ -124,13 +132,15 @@ test('triggerEpisodeSearch fails when Sonarr omits the command id', async () => 
 test('queue failure""",
 )
 
-# Action route mocks must return real Arr command acknowledgements.
-replace_once(
+# Action route mocks must return real Arr command acknowledgements. The first
+# two fixtures intentionally share the same original text and are migrated in
+# order, so each operation only requires that one occurrence remains.
+replace_first(
     'test/app-routes.test.ts',
     "      return new Response('{}', { status: 201 });\n    }\n    if (path === '/api/v3/system/status') {",
     "      return new Response('{\"id\":1001,\"name\":\"MoviesSearch\",\"status\":\"queued\"}', { status: 201 });\n    }\n    if (path === '/api/v3/system/status') {",
 )
-replace_once(
+replace_first(
     'test/app-routes.test.ts',
     "      return new Response('{}', { status: 201 });\n    }\n    if (path === '/api/v3/system/status') {",
     "      return new Response('{\"id\":2001,\"name\":\"EpisodeSearch\",\"status\":\"queued\"}', { status: 201 });\n    }\n    if (path === '/api/v3/system/status') {",
