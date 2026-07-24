@@ -29,6 +29,14 @@ def sub_once(path: str, pattern: str, replacement: str) -> None:
     write(path, updated)
 
 
+# Normal PR CI runs before the main one-shot source transformation. Leave the
+# temporary lifecycle hook in place until the implementation job has added the
+# policy type, then perform and self-remove the legacy test migration.
+if "export type ExistingItemPolicy" not in read('src/config.ts'):
+    print('Existing-item implementation is not applied yet; test migration skipped.')
+    raise SystemExit(0)
+
+
 sub_once(
     'test/sonarr.test.ts',
     r"test\('triggerEpisodeSearch posts EpisodeSearch command'.*?\n\}\);\n\ntest\('queue failure",
