@@ -317,14 +317,25 @@ export class RadarrClient {
       };
     }
 
-    const policyDetail = options.existingBeforeAction === false
-      ? 'Configured settings applied to the new movie.'
-      : await this.applyExistingMoviePolicy(existing);
-
-    const command = await this.http.post<ArrCommandResponse>('/api/v3/command', {
-      name: 'MoviesSearch',
-      movieIds: [existing.id]
-    });
+    let policyDetail: string;
+    let command: ArrCommandResponse;
+    try {
+      policyDetail = options.existingBeforeAction === false
+        ? 'Configured settings applied to the new movie.'
+        : await this.applyExistingMoviePolicy(existing);
+      command = await this.http.post<ArrCommandResponse>('/api/v3/command', {
+        name: 'MoviesSearch',
+        movieIds: [existing.id]
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        service: 'radarr',
+        title: 'Radarr action failed',
+        summary: error instanceof Error ? error.message : 'Radarr rejected the movie policy or search request.',
+        detail: existing.title
+      };
+    }
     const commandName = command?.name?.trim().toLowerCase();
     if (!Number.isInteger(command?.id) || Number(command.id) <= 0 || (commandName != null && commandName !== 'moviessearch')) {
       return {

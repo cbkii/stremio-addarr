@@ -287,3 +287,48 @@ test('Sonarr rejects a command acknowledgement for the wrong command name', asyn
   assert.equal(result.ok, false);
   assert.match(result.summary, /EpisodeSearch acknowledgement/i);
 });
+
+
+test('Radarr command transport failure returns a structured action result', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/movie') return [{ id: 70, imdbId: 'tt70', title: 'Offline Movie', monitored: true }] as T;
+      if (path === '/api/v3/qualityprofile') return [] as T;
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(): Promise<T> { throw new Error('radarr command transport failed'); },
+    async put<T>(): Promise<T> { return {} as T; }
+  };
+
+  const result = await new RadarrClient(cfg, http as never).triggerMovieSearch('tt70');
+  assert.equal(result.ok, false);
+  assert.equal(result.service, 'radarr');
+  assert.equal(result.title, 'Radarr action failed');
+  assert.match(result.summary, /command transport failed/i);
+});
+
+test('Sonarr policy mutation failure returns a structured action result', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.existingItemPolicy = 'apply-config';
+  cfg.sonarr.seriesMonitor = 'ep';
+  cfg.sonarr.episodeReadyPollMs = 1;
+  cfg.sonarr.episodeReadyTimeoutMs = 20;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') return [{ id: 80, imdbId: 'tt80', title: 'Policy Failure Show', monitored: true }] as T;
+      if (path === '/api/v3/episode?seriesId=80') return [{ id: 801, seasonNumber: 1, episodeNumber: 1, monitored: true }] as T;
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(): Promise<T> { return { id: 800, name: 'EpisodeSearch' } as T; },
+    async put<T>(): Promise<T> { throw new Error('sonarr policy mutation failed'); }
+  };
+
+  const result = await new SonarrClient(cfg, http as never).triggerEpisodeSearch('tt80', 1, 1);
+  assert.equal(result.ok, false);
+  assert.equal(result.service, 'sonarr');
+  assert.equal(result.title, 'Sonarr action failed');
+  assert.match(result.summary, /policy mutation failed/i);
+});

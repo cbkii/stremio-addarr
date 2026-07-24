@@ -444,7 +444,18 @@ export class SonarrClient {
     }
     if (!series) return { ok: false, service: 'sonarr', title: 'Not in Sonarr', summary: 'Series is not added yet.' };
 
-    const exact = await this.waitForEpisode(series.id, season, episode);
+    let exact: SonarrEpisodeRecord | undefined;
+    try {
+      exact = await this.waitForEpisode(series.id, season, episode);
+    } catch (error) {
+      return {
+        ok: false,
+        service: 'sonarr',
+        title: 'Sonarr action failed',
+        summary: error instanceof Error ? error.message : 'Sonarr could not resolve the exact episode.',
+        detail: `${series.title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
+      };
+    }
     if (!exact) {
       return {
         ok: false,
@@ -457,14 +468,25 @@ export class SonarrClient {
       return { ok: true, service: 'sonarr', title: 'Already downloaded', summary: 'Episode file already exists.', detail: series.title, alreadyExisted: true };
     }
 
-    const policyDetail = options.existingBeforeAction === false
-      ? 'Configured settings applied to the new series.'
-      : await this.applyExistingSeriesPolicy(imdbId, series, exact, season, episode);
-
-    const command = await this.http.post<ArrCommandResponse>('/api/v3/command', {
-      name: 'EpisodeSearch',
-      episodeIds: [exact.id]
-    });
+    let policyDetail: string;
+    let command: ArrCommandResponse;
+    try {
+      policyDetail = options.existingBeforeAction === false
+        ? 'Configured settings applied to the new series.'
+        : await this.applyExistingSeriesPolicy(imdbId, series, exact, season, episode);
+      command = await this.http.post<ArrCommandResponse>('/api/v3/command', {
+        name: 'EpisodeSearch',
+        episodeIds: [exact.id]
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        service: 'sonarr',
+        title: 'Sonarr action failed',
+        summary: error instanceof Error ? error.message : 'Sonarr rejected the series policy or episode search request.',
+        detail: `${series.title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
+      };
+    }
     const commandName = command?.name?.trim().toLowerCase();
     if (!Number.isInteger(command?.id) || Number(command.id) <= 0 || (commandName != null && commandName !== 'episodesearch')) {
       return {
