@@ -20,11 +20,11 @@ if [[ "$status" != "0" ]]; then
     echo 'Existing-item policy implementation validation failed.'
     echo
     tail -n 400 "$log_file"
-  } > validation-error.log
+  } > validation-error.txt
 
   git config user.name 'github-actions[bot]'
   git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-  git add validation-error.log
+  git add -f validation-error.txt
   git commit -m 'chore: capture existing-item validation failure [skip ci]'
   git push origin HEAD:agent/preserve-existing-arr-settings
   exit "$status"
