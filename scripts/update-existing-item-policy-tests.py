@@ -156,6 +156,15 @@ replace_once(
     "signedActionUrl(baseUrl, cfg, 'add-search', 'series', 'tt1111111:1:1')",
 )
 
+# The exact-search implementation can legitimately poll for a newly created
+# episode. Keep production defaults unchanged while ensuring mock failures are
+# bounded and deterministic.
+replace_once(
+    'test/_helpers.ts',
+    "      episodeReadyTimeoutMs: 60_000,\n      episodeReadyPollMs: 1_500,",
+    "      episodeReadyTimeoutMs: 100,\n      episodeReadyPollMs: 1,",
+)
+
 # This script is invoked once through npm's `preci` lifecycle and removes its
 # temporary lifecycle hook before the implementation commit is created.
 package_path = Path('package.json')
