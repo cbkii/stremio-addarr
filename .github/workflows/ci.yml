@@ -258,7 +258,7 @@ jobs:
 
   # BEGIN ONE-SHOT EXISTING ITEM POLICY IMPLEMENTATION
   implement-existing-item-policy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/agent/preserve-existing-arr-settings'
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/preserve-existing-arr-settings'
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 20
