@@ -14,7 +14,6 @@
     "start": "node dist/src/index.js",
     "test": "tsx --test --test-reporter=spec test/*.test.ts",
     "test:catalog": "tsx --test --test-name-pattern=catalog test/catalog.test.ts test/addon.test.ts",
-    "preci": "python3 scripts/diagnose-existing-item-finalization.py",
     "ci": "npm run typecheck && npm test && npm run build && npm run lint:manifest",
     "package:release": "node scripts/package-release.mjs",
     "lint:manifest": "node scripts/lint-manifest.mjs"

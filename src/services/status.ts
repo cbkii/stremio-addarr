@@ -436,8 +436,16 @@ export class ArrStatusService {
       return added;
     }
     const searched = parsed.kind === 'movie'
-      ? await this.radarr.triggerMovieSearch(parsed.imdbId, { existingBeforeAction: added.alreadyExisted === true })
-      : await this.sonarr.triggerEpisodeSearch(parsed.imdbId, parsed.season, parsed.episode, { existingBeforeAction: added.alreadyExisted === true });
+      ? await this.radarr.triggerMovieSearch(parsed.imdbId, {
+        existingBeforeAction: added.alreadyExisted === true,
+        knownMovieId: added.itemId,
+        knownTitle: added.detail
+      })
+      : await this.sonarr.triggerEpisodeSearch(parsed.imdbId, parsed.season, parsed.episode, {
+        existingBeforeAction: added.alreadyExisted === true,
+        knownSeriesId: added.itemId,
+        knownTitle: added.detail
+      });
     this.invalidateStatusCaches();
     return searched.ok
       ? { ...searched, title: added.alreadyExisted ? searched.title : 'Added + search triggered' }

@@ -11,7 +11,6 @@ import type {
   RadarrHistoryRecord,
   RadarrLookupRecord,
   RadarrMovieRecord,
-  RadarrReleaseRecord,
   RadarrQueueRecord
 } from '../types.js';
 
@@ -172,7 +171,8 @@ export class RadarrClient {
         title: 'Already in Radarr',
         summary: existing.hasFile || existing.movieFile ? 'Movie is already downloaded.' : 'Movie is already added.',
         detail: `${existing.title}${profile ? ` · ${profile}` : ''}`,
-        alreadyExisted: true
+        alreadyExisted: true,
+        itemId: existing.id
       };
     }
 
@@ -243,8 +243,9 @@ export class RadarrClient {
       }
     };
 
+    let created: RadarrMovieRecord;
     try {
-      await this.http.post('/api/v3/movie', payload);
+      created = await this.http.post<RadarrMovieRecord>('/api/v3/movie', payload);
     } catch (error) {
       if (
         error instanceof HttpError &&
@@ -279,18 +280,21 @@ export class RadarrClient {
       service: 'radarr',
       title: 'Added to Radarr',
       summary: 'Movie added.',
-      detail: match.title
+      detail: match.title,
+      itemId: created?.id
     };
   }
 
   async triggerMovieSearch(
     imdbId: string,
-    options: { existingBeforeAction?: boolean } = { existingBeforeAction: true }
+    options: { existingBeforeAction?: boolean; knownMovieId?: number; knownTitle?: string } = { existingBeforeAction: true }
   ): Promise<AddActionResult> {
     this.logger.info('radarr search start', { imdbId });
-    let existing: RadarrMovieRecord | undefined;
+    let existing: RadarrMovieRecord | undefined = options.knownMovieId != null
+      ? { id: options.knownMovieId, imdbId, title: options.knownTitle ?? imdbId }
+      : undefined;
     try {
-      existing = await this.findMovieByImdbId(imdbId, true);
+      existing ??= await this.findMovieByImdbId(imdbId, true);
     } catch (error) {
       return {
         ok: false,
@@ -366,27 +370,6 @@ export class RadarrClient {
       moveFiles: false
     });
     return `Configured Radarr settings were applied (Profile ${this.config.radarr.qualityProfileId}).`;
-  }
-
-  private async tryGrabTopRelease(movieId: number): Promise<boolean> {
-    try {
-      const releases = await this.http.get<RadarrReleaseRecord[]>(`/api/v3/release?movieId=${movieId}`);
-      const candidate = releases
-        .filter((item) => item.approved && !item.rejected && item.downloadAllowed !== false && item.guid && item.indexerId != null)
-        .sort((a, b) => (b.releaseWeight ?? Number.NEGATIVE_INFINITY) - (a.releaseWeight ?? Number.NEGATIVE_INFINITY))[0];
-      if (!candidate?.guid || candidate.indexerId == null) {
-        return false;
-      }
-      await this.http.post('/api/v3/release', {
-        guid: candidate.guid,
-        indexerId: candidate.indexerId,
-        movieId,
-        ...(candidate.downloadClientId != null ? { downloadClientId: candidate.downloadClientId } : {})
-      });
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   invalidateCache(): void {

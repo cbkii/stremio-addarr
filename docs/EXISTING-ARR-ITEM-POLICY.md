@@ -232,14 +232,14 @@ Avoid duplicate and broad searches.
 ### Radarr
 
 - add with `searchForMovie: false` for an add-and-search tile;
-- resolve the created/existing movie record;
-- queue one explicit `MoviesSearch` for the exact movie ID.
+- retain the movie ID returned by the add response rather than waiting for list-cache visibility;
+- queue one explicit `MoviesSearch` for that exact movie ID.
 
 ### Sonarr
 
 - add with `searchForMissingEpisodes: false` and `searchForCutoffUnmetEpisodes: false` for an episode add-and-search tile;
 - apply configured monitoring to the new series;
-- wait for exact episode metadata;
+- retain the series ID returned by the add response, then wait for exact episode metadata;
 - queue one explicit `EpisodeSearch` for the exact episode ID.
 
 ## API source verification

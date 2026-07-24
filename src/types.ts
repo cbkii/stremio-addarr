@@ -74,6 +74,7 @@ export interface AddActionResult {
   detail?: string;
   alreadyExisted?: boolean;
   commandId?: number;
+  itemId?: number;
 }
 
 export interface ArrCommandResponse {

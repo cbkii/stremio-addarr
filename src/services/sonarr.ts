@@ -11,7 +11,6 @@ import type {
   SonarrHistoryRecord,
   SonarrLookupRecord,
   SonarrQueueRecord,
-  SonarrReleaseRecord,
   SonarrSeriesRecord
 } from '../types.js';
 
@@ -170,7 +169,8 @@ export class SonarrClient {
         title: 'Already in Sonarr',
         summary: 'Series is already added to Sonarr.',
         detail: current.title,
-        alreadyExisted: true
+        alreadyExisted: true,
+        itemId: current.id
       };
     }
 
@@ -228,8 +228,9 @@ export class SonarrClient {
       }
     };
 
+    let created: SonarrSeriesRecord;
     try {
-      await this.http.post('/api/v3/series', payload);
+      created = await this.http.post<SonarrSeriesRecord>('/api/v3/series', payload);
     } catch (error) {
       if (
         error instanceof HttpError &&
@@ -255,7 +256,8 @@ export class SonarrClient {
         imdbId,
         opts!.season!,
         opts!.episode!,
-        monitorMode
+        monitorMode,
+        created?.id
       );
       if (!applied.ok) {
         return applied.result;
@@ -268,7 +270,8 @@ export class SonarrClient {
       service: 'sonarr',
       title: 'Added to Sonarr',
       summary: 'Series added.',
-      detail: lookup.title
+      detail: lookup.title,
+      itemId: created?.id
     };
   }
 
@@ -276,10 +279,13 @@ export class SonarrClient {
     imdbId: string,
     season: number,
     episode: number,
-    mode: 'ep' | 'epfuture' | 'epseason'
+    mode: 'ep' | 'epfuture' | 'epseason',
+    knownSeriesId?: number
   ): Promise<{ ok: true } | { ok: false; result: AddActionResult }> {
     const startedAt = Date.now();
-    let series: SonarrSeriesRecord | undefined;
+    let series: SonarrSeriesRecord | undefined = knownSeriesId != null
+      ? { id: knownSeriesId, imdbId, title: imdbId }
+      : undefined;
     while (!series && (Date.now() - startedAt) < this.config.sonarr.episodeReadyTimeoutMs) {
       series = await this.findSeriesByImdbId(imdbId);
       if (!series) {
@@ -416,7 +422,7 @@ export class SonarrClient {
     imdbId: string,
     season?: number,
     episode?: number,
-    options: { existingBeforeAction?: boolean } = { existingBeforeAction: true }
+    options: { existingBeforeAction?: boolean; knownSeriesId?: number; knownTitle?: string } = { existingBeforeAction: true }
   ): Promise<AddActionResult> {
     this.logger.info('sonarr search start', { imdbId, season, episode });
     if (season == null || episode == null) {
@@ -428,9 +434,11 @@ export class SonarrClient {
       };
     }
 
-    let series: SonarrSeriesRecord | undefined;
+    let series: SonarrSeriesRecord | undefined = options.knownSeriesId != null
+      ? { id: options.knownSeriesId, imdbId, title: options.knownTitle ?? imdbId }
+      : undefined;
     try {
-      series = await this.findSeriesByImdbId(imdbId, true);
+      series ??= await this.findSeriesByImdbId(imdbId, true);
     } catch (error) {
       return { ok: false, service: 'sonarr', title: 'Sonarr unavailable', summary: error instanceof Error ? error.message : 'Sonarr lookup failed.' };
     }
@@ -717,41 +725,6 @@ export class SonarrClient {
       `/api/v3/series/lookup?term=${encodeURIComponent(`imdb:${imdbId}`)}`
     );
     return results.find((item) => item.imdbId === imdbId) ?? results[0] ?? null;
-  }
-
-  private async tryGrabTopRelease(
-    seriesId: number | undefined,
-    episodeId: number | undefined,
-    season?: number
-  ): Promise<boolean> {
-    if (!seriesId) {
-      return false;
-    }
-    const params = new URLSearchParams({ seriesId: String(seriesId) });
-    if (season != null) {
-      params.set('seasonNumber', String(season));
-    }
-    if (episodeId != null) {
-      params.set('episodeId', String(episodeId));
-    }
-    try {
-      const releases = await this.http.get<SonarrReleaseRecord[]>(`/api/v3/release?${params.toString()}`);
-      const candidate = releases
-        .filter((item) => item.approved && !item.rejected && item.downloadAllowed !== false && item.guid && item.indexerId != null)
-        .sort((a, b) => (b.releaseWeight ?? Number.NEGATIVE_INFINITY) - (a.releaseWeight ?? Number.NEGATIVE_INFINITY))[0];
-      if (!candidate?.guid || candidate.indexerId == null) {
-        return false;
-      }
-      await this.http.post('/api/v3/release', {
-        guid: candidate.guid,
-        indexerId: candidate.indexerId,
-        ...(episodeId ? { episodeIds: [episodeId] } : { seriesId }),
-        ...(candidate.downloadClientId != null ? { downloadClientId: candidate.downloadClientId } : {})
-      });
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   async ping(): Promise<{ reachable: boolean; detail?: string }> {

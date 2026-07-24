@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { RadarrClient } from '../src/services/radarr.js';
 import { SonarrClient } from '../src/services/sonarr.js';
 import { baseConfig } from './_helpers.js';
 
