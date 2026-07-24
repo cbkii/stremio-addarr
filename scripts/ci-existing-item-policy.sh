@@ -13,31 +13,20 @@ status=${PIPESTATUS[0]}
 set -e
 
 if [[ "$status" != "0" ]]; then
-  if [[ -n "${GH_TOKEN:-}" ]] && command -v gh >/dev/null 2>&1; then
-    current_body="$(gh pr view 76 --repo cbkii/stremio-addarr --json body --jq .body)"
-    CURRENT_BODY="$current_body" LOG_FILE="$log_file" python3 - <<'PY'
-from pathlib import Path
-import os
+  # Commit only the validation output. The transformed implementation remains
+  # unstaged in this failed runner, so the branch still contains reviewable
+  # scaffolding plus a deterministic diagnostic artefact.
+  {
+    echo 'Existing-item policy implementation validation failed.'
+    echo
+    tail -n 400 "$log_file"
+  } > validation-error.log
 
-start = '<!-- existing-item-validation-start -->'
-end = '<!-- existing-item-validation-end -->'
-body = os.environ['CURRENT_BODY']
-if start in body and end in body:
-    before, remainder = body.split(start, 1)
-    _, after = remainder.split(end, 1)
-    body = before.rstrip() + '\n\n' + after.lstrip()
-lines = Path(os.environ['LOG_FILE']).read_text(errors='replace').splitlines()[-220:]
-diagnostic = (
-    f"{start}\n"
-    "## Current implementation validation failure\n\n"
-    "```text\n"
-    + '\n'.join(lines)
-    + f"\n```\n{end}"
-)
-Path('/tmp/pr-76-body.md').write_text(body.rstrip() + '\n\n' + diagnostic + '\n')
-PY
-    gh pr edit 76 --repo cbkii/stremio-addarr --body-file /tmp/pr-76-body.md || true
-  fi
+  git config user.name 'github-actions[bot]'
+  git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+  git add validation-error.log
+  git commit -m 'chore: capture existing-item validation failure [skip ci]'
+  git push origin HEAD:agent/preserve-existing-arr-settings
   exit "$status"
 fi
 
