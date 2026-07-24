@@ -11,11 +11,17 @@ if 'export type ExistingItemPolicy' not in config_path.read_text(encoding='utf-8
 
 helper_path = Path('scripts/update-existing-item-policy-tests.py')
 helper = helper_path.read_text(encoding='utf-8')
-old = 'assert.equal(payload.addOptions.searchForMissingEpisodes, true);'
-new = 'assert.equal(addOptions.searchForMissingEpisodes, true);'
-if helper.count(old) != 1:
-    raise SystemExit(f'expected exactly one stale Sonarr addOptions assertion, found {helper.count(old)}')
-helper_path.write_text(helper.replace(old, new, 1), encoding='utf-8')
+replacements = {
+    'assert.equal(payload.addOptions.searchForMissingEpisodes, true);':
+        'assert.equal(addOptions.searchForMissingEpisodes, true);',
+    'assert.equal(payload.addOptions.searchForMissingEpisodes, false);':
+        'assert.equal(addOptions.searchForMissingEpisodes, false);',
+}
+for old, new in replacements.items():
+    if helper.count(old) != 1:
+        raise SystemExit(f'expected exactly one stale Sonarr addOptions assertion, found {helper.count(old)}: {old}')
+    helper = helper.replace(old, new, 1)
+helper_path.write_text(helper, encoding='utf-8')
 
 package_path = Path('package.json')
 package = json.loads(package_path.read_text(encoding='utf-8'))
