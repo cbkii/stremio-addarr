@@ -298,6 +298,11 @@ jobs:
           set -e
           if [[ "$status" != "0" ]]; then
             {
+              echo 'Existing-item policy implementation validation failed.'
+              echo
+              tail -n 500 "$RUNNER_TEMP/existing-item-validation.log"
+            } > validation-error.txt
+            {
               echo '### Existing-item policy validation failure'
               echo
               echo '```text'
