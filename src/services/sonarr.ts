@@ -4,7 +4,9 @@ import { HttpError, HttpTimeoutError, JsonHttpClient } from '../lib/http.js';
 import { createLogger } from '../logger.js';
 import type {
   AddActionResult,
+  ArrCommandResponse,
   ArrEpisodeStatus,
+  ArrQualityProfile,
   SonarrEpisodeRecord,
   SonarrHistoryRecord,
   SonarrLookupRecord,
@@ -16,6 +18,7 @@ import type {
 interface SeriesSnapshot {
   series: SonarrSeriesRecord[];
   byImdbId: Map<string, SonarrSeriesRecord>;
+  byTvdbId: Map<number, SonarrSeriesRecord>;
 }
 
 export class SonarrClient {
@@ -24,6 +27,7 @@ export class SonarrClient {
   private readonly seriesSnapshotCache: AsyncTtlCache<SeriesSnapshot>;
   private readonly episodeCache: AsyncTtlCache<SonarrEpisodeRecord[]>;
   private readonly queueCache: AsyncTtlCache<SonarrQueueRecord[]>;
+  private readonly qualityProfileCache: AsyncTtlCache<ArrQualityProfile[]>;
 
   constructor(
     private readonly config: AppConfig,
@@ -42,19 +46,32 @@ export class SonarrClient {
     this.seriesSnapshotCache = new AsyncTtlCache<SeriesSnapshot>(config.statusCacheTtlMs);
     this.episodeCache = new AsyncTtlCache<SonarrEpisodeRecord[]>(config.statusCacheTtlMs);
     this.queueCache = new AsyncTtlCache<SonarrQueueRecord[]>(Math.max(1000, Math.floor(config.statusCacheTtlMs / 3)));
+    this.qualityProfileCache = new AsyncTtlCache<ArrQualityProfile[]>(Math.max(config.statusCacheTtlMs, 60_000));
   }
 
   private async getSeriesSnapshot(): Promise<SeriesSnapshot> {
     return this.seriesSnapshotCache.getOrSet('snapshot', async () => {
       const series = await this.http.get<SonarrSeriesRecord[]>('/api/v3/series');
       const byImdbId = new Map<string, SonarrSeriesRecord>();
-      for (const s of series) {
-        if (s.imdbId) {
-          byImdbId.set(s.imdbId, s);
-        }
+      const byTvdbId = new Map<number, SonarrSeriesRecord>();
+      for (const item of series) {
+        if (item.imdbId) byImdbId.set(item.imdbId.toLowerCase(), item);
+        if (item.tvdbId != null) byTvdbId.set(item.tvdbId, item);
       }
-      return { series, byImdbId };
+      return { series, byImdbId, byTvdbId };
     });
+  }
+
+  private async qualityProfileName(profileId?: number): Promise<string | undefined> {
+    if (profileId == null) return undefined;
+    try {
+      const profiles = await this.qualityProfileCache.getOrSet('profiles', () =>
+        this.http.get<ArrQualityProfile[]>('/api/v3/qualityprofile')
+      );
+      return profiles.find((profile) => profile.id === profileId)?.name ?? `Profile ${profileId}`;
+    } catch {
+      return `Profile ${profileId}`;
+    }
   }
 
   private async sleep(ms: number): Promise<void> {
@@ -73,81 +90,51 @@ export class SonarrClient {
   }
 
   async getEpisodeStatus(imdbId: string, season?: number, episode?: number): Promise<ArrEpisodeStatus> {
-    if (!this.config.sonarr.enabled) {
-      return { state: 'unavailable', reason: 'Sonarr is disabled.' };
-    }
+    if (!this.config.sonarr.enabled) return { state: 'unavailable', reason: 'Sonarr is disabled.' };
 
     try {
       const series = await this.findSeriesByImdbId(imdbId);
-      if (!series) {
-        return { state: 'series_not_added' };
-      }
-
-      if (season == null || episode == null) {
-        return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, title: series.title };
-      }
+      if (!series) return { state: 'series_not_added' };
+      const qualityProfileName = await this.qualityProfileName(series.qualityProfileId);
+      const common = {
+        seriesId: series.id,
+        seriesMonitored: Boolean(series.monitored),
+        monitored: Boolean(series.monitored),
+        title: series.title,
+        qualityProfileId: series.qualityProfileId,
+        qualityProfileName,
+        monitorNewItems: series.monitorNewItems,
+        existingItemPolicy: this.config.sonarr.existingItemPolicy,
+        seasonMonitored: season == null ? undefined : series.seasons?.find((item) => item.seasonNumber === season)?.monitored
+      };
+      if (season == null || episode == null) return { state: 'series_added', ...common };
 
       const episodes = await this.listEpisodes(series.id);
-      const match = episodes.find(
-        (item) => item.seasonNumber === season && item.episodeNumber === episode
-      );
+      const match = episodes.find((item) => item.seasonNumber === season && item.episodeNumber === episode);
       const episodeReleaseDate = this.pickEpisodeReleaseDate(match?.airDateUtc, match?.airDate);
-
-      if (!match) {
-        return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, reason: 'Episode not found in Sonarr yet.', title: series.title };
-      }
+      if (!match) return { state: 'series_added', ...common, reason: 'Episode not found in Sonarr yet.' };
+      const episodeCommon = { ...common, episodeId: match.id, monitored: Boolean(match.monitored), episodeReleaseDate };
 
       if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
         const rawFileName = match.episodeFile?.relativePath ?? match.episodeFile?.path;
-        const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
+        const fileName = rawFileName ? rawFileName.split(/[\/]/).pop() : undefined;
         return {
           state: 'episode_downloaded',
-          seriesId: series.id,
-          episodeId: match.id,
+          ...episodeCommon,
           episodeFileId: match.episodeFileId,
-          monitored: match.monitored,
           hasFile: true,
-          title: series.title,
-          episodeReleaseDate,
           fileName,
           fileSizeBytes: match.episodeFile?.size
         };
       }
 
       let isDownloading = false;
-      try {
-        isDownloading = await this.isEpisodeQueued(match.id, series.id);
-      } catch {
-        isDownloading = false;
-      }
-      if (isDownloading) {
-        return {
-          state: 'episode_downloading',
-          seriesId: series.id,
-          episodeId: match.id,
-          monitored: match.monitored,
-          hasFile: false,
-          title: series.title,
-          episodeReleaseDate
-        };
-      }
-      if (match.monitored) {
-        return {
-          state: 'episode_missing',
-          seriesId: series.id,
-          episodeId: match.id,
-          monitored: true,
-          hasFile: false,
-          title: series.title,
-          episodeReleaseDate
-        };
-      }
-      return { state: 'series_added', seriesId: series.id, monitored: !!series.monitored, hasFile: false, title: series.title };
+      try { isDownloading = await this.isEpisodeQueued(match.id, series.id); } catch { isDownloading = false; }
+      if (isDownloading) return { state: 'episode_downloading', ...episodeCommon, hasFile: false };
+      if (match.monitored) return { state: 'episode_missing', ...episodeCommon, monitored: true, hasFile: false };
+      return { state: 'series_added', ...episodeCommon, monitored: false, hasFile: false };
     } catch (error) {
-      return {
-        state: 'unavailable',
-        reason: error instanceof Error ? error.message : 'Unknown Sonarr error.'
-      };
+      return { state: 'unavailable', reason: error instanceof Error ? error.message : 'Unknown Sonarr error.' };
     }
   }
 
@@ -174,7 +161,7 @@ export class SonarrClient {
     }
 
     this.logger.info('sonarr add start', { imdbId });
-    const current = await this.findSeriesByImdbId(imdbId);
+    const current = await this.findSeriesByImdbId(imdbId, true);
     if (current) {
       this.logger.info('sonarr add skipped', { imdbId, reason: 'already_exists', title: current.title });
       return {
@@ -236,7 +223,7 @@ export class SonarrClient {
       tags: this.config.sonarr.tags,
       addOptions: {
         monitor: addMonitor,
-        searchForMissingEpisodes: this.config.sonarr.searchOnAdd,
+        searchForMissingEpisodes: false,
         searchForCutoffUnmetEpisodes: false
       }
     };
@@ -275,12 +262,12 @@ export class SonarrClient {
       }
     }
 
-    this.logger.info('sonarr add success', { imdbId, title: lookup.title, searchOnAdd: this.config.sonarr.searchOnAdd });
+    this.logger.info('sonarr add success', { imdbId, title: lookup.title, searchOnAdd: false });
     return {
       ok: true,
       service: 'sonarr',
       title: 'Added to Sonarr',
-      summary: this.config.sonarr.searchOnAdd ? 'Series added and search triggered.' : 'Series added.',
+      summary: 'Series added.',
       detail: lookup.title
     };
   }
@@ -425,103 +412,175 @@ export class SonarrClient {
     return 'ep';
   }
 
-  async triggerEpisodeSearch(imdbId: string, season?: number, episode?: number): Promise<AddActionResult> {
+  async triggerEpisodeSearch(
+    imdbId: string,
+    season?: number,
+    episode?: number,
+    options: { existingBeforeAction?: boolean } = { existingBeforeAction: true }
+  ): Promise<AddActionResult> {
     this.logger.info('sonarr search start', { imdbId, season, episode });
-    const status = await this.getEpisodeStatus(imdbId, season, episode);
-    if (status.state === 'unavailable') {
-      this.logger.warn('sonarr search failed', { imdbId, reason: 'unavailable' });
+    if (season == null || episode == null) {
       return {
         ok: false,
         service: 'sonarr',
-        title: 'Sonarr unavailable',
-        summary: status.reason ?? 'Sonarr status check failed.'
+        title: 'Exact episode required',
+        summary: 'This action requires a season and episode number; no broad series search was started.'
       };
     }
-    if (status.state === 'series_not_added') {
-      this.logger.warn('sonarr search failed', { imdbId, reason: 'not_added' });
+
+    let series: SonarrSeriesRecord | undefined;
+    try {
+      series = await this.findSeriesByImdbId(imdbId, true);
+    } catch (error) {
+      return { ok: false, service: 'sonarr', title: 'Sonarr unavailable', summary: error instanceof Error ? error.message : 'Sonarr lookup failed.' };
+    }
+    if (!series) return { ok: false, service: 'sonarr', title: 'Not in Sonarr', summary: 'Series is not added yet.' };
+
+    const exact = await this.waitForEpisode(series.id, season, episode);
+    if (!exact) {
       return {
         ok: false,
         service: 'sonarr',
-        title: 'Not in Sonarr',
-        summary: 'Series is not added yet.'
+        title: 'Episode not ready',
+        summary: `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')} did not appear in Sonarr before the readiness timeout. No broad search was started.`
       };
     }
-    if (status.state === 'episode_downloaded') {
-      this.logger.info('sonarr search skipped', { imdbId, reason: 'already_downloaded' });
+    if (exact.hasFile || (exact.episodeFileId ?? 0) > 0) {
+      return { ok: true, service: 'sonarr', title: 'Already downloaded', summary: 'Episode file already exists.', detail: series.title, alreadyExisted: true };
+    }
+
+    const policyDetail = options.existingBeforeAction === false
+      ? 'Configured settings applied to the new series.'
+      : await this.applyExistingSeriesPolicy(imdbId, series, exact, season, episode);
+
+    const command = await this.http.post<ArrCommandResponse>('/api/v3/command', {
+      name: 'EpisodeSearch',
+      episodeIds: [exact.id]
+    });
+    if (!Number.isInteger(command?.id) || Number(command.id) <= 0) {
       return {
-        ok: true,
+        ok: false,
         service: 'sonarr',
-        title: 'Already downloaded',
-        summary: 'Episode file already exists.',
-        alreadyExisted: true
+        title: 'Search was not accepted',
+        summary: 'Sonarr did not return a valid command acknowledgement.',
+        detail: `${series.title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
       };
+    }
+
+    this.invalidateCache();
+    return {
+      ok: true,
+      service: 'sonarr',
+      title: 'Episode search queued',
+      summary: `Targeted search queued for ${series.title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}.`,
+      detail: policyDetail,
+      commandId: command.id
+    };
+  }
+
+  private async waitForEpisode(seriesId: number, season: number, episode: number): Promise<SonarrEpisodeRecord | undefined> {
+    const startedAt = Date.now();
+    while ((Date.now() - startedAt) < this.config.sonarr.episodeReadyTimeoutMs) {
+      const episodes = await this.listEpisodes(seriesId);
+      const exact = episodes.find((item) => item.seasonNumber === season && item.episodeNumber === episode);
+      if (exact) return exact;
+      this.episodeCache.clear();
+      await this.sleep(this.config.sonarr.episodeReadyPollMs);
+    }
+    return undefined;
+  }
+
+  private async applyExistingSeriesPolicy(
+    imdbId: string,
+    series: SonarrSeriesRecord,
+    exact: SonarrEpisodeRecord,
+    season: number,
+    episode: number
+  ): Promise<string> {
+    const policy = this.config.sonarr.existingItemPolicy;
+    if (policy === 'preserve') return 'Existing profile and monitoring settings were preserved.';
+
+    if (policy === 'extend') {
+      if (!series.monitored) {
+        await this.http.put('/api/v3/series/editor', { seriesIds: [series.id], monitored: true });
+      }
+      if (!exact.monitored) {
+        await this.http.put('/api/v3/episode/monitor', { episodeIds: [exact.id], monitored: true });
+      }
+      return 'Existing profile and new-item policy were preserved; selected monitoring was only extended.';
     }
 
     const monitorMode = this.config.sonarr.seriesMonitor;
-    const scopedMode = this.isEpisodeScopedMonitorMode(monitorMode) ? monitorMode : undefined;
-    if (scopedMode && season != null && episode != null && status.seriesId) {
-      const scoped = await this.applyEpisodeMonitoringFromReferencePoint(imdbId, season, episode, scopedMode);
-      if (!scoped.ok) {
-        return scoped.result;
-      }
-    } else if (status.seriesId) {
-      await this.http.put('/api/v3/series/editor', { seriesIds: [status.seriesId], monitored: true });
-      this.invalidateCache();
-    }
+    await this.http.put('/api/v3/series/editor', {
+      seriesIds: [series.id],
+      monitored: monitorMode !== 'none',
+      monitorNewItems: this.config.sonarr.monitorNewItems === 'auto'
+        ? (monitorMode === 'epfuture' || monitorMode === 'future' || monitorMode === 'all' ? 'all' : 'none')
+        : this.config.sonarr.monitorNewItems,
+      qualityProfileId: this.config.sonarr.qualityProfileId,
+      rootFolderPath: this.config.sonarr.rootFolderPath,
+      tags: this.config.sonarr.tags,
+      applyTags: 'replace',
+      moveFiles: false
+    });
 
-    if (status.episodeId && !scopedMode) {
-      const grabbed = await this.tryGrabTopRelease(status.seriesId, status.episodeId, season);
-      if (!grabbed) {
-        await this.http.post('/api/v3/command', {
-          name: 'EpisodeSearch',
-          episodeIds: [status.episodeId]
+    if (this.isEpisodeScopedMonitorMode(monitorMode)) {
+      const applied = await this.applyEpisodeMonitoringFromReferencePoint(imdbId, season, episode, monitorMode);
+      if (!applied.ok) throw new Error(applied.result.summary);
+    } else {
+      await this.applyConfiguredNonScopedMonitoring(series.id, monitorMode);
+    }
+    return `Configured Sonarr settings were applied (Profile ${this.config.sonarr.qualityProfileId}).`;
+  }
+
+  private async applyConfiguredNonScopedMonitoring(
+    seriesId: number,
+    mode: Exclude<AppConfig['sonarr']['seriesMonitor'], 'ep' | 'epfuture' | 'epseason'>
+  ): Promise<void> {
+    if (mode === 'skip') return;
+    const episodes = await this.listEpisodes(seriesId);
+    const regular = episodes
+      .filter((item) => item.id > 0 && item.seasonNumber > 0 && item.episodeNumber > 0)
+      .sort((a, b) => a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber);
+    const specials = episodes.filter((item) => item.id > 0 && item.seasonNumber === 0);
+
+    if (mode === 'monitorSpecials' || mode === 'unmonitorSpecials') {
+      if (specials.length > 0) {
+        await this.http.put('/api/v3/episode/monitor', {
+          episodeIds: specials.map((item) => item.id),
+          monitored: mode === 'monitorSpecials'
         });
       }
-      this.invalidateCache();
-      this.logger.info('sonarr search queued', { imdbId, episodeId: status.episodeId, method: grabbed ? 'release_grab' : 'command_search' });
-      return {
-        ok: true,
-        service: 'sonarr',
-        title: 'Search triggered',
-        summary: grabbed ? 'Sonarr release grabbed for download.' : 'Sonarr episode search queued.'
-      };
+      return;
     }
 
-    if (status.seriesId) {
-      if (scopedMode === 'epseason' && season != null) {
-        await this.http.post('/api/v3/command', {
-          name: 'SeasonSearch',
-          seriesId: status.seriesId,
-          seasonNumber: season
-        });
-      } else {
-        const grabbed = scopedMode ? false : await this.tryGrabTopRelease(status.seriesId, undefined, season);
-        if (!grabbed) {
-          await this.http.post('/api/v3/command', {
-            name: 'MissingEpisodeSearch',
-            seriesId: status.seriesId
-          });
-        }
-      }
-      this.invalidateCache();
-      this.logger.info('sonarr search queued', { imdbId, seriesId: status.seriesId, type: scopedMode === 'epseason' ? 'season_search' : 'missing_episode', scopedMode: scopedMode ?? null });
-      return {
-        ok: true,
-        service: 'sonarr',
-        title: 'Search triggered',
-        summary: scopedMode === 'epseason'
-          ? 'Sonarr season search queued.'
-          : 'Sonarr missing-episode search queued.'
-      };
+    let target: SonarrEpisodeRecord[] = [];
+    const seasons = [...new Set(regular.map((item) => item.seasonNumber))].sort((a, b) => a - b);
+    const firstSeason = seasons[0];
+    const lastSeason = seasons[seasons.length - 1];
+    const now = Date.now();
+    switch (mode) {
+      case 'all': target = regular; break;
+      case 'future': target = regular.filter((item) => {
+        const when = Date.parse(item.airDateUtc ?? item.airDate ?? '');
+        return Number.isFinite(when) && when >= now;
+      }); break;
+      case 'missing': target = regular.filter((item) => !item.hasFile && (item.episodeFileId ?? 0) <= 0); break;
+      case 'existing': target = regular.filter((item) => item.hasFile || (item.episodeFileId ?? 0) > 0); break;
+      case 'firstSeason': target = regular.filter((item) => item.seasonNumber === firstSeason); break;
+      case 'lastSeason':
+      case 'latestSeason':
+      case 'recent': target = regular.filter((item) => item.seasonNumber === lastSeason); break;
+      case 'pilot': target = regular.slice(0, 1); break;
+      case 'none': target = []; break;
+      default: target = regular; break;
     }
-
-    this.logger.warn('sonarr search failed', { imdbId, reason: 'no_ids' });
-    return {
-      ok: false,
-      service: 'sonarr',
-      title: 'Search skipped',
-      summary: 'Could not resolve Sonarr ids for search.'
-    };
+    if (regular.length > 0) {
+      await this.http.put('/api/v3/episode/monitor', { episodeIds: regular.map((item) => item.id), monitored: false });
+    }
+    if (target.length > 0) {
+      await this.http.put('/api/v3/episode/monitor', { episodeIds: target.map((item) => item.id), monitored: true });
+    }
   }
 
   invalidateCache(): void {
@@ -633,21 +692,22 @@ export class SonarrClient {
     });
   }
 
-  private async findSeriesByImdbId(imdbId: string): Promise<SonarrSeriesRecord | undefined> {
+  private async findSeriesByImdbId(imdbId: string, fresh = false): Promise<SonarrSeriesRecord | undefined> {
+    if (fresh) this.seriesSnapshotCache.clear();
     const snapshot = await this.getSeriesSnapshot();
-    const inLibrary = snapshot.byImdbId.get(imdbId);
+    const inLibrary = snapshot.byImdbId.get(imdbId.toLowerCase());
     if (inLibrary) return inLibrary;
 
-    const lookup = await this.lookupSeries(imdbId);
-    if (!lookup) return undefined;
-
-    if (lookup.tvdbId != null) {
-      return snapshot.series.find((item) => item.tvdbId === lookup.tvdbId);
+    let lookup: SonarrLookupRecord | null = null;
+    try {
+      lookup = await this.lookupSeries(imdbId);
+    } catch {
+      return undefined;
     }
+    if (!lookup) return undefined;
+    if (lookup.tvdbId != null) return snapshot.byTvdbId.get(lookup.tvdbId);
     if (lookup.title && lookup.year != null) {
-      return snapshot.series.find(
-        (item) => item.title.toLowerCase() === lookup.title.toLowerCase() && item.year === lookup.year
-      );
+      return snapshot.series.find((item) => item.title.toLowerCase() === lookup.title.toLowerCase() && item.year === lookup.year);
     }
     return undefined;
   }

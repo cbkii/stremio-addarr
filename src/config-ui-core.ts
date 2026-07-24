@@ -49,6 +49,7 @@ interface UiConfigPayload {
     tags: string;
     searchOnAdd: boolean;
     strictImdbMatch: boolean;
+    existingItemPolicy: AppConfig['radarr']['existingItemPolicy'];
   };
   sonarr: {
     enabled: boolean;
@@ -67,6 +68,7 @@ interface UiConfigPayload {
     epCountMod: AppConfig['sonarr']['epCountMod'];
     tags: string;
     searchOnAdd: boolean;
+    existingItemPolicy: AppConfig['sonarr']['existingItemPolicy'];
   };
   playback: {
     kodiEnabled: boolean;
@@ -110,6 +112,7 @@ const MANAGED_KEYS = new Set([
   'RADARR_TAGS',
   'RADARR_SEARCH_ON_ADD',
   'RADARR_STRICT_IMDB_MATCH',
+  'RADARR_EXISTING_ITEM_POLICY',
   'SONARR_ENABLED',
   'SONARR_BASE_URL',
   'SONARR_CARD_URL',
@@ -126,6 +129,7 @@ const MANAGED_KEYS = new Set([
   'EP_COUNT_MOD',
   'SONARR_TAGS',
   'SONARR_SEARCH_ON_ADD',
+  'SONARR_EXISTING_ITEM_POLICY',
   'KODI_ENABLED',
   'KODI_PACKAGE',
   'FILE_STREAMING_ENABLED',
@@ -154,6 +158,7 @@ const SONARR_MONITORS = new Set<AppConfig['sonarr']['seriesMonitor']>([
 const SONARR_NEW_ITEMS = new Set<AppConfig['sonarr']['monitorNewItems']>(['auto', 'all', 'none']);
 const EP_COUNT_MODES = new Set<AppConfig['sonarr']['epCountMod']>(['epfuture', 'epseason']);
 const PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
+const EXISTING_ITEM_POLICIES = new Set<AppConfig['radarr']['existingItemPolicy']>(['preserve', 'extend', 'apply-config']);
 
 function escapeHtml(value: string): string {
   return value
@@ -385,7 +390,8 @@ function buildViewModel(config: AppConfig, pending: Map<string, string>) {
       minimumAvailability: pendingValue(pending, 'RADARR_MINIMUM_AVAILABILITY', config.radarr.minimumAvailability),
       tags: pendingValue(pending, 'RADARR_TAGS', config.radarr.tags.join(',')),
       searchOnAdd: parseBoolean(pending.get('RADARR_SEARCH_ON_ADD'), config.radarr.searchOnAdd),
-      strictImdbMatch: parseBoolean(pending.get('RADARR_STRICT_IMDB_MATCH'), config.radarr.strictImdbMatch)
+      strictImdbMatch: parseBoolean(pending.get('RADARR_STRICT_IMDB_MATCH'), config.radarr.strictImdbMatch),
+      existingItemPolicy: pendingValue(pending, 'RADARR_EXISTING_ITEM_POLICY', config.radarr.existingItemPolicy)
     },
     sonarr: {
       enabled: parseBoolean(pending.get('SONARR_ENABLED'), config.sonarr.enabled),
@@ -403,7 +409,8 @@ function buildViewModel(config: AppConfig, pending: Map<string, string>) {
       epCountPast: parseInteger(pending.get('EP_COUNT_PAST'), config.sonarr.epCountPast),
       epCountMod: pendingValue(pending, 'EP_COUNT_MOD', config.sonarr.epCountMod),
       tags: pendingValue(pending, 'SONARR_TAGS', config.sonarr.tags.join(',')),
-      searchOnAdd: parseBoolean(pending.get('SONARR_SEARCH_ON_ADD'), config.sonarr.searchOnAdd)
+      searchOnAdd: parseBoolean(pending.get('SONARR_SEARCH_ON_ADD'), config.sonarr.searchOnAdd),
+      existingItemPolicy: pendingValue(pending, 'SONARR_EXISTING_ITEM_POLICY', config.sonarr.existingItemPolicy)
     },
     playback: {
       kodiEnabled: parseBoolean(pending.get('KODI_ENABLED'), config.kodi.enabled),
@@ -464,6 +471,9 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
   set('RADARR_TAGS', normalizeTags(radarr['tags'], 'Radarr tags'));
   set('RADARR_SEARCH_ON_ADD', readBooleanField(radarr, 'searchOnAdd', config.radarr.searchOnAdd));
   set('RADARR_STRICT_IMDB_MATCH', readBooleanField(radarr, 'strictImdbMatch', config.radarr.strictImdbMatch));
+  const radarrExistingPolicy = readStringField(radarr, 'existingItemPolicy', config.radarr.existingItemPolicy) as AppConfig['radarr']['existingItemPolicy'];
+  if (!EXISTING_ITEM_POLICIES.has(radarrExistingPolicy)) throw new Error('Invalid Radarr existing-item policy.');
+  set('RADARR_EXISTING_ITEM_POLICY', radarrExistingPolicy);
 
   const sonarrEnabled = readBooleanField(sonarr, 'enabled', config.sonarr.enabled);
   const sonarrBaseUrl = normalizeHttpUrl(sonarr['baseUrl'], 'Sonarr server URL', !sonarrEnabled);
@@ -499,6 +509,9 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
   set('EP_COUNT_MOD', epCountMod);
   set('SONARR_TAGS', normalizeTags(sonarr['tags'], 'Sonarr tags'));
   set('SONARR_SEARCH_ON_ADD', readBooleanField(sonarr, 'searchOnAdd', config.sonarr.searchOnAdd));
+  const sonarrExistingPolicy = readStringField(sonarr, 'existingItemPolicy', config.sonarr.existingItemPolicy) as AppConfig['sonarr']['existingItemPolicy'];
+  if (!EXISTING_ITEM_POLICIES.has(sonarrExistingPolicy)) throw new Error('Invalid Sonarr existing-item policy.');
+  set('SONARR_EXISTING_ITEM_POLICY', sonarrExistingPolicy);
 
   const playbackMode = readStringField(playback, 'fileStreamingPlaybackMode', config.fileStreaming.playbackMode) as AppConfig['fileStreaming']['playbackMode'];
   if (!PLAYBACK_MODES.has(playbackMode)) throw new Error('Invalid file-streaming playback mode.');
@@ -682,6 +695,9 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
           <label for="radarr-tags">Tag IDs</label><input id="radarr-tags" inputmode="numeric" placeholder="1,3">
           <label for="radarr-search">Search immediately after add</label><select id="radarr-search" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
           <label for="radarr-strict">Require strict IMDb match</label><select id="radarr-strict" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
+          <label for="radarr-existing-policy">Existing movie settings</label>
+          <select id="radarr-existing-policy"><option value="preserve">Preserve existing settings (recommended)</option><option value="extend">Preserve profile; allow monitoring extension</option><option value="apply-config">Replace with these configured settings</option></select>
+          <p class="muted">Preserve is safest. Apply-config can replace the movie profile, monitoring, root folder, tags and availability.</p>
 
           <hr>
           <h2>Sonarr</h2>
@@ -705,6 +721,9 @@ function configureHtml(config: AppConfig, health: Awaited<ReturnType<ArrStatusSe
           <label for="sonarr-new-items">Monitor new items</label><select id="sonarr-new-items"><option value="auto">Automatic</option><option value="all">All</option><option value="none">None</option></select>
           <label for="sonarr-tags">Tag IDs</label><input id="sonarr-tags" inputmode="numeric" placeholder="1,3">
           <label for="sonarr-search">Search immediately after add</label><select id="sonarr-search" data-boolean-select="true"><option value="true">Enabled</option><option value="false">Disabled</option></select>
+          <label for="sonarr-existing-policy">Existing series settings</label>
+          <select id="sonarr-existing-policy"><option value="preserve">Preserve existing settings (recommended)</option><option value="extend">Preserve profile; only extend selected monitoring</option><option value="apply-config">Replace with these configured settings</option></select>
+          <p class="muted">Preserve keeps the current profile, season/episode monitoring and new-item policy. Apply-config intentionally replaces them.</p>
           <details><summary>Advanced episode behaviour</summary>
             <label for="episode-timeout">Episode-ready timeout (ms)</label><input id="episode-timeout" type="number" min="1000" step="250">
             <label for="episode-poll">Episode-ready poll interval (ms)</label><input id="episode-poll" type="number" min="250" step="250">

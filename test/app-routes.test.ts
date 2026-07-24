@@ -132,7 +132,7 @@ test('search action route triggers Radarr search and returns HLS stream', async 
     }
     if (path === '/api/v3/command' && init?.method === 'POST') {
       resolveCommandPosted();
-      return new Response('{}', { status: 201 });
+      return new Response('{"id":1001,"name":"MoviesSearch","status":"queued"}', { status: 201 });
     }
     if (path === '/api/v3/system/status') {
       return new Response('{}', { status: 200 });
@@ -195,7 +195,7 @@ test('add-search action route performs add and search on Sonarr', async () => {
     }
     if (path === '/api/v3/command' && init?.method === 'POST') {
       resolveCommandPosted();
-      return new Response('{}', { status: 201 });
+      return new Response('{"id":2001,"name":"EpisodeSearch","status":"queued"}', { status: 201 });
     }
     if (path === '/api/v3/system/status') {
       return new Response('{}', { status: 200 });
@@ -248,10 +248,11 @@ test('series add-search action route triggers Sonarr add and search', async () =
       seriesAdded = true;
       return new Response('{}', { status: 201 });
     }
+    if (path.startsWith('/api/v3/episode?seriesId=111')) return new Response('[{"id":112,"seasonNumber":1,"episodeNumber":1,"monitored":true}]', { status: 200 });
     if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
     if (path === '/api/v3/command' && init?.method === 'POST') {
       resolveCommandPosted();
-      return new Response('{}', { status: 201 });
+      return new Response('{"id":3001,"name":"EpisodeSearch","status":"queued"}', { status: 201 });
     }
 
     return new Response('[]', { status: 200 });
@@ -259,7 +260,7 @@ test('series add-search action route triggers Sonarr add and search', async () =
 
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
-    const res = await ORIGINAL_FETCH(signedActionUrl(baseUrl, cfg, 'add-search', 'series', 'tt1111111'));
+    const res = await ORIGINAL_FETCH(signedActionUrl(baseUrl, cfg, 'add-search', 'series', 'tt1111111:1:1'));
     assert.equal(res.status, 200);
     const text = await res.text();
     assert.ok(text.includes('#EXTM3U'), 'Should return an HLS playlist');
