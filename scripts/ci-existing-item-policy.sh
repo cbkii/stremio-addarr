@@ -13,20 +13,21 @@ status=${PIPESTATUS[0]}
 set -e
 
 if [[ "$status" != "0" ]]; then
-  # Commit only the validation output. The transformed implementation remains
-  # unstaged in this failed runner, so the branch still contains reviewable
-  # scaffolding plus a deterministic diagnostic artefact.
   {
-    echo 'Existing-item policy implementation validation failed.'
+    echo 'Temporary diagnostic for draft PR #76.'
     echo
+    echo '```text'
     tail -n 400 "$log_file"
-  } > validation-error.txt
+    echo '```'
+  } > "${RUNNER_TEMP:-/tmp}/validation-issue.md"
 
-  git config user.name 'github-actions[bot]'
-  git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-  git add -f validation-error.txt
-  git commit -m 'chore: capture existing-item validation failure [skip ci]'
-  git push origin HEAD:agent/preserve-existing-arr-settings
+  if [[ -n "${GH_TOKEN:-}" ]] && command -v gh >/dev/null 2>&1; then
+    gh issue create \
+      --repo cbkii/stremio-addarr \
+      --title 'TEMP: PR #76 existing-item validation failure' \
+      --body-file "${RUNNER_TEMP:-/tmp}/validation-issue.md" \
+      >/dev/null || true
+  fi
   exit "$status"
 fi
 
