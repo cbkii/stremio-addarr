@@ -50,7 +50,7 @@ Supported values:
 | `extend` | unchanged | only add the minimum requested monitoring; never unmonitor anything | always target the clicked item |
 | `apply-config` | apply configured settings | replace with configured monitoring scope | always target the clicked item |
 
-`preserve` is the default when the setting is absent, including upgrades from older releases.
+`preserve` is the default when the setting is absent, including upgrades from older releases. Unrecognised values are rejected during startup/configuration validation; they never fall through to `apply-config` or any other mutating policy.
 
 ## Exact-search contract
 
@@ -91,7 +91,7 @@ For an existing episode:
 
 A targeted Sonarr `EpisodeSearch` operates directly on supplied episode IDs. The default action must not unmonitor all episodes, alter season monitoring, or change `monitorNewItems` merely to search the clicked episode.
 
-If the newly added series has not populated the selected episode yet, invalidate the episode cache and poll until the exact episode appears or the existing bounded readiness timeout expires. Do not silently replace the requested action with a whole-season or whole-series search.
+If the newly added series has not populated the selected episode yet, invalidate the episode cache and poll until the exact episode appears or the existing bounded readiness timeout expires. If the timeout expires, return an explicit failure, do not claim that a search was queued, and do not silently replace the requested action with a whole-season or whole-series search.
 
 ## Policy semantics
 
@@ -213,10 +213,12 @@ interface ArrCommandResponse {
 
 Return success only when:
 
-- the exact Arr item ID is resolved; and
-- the targeted command returns a valid command ID.
+- the exact Arr item ID is resolved;
+- the exact `MoviesSearch` or `EpisodeSearch` request is posted with that resolved ID;
+- Arr returns a positive command ID; and
+- when Arr includes `name`, it matches the expected command name (case-insensitively).
 
-Optionally poll `/api/v3/command/{id}` briefly to catch an immediate terminal failure, but do not wait for the complete indexer search or download within the Stremio request.
+The accepted POST response is the acknowledgement invariant used by this implementation. It does not poll command completion. If brief command polling is added later, an immediate terminal failure must map to action failure rather than success; the request must still not wait for indexer or download completion.
 
 Example result:
 

@@ -465,12 +465,13 @@ export class SonarrClient {
       name: 'EpisodeSearch',
       episodeIds: [exact.id]
     });
-    if (!Number.isInteger(command?.id) || Number(command.id) <= 0) {
+    const commandName = command?.name?.trim().toLowerCase();
+    if (!Number.isInteger(command?.id) || Number(command.id) <= 0 || (commandName != null && commandName !== 'episodesearch')) {
       return {
         ok: false,
         service: 'sonarr',
         title: 'Search was not accepted',
-        summary: 'Sonarr did not return a valid command acknowledgement.',
+        summary: 'Sonarr did not return a valid targeted EpisodeSearch acknowledgement.',
         detail: `${series.title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
       };
     }

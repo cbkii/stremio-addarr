@@ -325,12 +325,13 @@ export class RadarrClient {
       name: 'MoviesSearch',
       movieIds: [existing.id]
     });
-    if (!Number.isInteger(command?.id) || Number(command.id) <= 0) {
+    const commandName = command?.name?.trim().toLowerCase();
+    if (!Number.isInteger(command?.id) || Number(command.id) <= 0 || (commandName != null && commandName !== 'moviessearch')) {
       return {
         ok: false,
         service: 'radarr',
         title: 'Search was not accepted',
-        summary: 'Radarr did not return a valid command acknowledgement.',
+        summary: 'Radarr did not return a valid targeted MoviesSearch acknowledgement.',
         detail: existing.title
       };
     }

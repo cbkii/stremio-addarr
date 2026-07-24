@@ -257,3 +257,33 @@ test('new Sonarr POST ID bypasses stale series list and exact-searches selected 
     { method: 'POST', path: '/api/v3/command', body: { name: 'EpisodeSearch', episodeIds: [401] } }
   ]);
 });
+
+
+test('Radarr rejects a command acknowledgement for the wrong command name', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const client = new RadarrClient(cfg, radarrHttp({
+    movies: [{ id: 50, imdbId: 'tt50', title: 'Wrong Command Movie', monitored: true }],
+    command: { id: 500, name: 'EpisodeSearch', status: 'queued' }
+  }) as never);
+
+  const result = await client.triggerMovieSearch('tt50');
+  assert.equal(result.ok, false);
+  assert.match(result.summary, /MoviesSearch acknowledgement/i);
+});
+
+test('Sonarr rejects a command acknowledgement for the wrong command name', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.episodeReadyPollMs = 1;
+  cfg.sonarr.episodeReadyTimeoutMs = 20;
+  const client = new SonarrClient(cfg, sonarrHttp({
+    series: [{ id: 60, imdbId: 'tt60', title: 'Wrong Command Show', monitored: true }],
+    episodes: [{ id: 601, seasonNumber: 1, episodeNumber: 1, monitored: true }],
+    command: { id: 600, name: 'MoviesSearch', status: 'queued' }
+  }) as never);
+
+  const result = await client.triggerEpisodeSearch('tt60', 1, 1);
+  assert.equal(result.ok, false);
+  assert.match(result.summary, /EpisodeSearch acknowledgement/i);
+});
