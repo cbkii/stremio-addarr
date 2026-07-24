@@ -29,6 +29,14 @@ def replace_first(path: str, old: str, new: str) -> None:
     write(path, text.replace(old, new, 1))
 
 
+def replace_all(path: str, old: str, new: str, minimum: int = 1) -> None:
+    text = read(path)
+    count = text.count(old)
+    if count < minimum:
+        raise SystemExit(f'{path}: expected at least {minimum} occurrences, found {count}: {old[:100]!r}')
+    write(path, text.replace(old, new))
+
+
 def sub_once(path: str, pattern: str, replacement: str) -> None:
     text = read(path)
     updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
@@ -132,6 +140,14 @@ test('triggerEpisodeSearch fails when Sonarr omits the command id', async () => 
 test('queue failure""",
 )
 
+# Existing-series identification should degrade safely when the optional lookup
+# endpoint is unavailable or returns unusable data.
+replace_once(
+    'src/services/sonarr.ts',
+    "    const lookup = await this.lookupSeries(imdbId);\n    if (!lookup) return undefined;\n    if (lookup.tvdbId != null) return snapshot.byTvdbId.get(lookup.tvdbId);",
+    "    let lookup: SonarrLookupRecord | null = null;\n    try {\n      lookup = await this.lookupSeries(imdbId);\n    } catch {\n      return undefined;\n    }\n    if (!lookup) return undefined;\n    if (lookup.tvdbId != null) return snapshot.byTvdbId.get(lookup.tvdbId);",
+)
+
 # Action route mocks must return real Arr command acknowledgements. The first
 # two fixtures intentionally share the same original text and are migrated in
 # order, so each operation only requires that one occurrence remains.
@@ -156,13 +172,49 @@ replace_once(
     "signedActionUrl(baseUrl, cfg, 'add-search', 'series', 'tt1111111:1:1')",
 )
 
+# New-item adds must not start a second broad Sonarr search; the exact episode
+# command is queued by the action orchestration after metadata becomes ready.
+replace_once(
+    'test/sonarr.test.ts',
+    "assert.equal(payload.addOptions.searchForMissingEpisodes, true);",
+    "assert.equal(payload.addOptions.searchForMissingEpisodes, false);",
+)
+
+# Existing action tiles now show the real stored state instead of the configured
+# defaults intended for a newly added series.
+replace_once(
+    'test/episode-monitor-scope.test.ts',
+    "return new Response('[{\"id\":10,\"imdbId\":\"tt7654321\",\"title\":\"Mock Show\"}]', { status: 200 });",
+    "return new Response('[{\"id\":10,\"imdbId\":\"tt7654321\",\"title\":\"Mock Show\",\"monitored\":true,\"qualityProfileId\":4,\"monitorNewItems\":\"all\",\"seasons\":[{\"seasonNumber\":2,\"monitored\":true}]}]', { status: 200 });",
+)
+replace_once(
+    'test/episode-monitor-scope.test.ts',
+    "    assert.ok(lines.includes('📡: this (⥸3 / ⎗8 = +future) ❌new→✅new'));\n    assert.equal(lines.filter((line) => line.startsWith('📡:')).length, 1);",
+    "    assert.ok(lines.includes('🛡️: existing settings kept'));\n    assert.ok(lines.includes('📡: series on ep on ✅new'));\n    assert.ok(lines.includes('🎚️: Profile 4'));\n    assert.equal(lines.filter((line) => line.startsWith('📡:')).length, 1);",
+)
+
+# The added truthful settings lines remain compact enough for TV display while
+# making the action's preservation behaviour explicit.
+replace_all(
+    'test/status-watched.test.ts',
+    "assert.ok(lines.length <= 5);",
+    "assert.ok(lines.length <= 7);",
+    minimum=4,
+)
+replace_all(
+    'test/status-watched.test.ts',
+    "assert.ok(desc.split('\\n').length <= 5);",
+    "assert.ok(desc.split('\\n').length <= 7);",
+    minimum=2,
+)
+
 # The exact-search implementation can legitimately poll for a newly created
 # episode. Keep production defaults unchanged while ensuring mock failures are
-# bounded and deterministic.
+# bounded, deterministic and valid for the Configure API's minimum.
 replace_once(
     'test/_helpers.ts',
     "      episodeReadyTimeoutMs: 60_000,\n      episodeReadyPollMs: 1_500,",
-    "      episodeReadyTimeoutMs: 100,\n      episodeReadyPollMs: 1,",
+    "      episodeReadyTimeoutMs: 1_000,\n      episodeReadyPollMs: 1,",
 )
 
 # This script is invoked once through npm's `preci` lifecycle and removes its
