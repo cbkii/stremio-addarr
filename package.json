@@ -14,7 +14,7 @@
     "start": "node dist/src/index.js",
     "test": "tsx --test --test-reporter=spec test/*.test.ts",
     "test:catalog": "tsx --test --test-name-pattern=catalog test/catalog.test.ts test/addon.test.ts",
-    "preci": "python3 scripts/update-existing-item-policy-tests.py",
+    "preci": "python3 scripts/run-existing-item-policy-migration.py",
     "ci": "bash scripts/ci-existing-item-policy.sh",
     "package:release": "node scripts/package-release.mjs",
     "lint:manifest": "node scripts/lint-manifest.mjs"
