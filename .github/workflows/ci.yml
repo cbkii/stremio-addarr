@@ -283,14 +283,37 @@ jobs:
         run: npm ci
 
       - name: Validate
+        id: validate
         run: |
-          npm run typecheck
-          npm test
-          npm run build
-          npm run lint:manifest
-          npm run package:release
+          set +e
+          {
+            npm run typecheck
+            npm test
+            npm run build
+            npm run lint:manifest
+            npm run package:release
+          } > validation.log 2>&1
+          status=$?
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          if [[ "$status" == "0" ]]; then
+            cat validation.log
+          fi
+          exit 0
+
+      - name: Upload validation diagnostic
+        if: steps.validate.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr76-radarr-title-validation
+          path: validation.log
+          if-no-files-found: error
+
+      - name: Fail on validation error
+        if: steps.validate.outputs.status != '0'
+        run: exit 1
 
       - name: Remove temporary files and publish
+        if: steps.validate.outputs.status == '0'
         run: |
           set -euo pipefail
           rm -f scripts/fix-pr76-radarr-title.py .github/workflows/pr76-radarr-title-fix.yml
