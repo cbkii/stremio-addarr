@@ -233,7 +233,7 @@ jobs:
           start = '  # BEGIN ONE-SHOT ACTIONS REGISTRY PURGE\n'
           end = '  # END ONE-SHOT ACTIONS REGISTRY PURGE\n'
           if content.count(start) != 1 or content.count(end) != 1:
-            raise SystemExit('one-shot purge markers are missing or duplicated')
+              raise SystemExit('one-shot purge markers are missing or duplicated')
           before, remainder = content.split(start, 1)
           _, after = remainder.split(end, 1)
           path.write_text(before.rstrip() + '\n' + after.lstrip())
@@ -250,7 +250,7 @@ jobs:
             'chore/purge-obsolete-actions-registry' \
             'chore/finish-actions-registry-purge' \
             'chore/fix-actions-purge-registration-race'; do
-            encoded=$(python3 -c 'import sys; from urllib.parse quote; print(quote(sys.argv[1], safe=""))' "$branch")
+            encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$branch")
             gh api --method DELETE "repos/${REPO}/git/refs/heads/${encoded}" >/dev/null 2>&1 \
               || true
           done
