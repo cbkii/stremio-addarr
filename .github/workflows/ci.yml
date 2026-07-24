@@ -264,6 +264,8 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+      issues: write
+      pull-requests: write
     steps:
       - name: Checkout implementation branch
         uses: actions/checkout@v4
@@ -284,9 +286,27 @@ jobs:
         run: npm ci
 
       - name: Validate implementation
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          npm run ci
-          npm run package:release
+          set -uo pipefail
+          set +e
+          {
+            npm run ci && npm run package:release
+          } 2>&1 | tee "$RUNNER_TEMP/existing-item-validation.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$status" != "0" ]]; then
+            {
+              echo '### Existing-item policy validation failure'
+              echo
+              echo '```text'
+              tail -n 220 "$RUNNER_TEMP/existing-item-validation.log"
+              echo '```'
+            } > "$RUNNER_TEMP/existing-item-validation-comment.md"
+            gh pr comment 76 --body-file "$RUNNER_TEMP/existing-item-validation-comment.md" || true
+            exit "$status"
+          fi
 
       - name: Remove temporary helper and publish implementation
         run: |
