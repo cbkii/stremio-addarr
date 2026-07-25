@@ -1,5 +1,7 @@
 from pathlib import Path
 
+# This temporary transformer is intentionally self-cleaned after full validation.
+
 
 def replace_once(path: str, old: str, new: str) -> None:
     file_path = Path(path)
