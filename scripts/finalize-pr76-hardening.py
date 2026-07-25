@@ -18,6 +18,15 @@ def append_once(path: str, marker: str, addition: str) -> None:
     file_path.write_text(content.rstrip() + '\n\n' + addition.strip() + '\n', encoding='utf-8')
 
 
+def remove_from_marker(path: str, marker: str) -> None:
+    file_path = Path(path)
+    content = file_path.read_text(encoding='utf-8')
+    count = content.count(marker)
+    if count != 1:
+        raise SystemExit(f'{path}: expected one marker, found {count}: {marker!r}')
+    file_path.write_text(content.split(marker, 1)[0].rstrip() + '\n', encoding='utf-8')
+
+
 # Radarr: preserve the returned-ID shortcut only for newly-created movies, and
 # always honour a click by queueing the exact search even if the file appeared.
 replace_once(
@@ -359,26 +368,9 @@ replace_once(
 """,
     ''
 )
-replace_once(
+remove_from_marker(
     'src/services/series-monitor-scope.ts',
-    """
-export function addSeriesMonitorScopeToActionTiles(
-  tiles: StatusTile[],
-  config: SeriesMonitorDisplayConfig
-): StatusTile[] {
-  const scopeLine = seriesMonitorScopeLine(config);
-  return tiles.map((tile) => {
-    if (!tile.isAction || !tile.description) return tile;
-
-    const lines = tile.description.split('\n');
-    if (lines.includes(scopeLine)) return tile;
-
-    const actionLineIndex = lines.findIndex((line) => line.startsWith('🗯️'));
-    lines.splice(actionLineIndex >= 0 ? actionLineIndex : lines.length, 0, scopeLine);
-    return { ...tile, description: lines.join('\n') };
-  });
-}""",
-    '\n'
+    '\nexport function addSeriesMonitorScopeToActionTiles('
 )
 
 # Route-level exact-search tests must assert command name and target IDs.
