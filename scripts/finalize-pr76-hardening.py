@@ -354,11 +354,10 @@ replace_once(
 )
 replace_once(
     'src/services/series-monitor-scope.ts',
-    """import type { AppConfig } from '../config.js';
-import type { StatusTile } from '../types.js';
+    """import type { StatusTile } from '../types.js';
+
 """,
-    """import type { AppConfig } from '../config.js';
-"""
+    ''
 )
 replace_once(
     'src/services/series-monitor-scope.ts',
@@ -378,12 +377,11 @@ export function addSeriesMonitorScopeToActionTiles(
     lines.splice(actionLineIndex >= 0 ? actionLineIndex : lines.length, 0, scopeLine);
     return { ...tile, description: lines.join('\n') };
   });
-}
-""",
-    ''
+}""",
+    '\n'
 )
 
-# Route-level tests must prove the exact command target, not only observe a POST.
+# Route-level exact-search tests must assert command name and target IDs.
 replace_once(
     'test/app-routes.test.ts',
     """    if (path === '/api/v3/command' && init?.method === 'POST') {
@@ -421,7 +419,7 @@ replace_once(
     }"""
 )
 
-# Restore the documented downloaded-tile compactness and tighten episode actions.
+# Restore documented downloaded-tile compactness and assert compact action tiles.
 replace_once(
     'test/status-watched.test.ts',
     """  assert.ok(lines.length <= 7);
@@ -456,7 +454,7 @@ replace_once(
     assert.ok(lines.length <= 7);"""
 )
 
-# Case-insensitive env values must round-trip through the Configure API.
+# Case-insensitive environment policy values must round-trip in Configure.
 append_once(
     'test/config-ui.test.ts',
     "test('Configure normalizes case-insensitive existing-item policies')",
@@ -483,7 +481,8 @@ test('Configure normalizes case-insensitive existing-item policies', async () =>
       },
       body: JSON.stringify(current.config)
     });
-    assert.equal(saveResponse.status, 200, await saveResponse.text());
+    const saveText = await saveResponse.text();
+    assert.equal(saveResponse.status, 200, saveText);
     const saved = await fs.readFile(envFile, 'utf8');
     assert.match(saved, /RADARR_EXISTING_ITEM_POLICY=extend/);
     assert.match(saved, /SONARR_EXISTING_ITEM_POLICY=apply-config/);
@@ -492,7 +491,7 @@ test('Configure normalizes case-insensitive existing-item policies', async () =>
 """
 )
 
-# Focused regressions for every current behavioural review finding.
+# Focused regressions for every valid behavioural review finding.
 append_once(
     'test/existing-item-policy-advanced.test.ts',
     "test('existing Radarr add-search re-resolves authoritative state before extend')",
@@ -680,7 +679,7 @@ test('Sonarr lookup transport failures are reported as unavailable', async () =>
 """
 )
 
-# Keep the contract aligned with the implementation and exact-search invariant.
+# Keep documentation aligned with current implementation boundaries and races.
 replace_once(
     'docs/EXISTING-ARR-ITEM-POLICY.md',
     """Cache `/api/v3/qualityprofile` results for both Arr services so status tiles and action results can show a meaningful profile name. Fall back safely to `Profile <id>` if discovery fails.""",
