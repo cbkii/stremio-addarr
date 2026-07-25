@@ -277,9 +277,28 @@ jobs:
           cache: npm
 
       - name: Apply focused review fixes
-        run: python3 scripts/finalize-pr76-hardening.py
+        id: apply
+        run: |
+          set +e
+          python3 scripts/finalize-pr76-hardening.py > hardening-apply.log 2>&1
+          status=$?
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload hardening diagnostic
+        if: steps.apply.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr76-hardening-apply
+          path: hardening-apply.log
+          if-no-files-found: error
+
+      - name: Fail on transformation error
+        if: steps.apply.outputs.status != '0'
+        run: exit 1
 
       - name: Install
+        if: steps.apply.outputs.status == '0'
         run: npm ci
 
       - name: Verify typecheck
