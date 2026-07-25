@@ -92,7 +92,7 @@ test('movie downloaded description mentions WATCHED and stays within 5 lines', a
   const tiles = await service.buildTiles(parseStremioId('movie', 'tt1234567'));
   const lines = (tiles[0]?.description ?? '').split('\n');
   assert.ok(lines.some(l => l.includes('WATCHED')), 'description should mention WATCHED');
-  assert.ok(lines.length <= 7);
+  assert.ok(lines.length <= 5);
 });
 
 test('movie missing description mentions UNWATCHED and includes a search action', async () => {
@@ -141,7 +141,7 @@ test('episode downloaded description mentions WATCHED and stays within 5 lines',
   const tiles = await service.buildTiles(parseStremioId('series', 'tt7654321:2:5'));
   const lines = (tiles[0]?.description ?? '').split('\n');
   assert.ok(lines.some(l => l.includes('WATCHED')), 'description should mention WATCHED');
-  assert.ok(lines.length <= 7);
+  assert.ok(lines.length <= 5);
 });
 
 test('episode missing description mentions UNWATCHED and includes a search action', async () => {

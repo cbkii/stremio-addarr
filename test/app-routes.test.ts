@@ -131,6 +131,7 @@ test('search action route triggers Radarr search and returns HLS stream', async 
       return new Response('{"records":[]}', { status: 200 });
     }
     if (path === '/api/v3/command' && init?.method === 'POST') {
+      assert.deepEqual(JSON.parse(String(init.body)), { name: 'MoviesSearch', movieIds: [100] });
       resolveCommandPosted();
       return new Response('{"id":1001,"name":"MoviesSearch","status":"queued"}', { status: 201 });
     }
@@ -194,6 +195,7 @@ test('add-search action route performs add and search on Sonarr', async () => {
       return new Response('{"records":[]}', { status: 200 });
     }
     if (path === '/api/v3/command' && init?.method === 'POST') {
+      assert.deepEqual(JSON.parse(String(init.body)), { name: 'EpisodeSearch', episodeIds: [45] });
       resolveCommandPosted();
       return new Response('{"id":2001,"name":"EpisodeSearch","status":"queued"}', { status: 201 });
     }
@@ -251,6 +253,7 @@ test('series add-search action route triggers Sonarr add and search', async () =
     if (path.startsWith('/api/v3/episode?seriesId=111')) return new Response('[{"id":112,"seasonNumber":1,"episodeNumber":1,"monitored":true}]', { status: 200 });
     if (path.startsWith('/api/v3/queue?')) return new Response('{"records":[]}', { status: 200 });
     if (path === '/api/v3/command' && init?.method === 'POST') {
+      assert.deepEqual(JSON.parse(String(init.body)), { name: 'EpisodeSearch', episodeIds: [112] });
       resolveCommandPosted();
       return new Response('{"id":3001,"name":"EpisodeSearch","status":"queued"}', { status: 201 });
     }

@@ -118,9 +118,20 @@ function existingPolicyLine(policy?: AppConfig['radarr']['existingItemPolicy']):
 
 function actualSeriesMonitorLine(status: ArrEpisodeStatus): string {
   const series = status.seriesMonitored ? 'series on' : 'series off';
+  const season = status.seasonMonitored == null ? '' : (status.seasonMonitored ? 'season on' : 'season off');
   const episode = status.episodeId != null ? (status.monitored ? 'ep on' : 'ep off') : '';
   const future = status.monitorNewItems === 'all' ? '✅new' : status.monitorNewItems === 'none' ? '❌new' : '';
-  return `📡: ${[series, episode, future].filter(Boolean).join(' ')}`;
+  return `📡: ${[series, season, episode, future].filter(Boolean).join(' ')}`;
+}
+
+function existingPolicyProfileLine(
+  policy: AppConfig['sonarr']['existingItemPolicy'] | undefined,
+  profileName?: string,
+  profileId?: number
+): string {
+  return [existingPolicyLine(policy), profileLine(profileName, profileId)]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function watchedLine(watched: boolean, borderFallback: boolean): string {
@@ -340,7 +351,7 @@ export class ArrStatusService {
       case 'episode_missing':
         return [{
           name: '🔍🦜\nSearch\nDownload',
-          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', existingPolicyLine(status.existingItemPolicy), actualSeriesMonitorLine(status), profileLine(status.qualityProfileName, status.qualityProfileId), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', existingPolicyProfileLine(status.existingItemPolicy, status.qualityProfileName, status.qualityProfileId), actualSeriesMonitorLine(status), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -349,7 +360,7 @@ export class ArrStatusService {
       case 'episode_monitored':
         return [{
           name: '🔍🦜\nSearch\nDownload',
-          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} ${status.monitored ? 'monitored' : 'unmonitored'}` : '⭕ In library', existingPolicyLine(status.existingItemPolicy), actualSeriesMonitorLine(status), profileLine(status.qualityProfileName, status.qualityProfileId), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} ${status.monitored ? 'monitored' : 'unmonitored'}` : '⭕ In library', existingPolicyProfileLine(status.existingItemPolicy, status.qualityProfileName, status.qualityProfileId), actualSeriesMonitorLine(status), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -438,13 +449,13 @@ export class ArrStatusService {
     const searched = parsed.kind === 'movie'
       ? await this.radarr.triggerMovieSearch(parsed.imdbId, {
         existingBeforeAction: added.alreadyExisted === true,
-        knownMovieId: added.itemId,
-        knownTitle: added.detail?.split(' · ', 1)[0]
+        knownMovieId: added.alreadyExisted === true ? undefined : added.itemId,
+        knownTitle: added.alreadyExisted === true ? undefined : added.detail
       })
       : await this.sonarr.triggerEpisodeSearch(parsed.imdbId, parsed.season, parsed.episode, {
         existingBeforeAction: added.alreadyExisted === true,
-        knownSeriesId: added.itemId,
-        knownTitle: added.detail
+        knownSeriesId: added.alreadyExisted === true ? undefined : added.itemId,
+        knownTitle: added.alreadyExisted === true ? undefined : added.detail
       });
     this.invalidateStatusCaches();
     return searched.ok

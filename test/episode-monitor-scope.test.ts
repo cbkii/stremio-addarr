@@ -141,9 +141,9 @@ test('episode action tile shows every applicable scope label on one line', async
     assert.equal(response.status, 200);
     const body = (await response.json()) as { streams: Array<{ description?: string }> };
     const lines = body.streams[0].description?.split('\n') ?? [];
-    assert.ok(lines.includes('🛡️: existing settings kept'));
-    assert.ok(lines.includes('📡: series on ep on ✅new'));
-    assert.ok(lines.includes('🎚️: Profile 4'));
+    assert.ok(lines.some((line) => line.includes('🛡️: existing settings kept') && line.includes('🎚️: Profile 4')));
+    assert.ok(lines.includes('📡: series on season on ep on ✅new'));
     assert.equal(lines.filter((line) => line.startsWith('📡:')).length, 1);
+    assert.ok(lines.length <= 7);
   });
 });

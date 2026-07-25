@@ -165,7 +165,7 @@ Immediately before a write action, force or perform a fresh item lookup rather t
 
 ## Quality profile names
 
-Cache `/api/v3/qualityprofile` results for both Arr services so status tiles and action results can show a meaningful profile name. Fall back safely to `Profile <id>` if discovery fails.
+Cache `/api/v3/qualityprofile` results for both Arr services so existing-item status tiles and action context can show a meaningful profile name. New-item tiles and configured apply-results may use `Profile <id>` because they render from configuration before an item resource is available. Fall back safely to `Profile <id>` whenever discovery is unavailable.
 
 ## Tile behaviour
 
@@ -218,6 +218,8 @@ Return success only when:
 - Arr returns a positive command ID; and
 - when Arr includes `name`, it matches the expected command name (case-insensitively).
 
+This exact-search invariant still applies if the file finishes downloading between tile rendering and action execution; a click that was offered as a search action must not silently become a no-op.
+
 The accepted POST response is the acknowledgement invariant used by this implementation. It does not poll command completion. If brief command polling is added later, an immediate terminal failure must map to action failure rather than success; the request must still not wait for indexer or download completion.
 
 Example result:
@@ -241,7 +243,7 @@ Avoid duplicate and broad searches.
 
 - add with `searchForMissingEpisodes: false` and `searchForCutoffUnmetEpisodes: false` for an episode add-and-search tile;
 - apply configured monitoring to the new series;
-- retain the series ID returned by the add response, then wait for exact episode metadata;
+- retain the series ID returned by the add response, then keep polling through partial episode lists until the exact selected episode appears or the bounded readiness timeout expires;
 - queue one explicit `EpisodeSearch` for the exact episode ID.
 
 ## API source verification

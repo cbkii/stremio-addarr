@@ -260,3 +260,33 @@ test('Arr connection test and option discovery use candidate credentials without
     assert.ok(seenKeys.every((key) => key === 'candidate-key'));
   });
 });
+
+test('Configure normalizes case-insensitive existing-item policies', async () => {
+  process.env['CONFIG_UI_TOKEN'] = 'correct-horse-battery-staple';
+  const envFile = await tempEnv('RADARR_EXISTING_ITEM_POLICY=EXTEND\nSONARR_EXISTING_ITEM_POLICY=APPLY-CONFIG\n');
+  process.env['CONFIG_UI_ENV_FILE'] = envFile;
+  const app = createApp(uiConfig());
+
+  await withServer(app, async (baseUrl) => {
+    const session = await login(baseUrl, process.env['CONFIG_UI_TOKEN']!);
+    const currentResponse = await ORIGINAL_FETCH(`${baseUrl}/api/config`, { headers: { cookie: session.cookie } });
+    const current = (await currentResponse.json()) as { csrf: string; config: Record<string, any> };
+    assert.equal(current.config.radarr.existingItemPolicy, 'extend');
+    assert.equal(current.config.sonarr.existingItemPolicy, 'apply-config');
+
+    const saveResponse = await ORIGINAL_FETCH(`${baseUrl}/api/config`, {
+      method: 'PUT',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+        'x-csrf-token': current.csrf
+      },
+      body: JSON.stringify(current.config)
+    });
+    const saveText = await saveResponse.text();
+    assert.equal(saveResponse.status, 200, saveText);
+    const saved = await fs.readFile(envFile, 'utf8');
+    assert.match(saved, /RADARR_EXISTING_ITEM_POLICY=extend/);
+    assert.match(saved, /SONARR_EXISTING_ITEM_POLICY=apply-config/);
+  });
+});

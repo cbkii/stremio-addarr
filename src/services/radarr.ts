@@ -290,9 +290,10 @@ export class RadarrClient {
     options: { existingBeforeAction?: boolean; knownMovieId?: number; knownTitle?: string } = { existingBeforeAction: true }
   ): Promise<AddActionResult> {
     this.logger.info('radarr search start', { imdbId });
-    let existing: RadarrMovieRecord | undefined = options.knownMovieId != null
-      ? { id: options.knownMovieId, imdbId, title: options.knownTitle ?? imdbId }
-      : undefined;
+    let existing: RadarrMovieRecord | undefined =
+      options.knownMovieId != null && options.existingBeforeAction === false
+        ? { id: options.knownMovieId, imdbId, title: options.knownTitle ?? imdbId }
+        : undefined;
     try {
       existing ??= await this.findMovieByImdbId(imdbId, true);
     } catch (error) {
@@ -306,17 +307,6 @@ export class RadarrClient {
     if (!existing) {
       return { ok: false, service: 'radarr', title: 'Not in Radarr', summary: 'Movie is not added yet.' };
     }
-    if (existing.hasFile || existing.movieFile) {
-      return {
-        ok: true,
-        service: 'radarr',
-        title: 'Already downloaded',
-        summary: 'Movie file already exists.',
-        detail: existing.title,
-        alreadyExisted: true
-      };
-    }
-
     let policyDetail: string;
     let command: ArrCommandResponse;
     try {

@@ -391,7 +391,7 @@ function buildViewModel(config: AppConfig, pending: Map<string, string>) {
       tags: pendingValue(pending, 'RADARR_TAGS', config.radarr.tags.join(',')),
       searchOnAdd: parseBoolean(pending.get('RADARR_SEARCH_ON_ADD'), config.radarr.searchOnAdd),
       strictImdbMatch: parseBoolean(pending.get('RADARR_STRICT_IMDB_MATCH'), config.radarr.strictImdbMatch),
-      existingItemPolicy: pendingValue(pending, 'RADARR_EXISTING_ITEM_POLICY', config.radarr.existingItemPolicy)
+      existingItemPolicy: pendingValue(pending, 'RADARR_EXISTING_ITEM_POLICY', config.radarr.existingItemPolicy).toLowerCase()
     },
     sonarr: {
       enabled: parseBoolean(pending.get('SONARR_ENABLED'), config.sonarr.enabled),
@@ -410,7 +410,7 @@ function buildViewModel(config: AppConfig, pending: Map<string, string>) {
       epCountMod: pendingValue(pending, 'EP_COUNT_MOD', config.sonarr.epCountMod),
       tags: pendingValue(pending, 'SONARR_TAGS', config.sonarr.tags.join(',')),
       searchOnAdd: parseBoolean(pending.get('SONARR_SEARCH_ON_ADD'), config.sonarr.searchOnAdd),
-      existingItemPolicy: pendingValue(pending, 'SONARR_EXISTING_ITEM_POLICY', config.sonarr.existingItemPolicy)
+      existingItemPolicy: pendingValue(pending, 'SONARR_EXISTING_ITEM_POLICY', config.sonarr.existingItemPolicy).toLowerCase()
     },
     playback: {
       kodiEnabled: parseBoolean(pending.get('KODI_ENABLED'), config.kodi.enabled),
@@ -471,7 +471,7 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
   set('RADARR_TAGS', normalizeTags(radarr['tags'], 'Radarr tags'));
   set('RADARR_SEARCH_ON_ADD', readBooleanField(radarr, 'searchOnAdd', config.radarr.searchOnAdd));
   set('RADARR_STRICT_IMDB_MATCH', readBooleanField(radarr, 'strictImdbMatch', config.radarr.strictImdbMatch));
-  const radarrExistingPolicy = readStringField(radarr, 'existingItemPolicy', config.radarr.existingItemPolicy) as AppConfig['radarr']['existingItemPolicy'];
+  const radarrExistingPolicy = readStringField(radarr, 'existingItemPolicy', config.radarr.existingItemPolicy).toLowerCase() as AppConfig['radarr']['existingItemPolicy'];
   if (!EXISTING_ITEM_POLICIES.has(radarrExistingPolicy)) throw new Error('Invalid Radarr existing-item policy.');
   set('RADARR_EXISTING_ITEM_POLICY', radarrExistingPolicy);
 
@@ -509,7 +509,7 @@ function payloadToUpdates(body: unknown, config: AppConfig, currentEnv: Map<stri
   set('EP_COUNT_MOD', epCountMod);
   set('SONARR_TAGS', normalizeTags(sonarr['tags'], 'Sonarr tags'));
   set('SONARR_SEARCH_ON_ADD', readBooleanField(sonarr, 'searchOnAdd', config.sonarr.searchOnAdd));
-  const sonarrExistingPolicy = readStringField(sonarr, 'existingItemPolicy', config.sonarr.existingItemPolicy) as AppConfig['sonarr']['existingItemPolicy'];
+  const sonarrExistingPolicy = readStringField(sonarr, 'existingItemPolicy', config.sonarr.existingItemPolicy).toLowerCase() as AppConfig['sonarr']['existingItemPolicy'];
   if (!EXISTING_ITEM_POLICIES.has(sonarrExistingPolicy)) throw new Error('Invalid Sonarr existing-item policy.');
   set('SONARR_EXISTING_ITEM_POLICY', sonarrExistingPolicy);
 

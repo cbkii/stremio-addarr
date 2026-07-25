@@ -69,12 +69,11 @@ export function createAddonInterface(config: AppConfig, logger?: Logger, deps?: 
 
     const parsed = parseStremioId(type, id);
     const tiles = await statusService.buildTiles(parsed);
-    const displayTiles = tiles;
 
-    logger?.info('stream handler complete', { type, id, tileCount: displayTiles.length, durationMs: Date.now() - start });
+    logger?.info('stream handler complete', { type, id, tileCount: tiles.length, durationMs: Date.now() - start });
 
     return {
-      streams: displayTiles.map(streamFromTile),
+      streams: tiles.map(streamFromTile),
       cacheMaxAge: config.streamCacheMaxAgeSec,
       staleRevalidate: config.streamStaleRevalidateSec
     };

@@ -332,3 +332,184 @@ test('Sonarr policy mutation failure returns a structured action result', async 
   assert.equal(result.title, 'Sonarr action failed');
   assert.match(result.summary, /policy mutation failed/i);
 });
+
+test('existing Radarr add-search re-resolves authoritative state before extend', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  cfg.radarr.existingItemPolicy = 'extend';
+  const calls: Call[] = [];
+  const client = new RadarrClient(cfg, radarrHttp({
+    movies: [{ id: 81, imdbId: 'tt81', title: 'Existing Movie', monitored: false, qualityProfileId: 4 }],
+    command: { id: 810, name: 'MoviesSearch' },
+    onCall: (call) => calls.push(call)
+  }) as never);
+
+  const result = await client.triggerMovieSearch('tt81', {
+    existingBeforeAction: true,
+    knownMovieId: 81,
+    knownTitle: 'Synthetic title'
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.filter((call) => call.method !== 'GET'), [
+    { method: 'PUT', path: '/api/v3/movie/editor', body: { movieIds: [81], monitored: true } },
+    { method: 'POST', path: '/api/v3/command', body: { name: 'MoviesSearch', movieIds: [81] } }
+  ]);
+});
+
+test('downloaded Radarr movie still queues the exact requested search', async () => {
+  const cfg = baseConfig();
+  cfg.radarr.enabled = true;
+  const calls: Call[] = [];
+  const client = new RadarrClient(cfg, radarrHttp({
+    movies: [{ id: 82, imdbId: 'tt82', title: 'Downloaded Movie', monitored: true, hasFile: true }],
+    command: { id: 820, name: 'MoviesSearch' },
+    onCall: (call) => calls.push(call)
+  }) as never);
+
+  const result = await client.triggerMovieSearch('tt82');
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.filter((call) => call.path === '/api/v3/command')[0]?.body, {
+    name: 'MoviesSearch', movieIds: [82]
+  });
+});
+
+test('existing Sonarr add-search re-resolves state and avoids redundant extend mutation', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.existingItemPolicy = 'extend';
+  cfg.sonarr.episodeReadyPollMs = 1;
+  cfg.sonarr.episodeReadyTimeoutMs = 20;
+  const calls: Call[] = [];
+  const client = new SonarrClient(cfg, sonarrHttp({
+    series: [{ id: 83, imdbId: 'tt83', title: 'Existing Show', monitored: true }],
+    episodes: [{ id: 831, seasonNumber: 1, episodeNumber: 1, monitored: true }],
+    command: { id: 830, name: 'EpisodeSearch' },
+    onCall: (call) => calls.push(call)
+  }) as never);
+
+  const result = await client.triggerEpisodeSearch('tt83', 1, 1, {
+    existingBeforeAction: true,
+    knownSeriesId: 83,
+    knownTitle: 'Synthetic title'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.filter((call) => call.method === 'PUT').length, 0);
+  assert.deepEqual(calls.filter((call) => call.path === '/api/v3/command')[0]?.body, {
+    name: 'EpisodeSearch', episodeIds: [831]
+  });
+});
+
+test('downloaded Sonarr episode still queues the exact requested search', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.episodeReadyPollMs = 1;
+  cfg.sonarr.episodeReadyTimeoutMs = 20;
+  const calls: Call[] = [];
+  const client = new SonarrClient(cfg, sonarrHttp({
+    series: [{ id: 84, imdbId: 'tt84', title: 'Downloaded Show', monitored: true }],
+    episodes: [{ id: 841, seasonNumber: 1, episodeNumber: 1, monitored: true, hasFile: true }],
+    command: { id: 840, name: 'EpisodeSearch' },
+    onCall: (call) => calls.push(call)
+  }) as never);
+
+  const result = await client.triggerEpisodeSearch('tt84', 1, 1);
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.filter((call) => call.path === '/api/v3/command')[0]?.body, {
+    name: 'EpisodeSearch', episodeIds: [841]
+  });
+});
+
+test('Sonarr apply-config skip preserves series monitored and auto keeps new items enabled', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.existingItemPolicy = 'apply-config';
+  cfg.sonarr.seriesMonitor = 'skip';
+  cfg.sonarr.monitorNewItems = 'auto';
+  cfg.sonarr.episodeReadyPollMs = 1;
+  cfg.sonarr.episodeReadyTimeoutMs = 20;
+  const calls: Call[] = [];
+  const client = new SonarrClient(cfg, sonarrHttp({
+    series: [{ id: 85, imdbId: 'tt85', title: 'Skip Show', monitored: false }],
+    episodes: [{ id: 851, seasonNumber: 1, episodeNumber: 1, monitored: false }],
+    command: { id: 850, name: 'EpisodeSearch' },
+    onCall: (call) => calls.push(call)
+  }) as never);
+
+  const result = await client.triggerEpisodeSearch('tt85', 1, 1);
+  assert.equal(result.ok, true);
+  const editor = calls.find((call) => call.path === '/api/v3/series/editor');
+  assert.ok(editor);
+  assert.equal(Object.hasOwn(editor!.body as object, 'monitored'), false);
+  assert.equal((editor!.body as { monitorNewItems?: string }).monitorNewItems, 'all');
+});
+
+test('episode-scoped monitoring waits through partial metadata until the pivot appears', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.seriesMonitor = 'ep';
+  cfg.sonarr.episodeReadyPollMs = 1;
+  cfg.sonarr.episodeReadyTimeoutMs = 50;
+  let episodeReads = 0;
+  const calls: Call[] = [];
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      calls.push({ method: 'GET', path });
+      if (path === '/api/v3/series') return [] as T;
+      if (path.startsWith('/api/v3/series/lookup')) return [{ title: 'Partial Show', imdbId: 'tt86', tvdbId: 86 }] as T;
+      if (path.startsWith('/api/v3/episode?seriesId=86')) {
+        episodeReads++;
+        return (episodeReads === 1
+          ? [{ id: 860, seasonNumber: 1, episodeNumber: 1, monitored: false }]
+          : [
+            { id: 860, seasonNumber: 1, episodeNumber: 1, monitored: false },
+            { id: 861, seasonNumber: 1, episodeNumber: 2, monitored: false }
+          ]) as T;
+      }
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(path: string, body: unknown): Promise<T> {
+      calls.push({ method: 'POST', path, body });
+      if (path === '/api/v3/series') return { id: 86, title: 'Partial Show', imdbId: 'tt86', tvdbId: 86 } as T;
+      if (path === '/api/v3/command') return { id: 8600, name: 'EpisodeSearch' } as T;
+      throw new Error(`Unexpected POST ${path}`);
+    },
+    async put<T>(path: string, body: unknown): Promise<T> {
+      calls.push({ method: 'PUT', path, body });
+      return {} as T;
+    }
+  };
+
+  const result = await new SonarrClient(cfg, http as never).addSeriesByImdbId('tt86', { season: 1, episode: 2 });
+  assert.equal(result.ok, true);
+  assert.ok(episodeReads >= 2);
+  assert.ok(calls.some((call) => call.path === '/api/v3/episode/monitor' && (call.body as any).episodeIds.includes(861)));
+});
+
+test('Sonarr lookup transport failures are reported as unavailable', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  cfg.sonarr.episodeReadyPollMs = 1;
+  cfg.sonarr.episodeReadyTimeoutMs = 20;
+  const http = {
+    async get<T>(path: string): Promise<T> {
+      if (path === '/api/v3/series') return [] as T;
+      if (path.startsWith('/api/v3/series/lookup')) throw new Error('sonarr lookup transport failed');
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async post<T>(): Promise<T> { return {} as T; },
+    async put<T>(): Promise<T> { return {} as T; }
+  };
+  const client = new SonarrClient(cfg, http as never);
+
+  const status = await client.getEpisodeStatus('tt87', 1, 1);
+  assert.equal(status.state, 'unavailable');
+  assert.match(status.reason ?? '', /lookup transport failed/i);
+  const action = await client.triggerEpisodeSearch('tt87', 1, 1);
+  assert.equal(action.ok, false);
+  assert.equal(action.title, 'Sonarr unavailable');
+  assert.match(action.summary, /lookup transport failed/i);
+  const add = await client.addSeriesByImdbId('tt87', { season: 1, episode: 1 });
+  assert.equal(add.ok, false);
+  assert.equal(add.title, 'Sonarr unavailable');
+  assert.match(add.summary, /lookup transport failed/i);
+});
