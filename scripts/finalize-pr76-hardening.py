@@ -1,7 +1,5 @@
 from pathlib import Path
 
-# This temporary transformer is intentionally self-cleaned after full validation.
-
 
 def replace_once(path: str, old: str, new: str) -> None:
     file_path = Path(path)
@@ -260,23 +258,8 @@ replace_once(
     if (!lookup) return undefined;"""
 )
 
-# Action orchestration: only carry IDs across the post-create visibility race.
-replace_once(
-    'src/services/status.ts',
-    """        knownMovieId: added.itemId,
-        knownTitle: added.detail?.split(' · ', 1)[0]""",
-    """        knownMovieId: added.alreadyExisted === true ? undefined : added.itemId,
-        knownTitle: added.alreadyExisted === true ? undefined : added.detail"""
-)
-replace_once(
-    'src/services/status.ts',
-    """        knownSeriesId: added.itemId,
-        knownTitle: added.detail""",
-    """        knownSeriesId: added.alreadyExisted === true ? undefined : added.itemId,
-        knownTitle: added.alreadyExisted === true ? undefined : added.detail"""
-)
-
-# TV tile clarity: include season state while keeping policy/profile context compact.
+# Tile/action orchestration: show season state, keep action descriptions compact,
+# and carry returned IDs only across post-create visibility races.
 replace_once(
     'src/services/status.ts',
     """function actualSeriesMonitorLine(status: ArrEpisodeStatus): string {
@@ -294,8 +277,12 @@ replace_once(
   return `📡: ${[series, season, episode, future].filter(Boolean).join(' ')}`;
 }
 
-function existingSeriesContextLine(status: ArrEpisodeStatus): string {
-  return [existingPolicyLine(status.existingItemPolicy), profileLine(status.qualityProfileName, status.qualityProfileId)]
+function existingPolicyProfileLine(
+  policy: AppConfig['sonarr']['existingItemPolicy'] | undefined,
+  profileName?: string,
+  profileId?: number
+): string {
+  return [existingPolicyLine(policy), profileLine(profileName, profileId)]
     .filter(Boolean)
     .join(' · ');
 }
@@ -303,13 +290,27 @@ function existingSeriesContextLine(status: ArrEpisodeStatus): string {
 )
 replace_once(
     'src/services/status.ts',
-    """existingPolicyLine(status.existingItemPolicy), actualSeriesMonitorLine(status), profileLine(status.qualityProfileName, status.qualityProfileId), '🗯️ 🔍  SEARCH FOR DL 📥📀'""",
-    """existingSeriesContextLine(status), actualSeriesMonitorLine(status), '🗯️ 🔍  SEARCH FOR DL 📥📀'"""
+    """description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', existingPolicyLine(status.existingItemPolicy), actualSeriesMonitorLine(status), profileLine(status.qualityProfileName, status.qualityProfileId), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),""",
+    """description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', existingPolicyProfileLine(status.existingItemPolicy, status.qualityProfileName, status.qualityProfileId), actualSeriesMonitorLine(status), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),"""
 )
 replace_once(
     'src/services/status.ts',
-    """existingPolicyLine(status.existingItemPolicy), actualSeriesMonitorLine(status), profileLine(status.qualityProfileName, status.qualityProfileId), '🗯️ 🔍  SEARCH FOR DL 📥📀'""",
-    """existingSeriesContextLine(status), actualSeriesMonitorLine(status), '🗯️ 🔍  SEARCH FOR DL 📥📀'"""
+    """description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} ${status.monitored ? 'monitored' : 'unmonitored'}` : '⭕ In library', existingPolicyLine(status.existingItemPolicy), actualSeriesMonitorLine(status), profileLine(status.qualityProfileName, status.qualityProfileId), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),""",
+    """description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} ${status.monitored ? 'monitored' : 'unmonitored'}` : '⭕ In library', existingPolicyProfileLine(status.existingItemPolicy, status.qualityProfileName, status.qualityProfileId), actualSeriesMonitorLine(status), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),"""
+)
+replace_once(
+    'src/services/status.ts',
+    """        knownMovieId: added.itemId,
+        knownTitle: added.detail?.split(' · ', 1)[0]""",
+    """        knownMovieId: added.alreadyExisted === true ? undefined : added.itemId,
+        knownTitle: added.alreadyExisted === true ? undefined : added.detail"""
+)
+replace_once(
+    'src/services/status.ts',
+    """        knownSeriesId: added.itemId,
+        knownTitle: added.detail""",
+    """        knownSeriesId: added.alreadyExisted === true ? undefined : added.itemId,
+        knownTitle: added.alreadyExisted === true ? undefined : added.detail"""
 )
 
 # Configure UI: preserve case-insensitive policy support on read and write.
