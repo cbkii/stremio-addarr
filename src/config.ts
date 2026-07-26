@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import type { LogLevel } from './logger.js';
 import type { ConfigValidation } from './types.js';
 
+export type ExistingItemPolicy = 'preserve' | 'extend' | 'apply-config';
+
 export interface AppConfig {
   appName: string;
   version: string;
@@ -61,6 +63,7 @@ export interface AppConfig {
     tags: number[];
     searchOnAdd: boolean;
     strictImdbMatch: boolean;
+    existingItemPolicy: ExistingItemPolicy;
   };
   sonarr: {
     enabled: boolean;
@@ -95,6 +98,7 @@ export interface AppConfig {
     epCountMod: 'epfuture' | 'epseason';
     tags: number[];
     searchOnAdd: boolean;
+    existingItemPolicy: ExistingItemPolicy;
   };
   traktSync: {
     enabled: boolean;
@@ -122,6 +126,7 @@ export const DEFAULT_MANIFEST_LOGO_PATH = '/assets/logo.png';
 const TARGET_CLIENTS = new Set<AppConfig['targetClient']>(['android-tv', 'generic']);
 const FILE_STREAMING_PLAYBACK_MODES = new Set<AppConfig['fileStreaming']['playbackMode']>(['direct', 'kodi']);
 const SONARR_MONITOR_NEW_ITEMS = new Set<AppConfig['sonarr']['monitorNewItems']>(['auto', 'all', 'none']);
+const EXISTING_ITEM_POLICIES = new Set<ExistingItemPolicy>(['preserve', 'extend', 'apply-config']);
 const SONARR_MONITOR_ALIASES: Record<string, AppConfig['sonarr']['seriesMonitor']> = {
   all: 'all',
   future: 'future',
@@ -140,6 +145,14 @@ const SONARR_MONITOR_ALIASES: Record<string, AppConfig['sonarr']['seriesMonitor'
   epfuture: 'epfuture',
   epseason: 'epseason'
 };
+
+function parseExistingItemPolicy(name: string, value: string): ExistingItemPolicy {
+  const normalized = value.trim().toLowerCase() as ExistingItemPolicy;
+  if (!EXISTING_ITEM_POLICIES.has(normalized)) {
+    throw new Error(`${name} must be one of: preserve, extend, apply-config.`);
+  }
+  return normalized;
+}
 
 function parseSonarrMonitorNewItems(value: string): AppConfig['sonarr']['monitorNewItems'] {
   const normalized = value.trim().toLowerCase() as AppConfig['sonarr']['monitorNewItems'];
@@ -506,7 +519,8 @@ function loadRadarrConfig(): AppConfig['radarr'] {
     minimumAvailability: readString('RADARR_MINIMUM_AVAILABILITY', 'announced'),
     tags: readIntegerListEnv('RADARR_TAGS'),
     searchOnAdd: readBoolean('RADARR_SEARCH_ON_ADD', true),
-    strictImdbMatch: readBoolean('RADARR_STRICT_IMDB_MATCH', false)
+    strictImdbMatch: readBoolean('RADARR_STRICT_IMDB_MATCH', false),
+    existingItemPolicy: parseExistingItemPolicy('RADARR_EXISTING_ITEM_POLICY', readString('RADARR_EXISTING_ITEM_POLICY', 'preserve'))
   };
 
   if (config.enabled && (!config.baseUrl || !config.apiKey)) {
@@ -547,7 +561,8 @@ function loadSonarrConfig(): AppConfig['sonarr'] {
     epCountPast: parseEpCountPast(readString('EP_COUNT_PAST', '8')),
     epCountMod: parseEpCountMod(readString('EP_COUNT_MOD', 'epfuture')),
     tags: readIntegerListEnv('SONARR_TAGS'),
-    searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true)
+    searchOnAdd: readBoolean('SONARR_SEARCH_ON_ADD', true),
+    existingItemPolicy: parseExistingItemPolicy('SONARR_EXISTING_ITEM_POLICY', readString('SONARR_EXISTING_ITEM_POLICY', 'preserve'))
   };
 
   if (config.enabled && (!config.baseUrl || !config.apiKey)) {

@@ -9,6 +9,7 @@ import { SonarrClient } from './sonarr.js';
 import { TmdbApiLookup, type TmdbLookup } from './tmdb.js';
 import { NoopTraktLookup, TraktApiLookup, type TraktLookup } from './trakt.js';
 import { NoopWatchedLookup, type WatchedLookup } from './watched.js';
+import { seriesMonitorScopeLine } from './series-monitor-scope.js';
 
 // --- Tile formatting helpers ---
 
@@ -101,6 +102,36 @@ function cardEndpointLine(raw: string): string {
   const value = raw.trim().replace(/\/+$/, '');
   const display = value.replace(/^https?:\/\//i, '');
   return `└─── 📲  ${display}`;
+}
+
+function profileLine(profileName?: string, profileId?: number): string {
+  if (profileName) return `🎚️: ${profileName}`;
+  if (profileId != null) return `🎚️: Profile ${profileId}`;
+  return '';
+}
+
+function existingPolicyLine(policy?: AppConfig['radarr']['existingItemPolicy']): string {
+  if (policy === 'apply-config') return '⚠️: configured settings will replace existing';
+  if (policy === 'extend') return '➕: existing settings kept; monitoring may extend';
+  return '🛡️: existing settings kept';
+}
+
+function actualSeriesMonitorLine(status: ArrEpisodeStatus): string {
+  const series = status.seriesMonitored ? 'series on' : 'series off';
+  const season = status.seasonMonitored == null ? '' : (status.seasonMonitored ? 'season on' : 'season off');
+  const episode = status.episodeId != null ? (status.monitored ? 'ep on' : 'ep off') : '';
+  const future = status.monitorNewItems === 'all' ? '✅new' : status.monitorNewItems === 'none' ? '❌new' : '';
+  return `📡: ${[series, season, episode, future].filter(Boolean).join(' ')}`;
+}
+
+function existingPolicyProfileLine(
+  policy: AppConfig['sonarr']['existingItemPolicy'] | undefined,
+  profileName?: string,
+  profileId?: number
+): string {
+  return [existingPolicyLine(policy), profileLine(profileName, profileId)]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function watchedLine(watched: boolean, borderFallback: boolean): string {
@@ -258,7 +289,7 @@ export class ArrStatusService {
       case 'missing':
         return [{
           name: '🔍🦜\nSearch\nDownload',
-          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ Monitored — file missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ Monitored — file missing', existingPolicyLine(status.existingItemPolicy), profileLine(status.qualityProfileName, status.qualityProfileId), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -266,7 +297,7 @@ export class ArrStatusService {
       case 'added':
         return [{
           name: '🔍🦜\nSearch\nDownload',
-          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ In Library — not monitored', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '⭕ In Library — not monitored', existingPolicyLine(status.existingItemPolicy), profileLine(status.qualityProfileName, status.qualityProfileId), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.radarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -274,7 +305,7 @@ export class ArrStatusService {
       case 'not_added':
         return [{
           name: '➕ Add +\nDownload',
-          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), '🗯️ ➕  ADD + SEARCH ►', this.radarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), movieLine(status.title, status.releaseDate, this.config.timeZone), `🎚️: Profile ${this.config.radarr.qualityProfileId}`, '🗯️ ➕  ADD + SEARCH ►', this.radarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -320,7 +351,7 @@ export class ArrStatusService {
       case 'episode_missing':
         return [{
           name: '🔍🦜\nSearch\nDownload',
-          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} missing` : '⭕ Episode missing', existingPolicyProfileLine(status.existingItemPolicy, status.qualityProfileName, status.qualityProfileId), actualSeriesMonitorLine(status), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -329,7 +360,7 @@ export class ArrStatusService {
       case 'episode_monitored':
         return [{
           name: '🔍🦜\nSearch\nDownload',
-          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} monitored` : '⭕ In library', '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), seriesLine(status.title), ep ? `⭕ ${ep} ${status.monitored ? 'monitored' : 'unmonitored'}` : '⭕ In library', existingPolicyProfileLine(status.existingItemPolicy, status.qualityProfileName, status.qualityProfileId), actualSeriesMonitorLine(status), '🗯️ 🔍  SEARCH FOR DL 📥📀', this.sonarrCardLine()),
           url: this.buildActionLink('search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -337,7 +368,7 @@ export class ArrStatusService {
       case 'series_not_added':
         return [{
           name: '➕ Add +\nDownload',
-          description: desc(watchedLine(watched, borderFallback), '📺  Not in Sonarr', ep, '🗯️ ➕  ADD SERIES + SEARCH ►', this.sonarrCardLine()),
+          description: desc(watchedLine(watched, borderFallback), '📺  Not in Sonarr', ep, seriesMonitorScopeLine(this.config.sonarr), `🎚️: Profile ${this.config.sonarr.qualityProfileId}`, '🗯️ ➕  ADD SERIES + SEARCH ►', this.sonarrCardLine()),
           url: this.buildActionLink('add-search', parsed),
           behaviorHints: { notWebReady: true },
           isAction: true
@@ -401,11 +432,11 @@ export class ArrStatusService {
 
   async triggerSearch(parsed: ParsedStremioId): Promise<AddActionResult> {
     if (parsed.kind === 'movie') {
-      const result = await this.radarr.triggerMovieSearch(parsed.imdbId);
+      const result = await this.radarr.triggerMovieSearch(parsed.imdbId, { existingBeforeAction: true });
       this.invalidateStatusCaches();
       return result;
     }
-    const result = await this.sonarr.triggerEpisodeSearch(parsed.imdbId, parsed.season, parsed.episode);
+    const result = await this.sonarr.triggerEpisodeSearch(parsed.imdbId, parsed.season, parsed.episode, { existingBeforeAction: true });
     this.invalidateStatusCaches();
     return result;
   }
@@ -415,7 +446,18 @@ export class ArrStatusService {
     if (!added.ok) {
       return added;
     }
-    const searched = await this.triggerSearch(parsed);
+    const searched = parsed.kind === 'movie'
+      ? await this.radarr.triggerMovieSearch(parsed.imdbId, {
+        existingBeforeAction: added.alreadyExisted === true,
+        knownMovieId: added.alreadyExisted === true ? undefined : added.itemId,
+        knownTitle: added.alreadyExisted === true ? undefined : added.detail
+      })
+      : await this.sonarr.triggerEpisodeSearch(parsed.imdbId, parsed.season, parsed.episode, {
+        existingBeforeAction: added.alreadyExisted === true,
+        knownSeriesId: added.alreadyExisted === true ? undefined : added.itemId,
+        knownTitle: added.alreadyExisted === true ? undefined : added.detail
+      });
+    this.invalidateStatusCaches();
     return searched.ok
       ? { ...searched, title: added.alreadyExisted ? searched.title : 'Added + search triggered' }
       : searched;

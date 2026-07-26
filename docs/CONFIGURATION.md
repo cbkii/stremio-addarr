@@ -60,6 +60,7 @@ Do not use nested values such as `MANIFEST_LOGO_URL=https://${PUBLIC_BASE_URL}/.
 | `RADARR_TAGS` | Optional comma-separated numeric tag IDs, for example `1,3`. |
 | `RADARR_SEARCH_ON_ADD` | Starts a search immediately after adding. |
 | `RADARR_STRICT_IMDB_MATCH` | Requires a strict IMDb match before acting on an existing movie. |
+| `RADARR_EXISTING_ITEM_POLICY` | Existing movie policy: `preserve` (default), `extend`, or destructive opt-in `apply-config`. Exact movie search still runs. |
 
 Find root folders, quality profiles and tags through Radarr or the Configure page's **Test & discover options** action.
 
@@ -76,6 +77,11 @@ Find root folders, quality profiles and tags through Radarr or the Configure pag
 | `SONARR_LANGUAGE_PROFILE_ID` | Sonarr v3 only. Leave unused for Sonarr v4. |
 | `SONARR_TAGS` | Optional comma-separated numeric tag IDs. |
 | `SONARR_SEARCH_ON_ADD` | Starts a search immediately after adding. |
+| `SONARR_EXISTING_ITEM_POLICY` | Existing series policy: `preserve` (default), `extend`, or destructive opt-in `apply-config`. Exact selected episode search still runs. |
+
+### Existing-item safety
+
+By default, clicking a tile for an item already in Radarr/Sonarr preserves its existing quality profile and monitoring settings. The add-on independently queues a targeted `MoviesSearch` or exact `EpisodeSearch`, so preservation never makes the action a no-op. Use `extend` only to add minimal monitoring, or `apply-config` to intentionally replace existing Arr-managed settings.
 
 ### Monitoring modes
 

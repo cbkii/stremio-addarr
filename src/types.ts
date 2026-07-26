@@ -1,3 +1,5 @@
+import type { ExistingItemPolicy } from './config.js';
+
 export type ContentKind = 'movie' | 'series';
 
 export interface ParsedStremioId {
@@ -32,6 +34,9 @@ export interface ArrMovieStatus {
   fileName?: string;
   fileSizeBytes?: number;
   reason?: string;
+  qualityProfileId?: number;
+  qualityProfileName?: string;
+  existingItemPolicy?: ExistingItemPolicy;
 }
 
 export interface ArrEpisodeStatus {
@@ -53,6 +58,12 @@ export interface ArrEpisodeStatus {
   fileName?: string;
   fileSizeBytes?: number;
   reason?: string;
+  qualityProfileId?: number;
+  qualityProfileName?: string;
+  existingItemPolicy?: ExistingItemPolicy;
+  seriesMonitored?: boolean;
+  seasonMonitored?: boolean;
+  monitorNewItems?: 'all' | 'none';
 }
 
 export interface AddActionResult {
@@ -62,6 +73,19 @@ export interface AddActionResult {
   summary: string;
   detail?: string;
   alreadyExisted?: boolean;
+  commandId?: number;
+  itemId?: number;
+}
+
+export interface ArrCommandResponse {
+  id?: number;
+  name?: string;
+  status?: string;
+}
+
+export interface ArrQualityProfile {
+  id: number;
+  name: string;
 }
 
 export interface ServiceHealth {
@@ -83,6 +107,10 @@ export interface RadarrMovieRecord {
   physicalRelease?: string;
   inCinemas?: string;
   added?: string;
+  qualityProfileId?: number;
+  minimumAvailability?: string;
+  rootFolderPath?: string;
+  tags?: number[];
   images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
 }
 
@@ -138,6 +166,11 @@ export interface SonarrSeriesRecord {
   year?: number;
   monitored?: boolean;
   added?: string;
+  qualityProfileId?: number;
+  monitorNewItems?: 'all' | 'none';
+  rootFolderPath?: string;
+  tags?: number[];
+  seasons?: Array<{ seasonNumber: number; monitored?: boolean }>;
   statistics?: {
     episodeFileCount?: number;
     episodeCount?: number;

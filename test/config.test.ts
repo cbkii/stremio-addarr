@@ -522,3 +522,26 @@ test('longer legacy add-on access tokens remain accepted', () => {
   process.env.ADDON_ACCESS_TOKEN = 'legacy-token-that-is-longer-than-eight';
   assert.equal(loadConfig().addonAccessToken, 'legacy-token-that-is-longer-than-eight');
 });
+
+
+test('existing-item policies default to preserve', () => {
+  const config = loadConfig();
+  assert.equal(config.radarr.existingItemPolicy, 'preserve');
+  assert.equal(config.sonarr.existingItemPolicy, 'preserve');
+});
+
+test('existing-item policy parsing is case-insensitive', () => {
+  process.env.RADARR_EXISTING_ITEM_POLICY = 'EXTEND';
+  process.env.SONARR_EXISTING_ITEM_POLICY = 'APPLY-CONFIG';
+  const config = loadConfig();
+  assert.equal(config.radarr.existingItemPolicy, 'extend');
+  assert.equal(config.sonarr.existingItemPolicy, 'apply-config');
+});
+
+test('invalid existing-item policies fail startup validation', () => {
+  process.env.RADARR_EXISTING_ITEM_POLICY = 'overwrite-everything';
+  assert.throws(() => loadConfig(), /RADARR_EXISTING_ITEM_POLICY/);
+  delete process.env.RADARR_EXISTING_ITEM_POLICY;
+  process.env.SONARR_EXISTING_ITEM_POLICY = 'maybe';
+  assert.throws(() => loadConfig(), /SONARR_EXISTING_ITEM_POLICY/);
+});

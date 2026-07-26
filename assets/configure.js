@@ -79,6 +79,7 @@ function populate(config) {
   byId('radarr-tags').value = radarr.tags;
   setBooleanValue('radarr-search', radarr.searchOnAdd);
   setBooleanValue('radarr-strict', radarr.strictImdbMatch);
+  byId('radarr-existing-policy').value = radarr.existingItemPolicy;
 
   setBooleanValue('sonarr-enabled', sonarr.enabled);
   byId('sonarr-url').value = sonarr.baseUrl;
@@ -92,6 +93,7 @@ function populate(config) {
   byId('sonarr-new-items').value = sonarr.monitorNewItems;
   byId('sonarr-tags').value = sonarr.tags;
   setBooleanValue('sonarr-search', sonarr.searchOnAdd);
+  byId('sonarr-existing-policy').value = sonarr.existingItemPolicy;
   byId('episode-timeout').value = sonarr.episodeReadyTimeoutMs;
   byId('episode-poll').value = sonarr.episodeReadyPollMs;
   byId('ep-count').value = sonarr.epCount;
@@ -145,7 +147,8 @@ function collect() {
       minimumAvailability: byId('radarr-minimum').value,
       tags: byId('radarr-tags').value,
       searchOnAdd: readBooleanValue('radarr-search'),
-      strictImdbMatch: readBooleanValue('radarr-strict')
+      strictImdbMatch: readBooleanValue('radarr-strict'),
+      existingItemPolicy: byId('radarr-existing-policy').value
     },
     sonarr: {
       enabled: readBooleanValue('sonarr-enabled'),
@@ -163,7 +166,8 @@ function collect() {
       epCountPast: readNumber('ep-count-past'),
       epCountMod: byId('ep-count-mod').value,
       tags: byId('sonarr-tags').value,
-      searchOnAdd: readBooleanValue('sonarr-search')
+      searchOnAdd: readBooleanValue('sonarr-search'),
+      existingItemPolicy: byId('sonarr-existing-policy').value
     },
     playback: {
       kodiEnabled: readBooleanValue('kodi-enabled'),
