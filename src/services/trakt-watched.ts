@@ -54,6 +54,7 @@ export class TraktWatchedLookup implements WatchedLookup {
   private lastSyncError?: string;
   private runningSync: Promise<void> | null = null;
   private runningRefresh: Promise<void> | null = null;
+  private initializationPromise: Promise<void> | null = null;
   private snapshotReady = false;
 
   constructor(
@@ -74,7 +75,7 @@ export class TraktWatchedLookup implements WatchedLookup {
   }
 
   async init(): Promise<void> {
-    await this.loadState();
+    await this.ensureInitialized();
   }
 
   async triggerSync(): Promise<void> {
@@ -144,8 +145,14 @@ export class TraktWatchedLookup implements WatchedLookup {
     return { expiresAtMs: timing.expiresAtMs, refreshAtMs: timing.refreshAtMs };
   }
 
+  private ensureInitialized(): Promise<void> {
+    this.initializationPromise ??= this.loadState();
+    return this.initializationPromise;
+  }
+
   private async ensureSynced(force: boolean): Promise<void> {
     if (!this.config.traktSync.enabled) return;
+    await this.ensureInitialized();
     const now = this.now();
     if (!force && this.snapshotReady && this.lastSyncAt > 0 && (now - this.lastSyncAt) < this.syncMs) return;
     if (this.runningSync) return this.runningSync;
