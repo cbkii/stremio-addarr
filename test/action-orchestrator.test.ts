@@ -17,7 +17,6 @@ function captureLogger() {
   const waiters = new Set<{
     predicate: (entry: Record<string, unknown>, allEntries: Array<Record<string, unknown>>) => boolean;
     resolve: (entry: Record<string, unknown>) => void;
-    reject: (error: Error) => void;
     timer: NodeJS.Timeout;
   }>();
 
@@ -46,7 +45,6 @@ function captureLogger() {
       const waiter = {
         predicate,
         resolve,
-        reject,
         timer: setTimeout(() => {
           waiters.delete(waiter);
           reject(new Error(message));
@@ -186,14 +184,13 @@ test('ActionOrchestrator logs terminal failure, clears dedupe state, and accepts
   assert.equal(entries.filter((entry) => entry['message'] === 'Action attempt failed').length, 3);
 
   shouldFail = false;
-  const laterSuccess = waitForEntry(
-    (entry) => entry['message'] === 'Action completed' && entry['title'] === 'later success',
-    'later retry was not accepted after terminal failure'
-  );
   const next = orchestrator.enqueue('search', movie('tt4000001'));
   assert.ok(next);
   assert.notEqual(next, 'search:movie:tt4000001', 'completed failure must not leave the dedupe key locked');
-  await laterSuccess;
+  await waitForEntry(
+    (entry) => entry['message'] === 'Action completed' && entry['title'] === 'later success',
+    'later retry was not accepted after terminal failure'
+  );
   assert.equal(calls, 4);
 });
 
