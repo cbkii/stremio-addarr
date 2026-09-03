@@ -14,19 +14,49 @@ function successfulResult(title = 'ok') {
 
 function captureLogger() {
   const entries: Array<Record<string, unknown>> = [];
-  const logger = createLogger('debug', {
-    log: (line) => entries.push(JSON.parse(line) as Record<string, unknown>),
-    error: (line) => entries.push(JSON.parse(line) as Record<string, unknown>)
-  });
-  return { logger, entries };
-}
+  const waiters = new Set<{
+    predicate: (entry: Record<string, unknown>, allEntries: Array<Record<string, unknown>>) => boolean;
+    resolve: (entry: Record<string, unknown>) => void;
+    reject: (error: Error) => void;
+    timer: NodeJS.Timeout;
+  }>();
 
-async function waitUntil(predicate: () => boolean, message: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (predicate()) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 1));
-  }
-  assert.fail(message);
+  const record = (line: string) => {
+    const entry = JSON.parse(line) as Record<string, unknown>;
+    entries.push(entry);
+    for (const waiter of [...waiters]) {
+      if (!waiter.predicate(entry, entries)) continue;
+      clearTimeout(waiter.timer);
+      waiters.delete(waiter);
+      waiter.resolve(entry);
+    }
+  };
+
+  const logger = createLogger('debug', { log: record, error: record });
+
+  const waitForEntry = (
+    predicate: (entry: Record<string, unknown>, allEntries: Array<Record<string, unknown>>) => boolean,
+    message: string,
+    timeoutMs = 5_000
+  ): Promise<Record<string, unknown>> => {
+    const existing = entries.find((entry) => predicate(entry, entries));
+    if (existing) return Promise.resolve(existing);
+
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const waiter = {
+        predicate,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          waiters.delete(waiter);
+          reject(new Error(message));
+        }, timeoutMs)
+      };
+      waiters.add(waiter);
+    });
+  };
+
+  return { logger, entries, waitForEntry };
 }
 
 test('ActionOrchestrator deduplicates an action while its first job is in flight', async () => {
@@ -41,7 +71,7 @@ test('ActionOrchestrator deduplicates an action while its first job is in flight
     },
     async triggerAddAndSearch() { return successfulResult(); }
   };
-  const { logger, entries } = captureLogger();
+  const { logger, entries, waitForEntry } = captureLogger();
   const orchestrator = new ActionOrchestrator(statusService as never, logger, 10, async () => undefined);
 
   const first = orchestrator.enqueue('search', movie('tt1000001'), 'req-1');
@@ -52,8 +82,12 @@ test('ActionOrchestrator deduplicates an action while its first job is in flight
   assert.equal(calls, 1);
   assert.ok(entries.some((entry) => entry['message'] === 'Action queue deduped'));
 
+  const completed = waitForEntry(
+    (entry) => entry['message'] === 'Action completed',
+    'deduplicated action did not complete'
+  );
   release();
-  await waitUntil(() => entries.some((entry) => entry['message'] === 'Action completed'), 'deduplicated action did not complete');
+  await completed;
   assert.equal(calls, 1);
 });
 
@@ -69,7 +103,7 @@ test('ActionOrchestrator rejects a new action after the configured waiting queue
     },
     async triggerAddAndSearch() { return successfulResult(); }
   };
-  const { logger, entries } = captureLogger();
+  const { logger, entries, waitForEntry } = captureLogger();
   const orchestrator = new ActionOrchestrator(statusService as never, logger, 1, async () => undefined);
 
   assert.ok(orchestrator.enqueue('search', movie('tt2000001'))); // active
@@ -78,11 +112,13 @@ test('ActionOrchestrator rejects a new action after the configured waiting queue
   assert.equal(calls, 1);
   assert.ok(entries.some((entry) => entry['message'] === 'Action queue full' && entry['queueDepth'] === 1));
 
-  release();
-  await waitUntil(
-    () => entries.filter((entry) => entry['message'] === 'Action completed').length === 2,
+  const bothCompleted = waitForEntry(
+    (entry, allEntries) => entry['message'] === 'Action completed'
+      && allEntries.filter((candidate) => candidate['message'] === 'Action completed').length === 2,
     'active and queued actions did not both complete'
   );
+  release();
+  await bothCompleted;
   assert.equal(calls, 2);
 });
 
@@ -97,7 +133,7 @@ test('ActionOrchestrator retries a transient execution failure and then succeeds
     },
     async triggerAddAndSearch() { return successfulResult(); }
   };
-  const { logger, entries } = captureLogger();
+  const { logger, entries, waitForEntry } = captureLogger();
   const orchestrator = new ActionOrchestrator(
     statusService as never,
     logger,
@@ -105,8 +141,12 @@ test('ActionOrchestrator retries a transient execution failure and then succeeds
     async (ms) => { sleeps.push(ms); }
   );
 
+  const completed = waitForEntry(
+    (entry) => entry['message'] === 'Action completed',
+    'retried action did not complete'
+  );
   orchestrator.enqueue('search', movie('tt3000001'));
-  await waitUntil(() => entries.some((entry) => entry['message'] === 'Action completed'), 'retried action did not complete');
+  await completed;
 
   assert.equal(calls, 2);
   assert.deepEqual(sleeps, [500]);
@@ -126,7 +166,7 @@ test('ActionOrchestrator logs terminal failure, clears dedupe state, and accepts
     },
     async triggerAddAndSearch() { return successfulResult(); }
   };
-  const { logger, entries } = captureLogger();
+  const { logger, entries, waitForEntry } = captureLogger();
   const orchestrator = new ActionOrchestrator(
     statusService as never,
     logger,
@@ -134,21 +174,26 @@ test('ActionOrchestrator logs terminal failure, clears dedupe state, and accepts
     async (ms) => { sleeps.push(ms); }
   );
 
+  const terminalFailure = waitForEntry(
+    (entry) => entry['message'] === 'Action execution failed',
+    'terminal failure was not logged'
+  );
   orchestrator.enqueue('search', movie('tt4000001'));
-  await waitUntil(() => entries.some((entry) => entry['message'] === 'Action execution failed'), 'terminal failure was not logged');
+  await terminalFailure;
 
   assert.equal(calls, 3);
   assert.deepEqual(sleeps, [500, 1000]);
   assert.equal(entries.filter((entry) => entry['message'] === 'Action attempt failed').length, 3);
 
   shouldFail = false;
+  const laterSuccess = waitForEntry(
+    (entry) => entry['message'] === 'Action completed' && entry['title'] === 'later success',
+    'later retry was not accepted after terminal failure'
+  );
   const next = orchestrator.enqueue('search', movie('tt4000001'));
   assert.ok(next);
   assert.notEqual(next, 'search:movie:tt4000001', 'completed failure must not leave the dedupe key locked');
-  await waitUntil(
-    () => entries.some((entry) => entry['message'] === 'Action completed' && entry['title'] === 'later success'),
-    'later retry was not accepted after terminal failure'
-  );
+  await laterSuccess;
   assert.equal(calls, 4);
 });
 
@@ -165,11 +210,15 @@ test('ActionOrchestrator dispatches add-search jobs to triggerAddAndSearch', asy
       return successfulResult('added');
     }
   };
-  const { logger, entries } = captureLogger();
+  const { logger, waitForEntry } = captureLogger();
   const orchestrator = new ActionOrchestrator(statusService as never, logger, 10, async () => undefined);
 
+  const completed = waitForEntry(
+    (entry) => entry['message'] === 'Action completed',
+    'add-search job did not complete'
+  );
   orchestrator.enqueue('add-search', movie('tt5000001'));
-  await waitUntil(() => entries.some((entry) => entry['message'] === 'Action completed'), 'add-search job did not complete');
+  await completed;
 
   assert.equal(addSearchCalls, 1);
   assert.equal(searchCalls, 0);
