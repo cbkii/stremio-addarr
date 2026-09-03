@@ -29,7 +29,10 @@ export class ActionOrchestrator {
   constructor(
     private readonly statusService: ArrStatusService,
     private readonly logger: Logger,
-    private readonly maxQueueDepth = 100
+    private readonly maxQueueDepth = 100,
+    private readonly sleepFn: (ms: number) => Promise<void> = async (ms) => {
+      await new Promise<void>((resolve) => setTimeout(resolve, ms));
+    }
   ) {}
 
   enqueue(action: ActionName, parsed: ParsedStremioId, reqId?: string): string | null {
@@ -147,6 +150,6 @@ export class ActionOrchestrator {
   }
 
   private async sleep(ms: number): Promise<void> {
-    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+    await this.sleepFn(ms);
   }
 }
