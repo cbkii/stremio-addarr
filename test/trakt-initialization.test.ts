@@ -55,17 +55,25 @@ test('first watched lookup waits for shared persisted-state initialization befor
     lookup['tokenRefreshAt'] = Date.now() + 60_000;
     lookup['tokenExpiresAt'] = Date.now() + 120_000;
   };
+  // Persistence is outside this ordering test's scope. Avoid writing credentials
+  // to baseConfig()'s shared test-state path during the successful sync below.
+  lookup['persistState'] = async () => {};
 
-  const initPromise = lookup.init();
+  let initSettled = false;
+  const initPromise = lookup.init().then(() => {
+    initSettled = true;
+  });
   const watchedPromise = lookup.isMovieWatched('tt1');
 
   await initializationStarted;
   await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(initSettled, false, 'init must remain pending while the shared state load is blocked');
   assert.equal(requests.length, 0, 'sync/network work must not start while persisted state is still loading');
 
   releaseInitialization();
   const [, watched] = await Promise.all([initPromise, watchedPromise]);
 
+  assert.equal(initSettled, true, 'init should settle after the shared state load completes');
   assert.equal(loadCalls, 1, 'init and first lookup must share one state-load promise');
   assert.equal(watched, true);
   assert.equal(requests.some(({ url }) => url.endsWith('/oauth/token')), false, 'loaded access token should avoid an unnecessary refresh');
