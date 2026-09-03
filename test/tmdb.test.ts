@@ -84,3 +84,52 @@ test('TmdbApiLookup resolves episode air_date via IMDb show lookup', async () =>
     global.fetch = originalFetch;
   }
 });
+
+test('TmdbApiLookup returns undefined for non-OK IMDb find responses', async () => {
+  const originalFetch = global.fetch;
+  try {
+    for (const status of [404, 500]) {
+      global.fetch = (async () => new Response('{"error":"unavailable"}', { status })) as typeof fetch;
+      const lookup = new TmdbApiLookup('token');
+      assert.equal(await lookup.getMovieReleaseDate(`tt${status}0000`), undefined);
+    }
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('TmdbApiLookup returns undefined rather than throwing on network failure', async () => {
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = (async () => { throw new Error('network offline'); }) as typeof fetch;
+    const lookup = new TmdbApiLookup('token');
+    assert.equal(await lookup.getMovieReleaseDate('tt9990001'), undefined);
+    assert.equal(await lookup.getEpisodeReleaseDate('tt9990002', 1, 1), undefined);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('TmdbApiLookup falls back to the find response date when release-details request fails', async () => {
+  const originalFetch = global.fetch;
+  const calls: string[] = [];
+  try {
+    global.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes('/3/find/tt9990003')) {
+        return new Response(JSON.stringify({ movie_results: [{ id: 700, release_date: '2025-04-03' }] }), { status: 200 });
+      }
+      if (url.includes('/3/movie/700/release_dates')) {
+        return new Response('{"error":"temporary"}', { status: 503 });
+      }
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+
+    const lookup = new TmdbApiLookup('token');
+    assert.equal(await lookup.getMovieReleaseDate('tt9990003'), '2025-04-03');
+    assert.equal(calls.length, 2);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
