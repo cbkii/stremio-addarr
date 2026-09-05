@@ -61,7 +61,8 @@ function selectValue(id, value, fallbackLabel) {
 }
 
 function arrOptionLabel(item) {
-  const name = typeof item?.name === 'string' && item.name.trim() ? item.name.trim() : 'Profile';
+  const rawName = item?.name;
+  const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : 'Profile';
   return `${name} [${item.id}]`;
 }
 
