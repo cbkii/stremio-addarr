@@ -134,8 +134,8 @@ test('Arr discovery returns every named profile and reuses stored same-origin cr
     ]);
   });
 
-  assert.ok(seenKeys.get('radarr')?.length);
+  assert.ok((seenKeys.get('radarr')?.length ?? 0) > 0);
   assert.ok(seenKeys.get('radarr')?.every((key) => key === cfg.radarr.apiKey));
-  assert.ok(seenKeys.get('sonarr')?.length);
+  assert.ok((seenKeys.get('sonarr')?.length ?? 0) > 0);
   assert.ok(seenKeys.get('sonarr')?.every((key) => key === cfg.sonarr.apiKey));
 });
