@@ -65,6 +65,10 @@ function arrOptionLabel(item) {
   return `${name} [${item.id}]`;
 }
 
+function discoveryInputMatches(service, baseUrl, apiKey) {
+  return byId(`${service}-url`).value === baseUrl && byId(`${service}-key`).value === apiKey;
+}
+
 function setBooleanValue(id, value) {
   byId(id).value = value ? 'true' : 'false';
 }
@@ -278,7 +282,7 @@ function applyArrOptions(service, options) {
 async function discoverOptions(service, { testConnection = false, force = false } = {}) {
   if (!force && discoveredServices.has(service)) return;
   const existing = discoveryInFlight.get(service);
-  if (existing) return existing;
+  if (existing && !force) return existing;
 
   const result = byId(`${service}-result`);
   const baseUrl = byId(`${service}-url`).value;
@@ -293,7 +297,7 @@ async function discoverOptions(service, { testConnection = false, force = false 
           method: 'POST',
           body: JSON.stringify({ baseUrl, apiKey })
         });
-        if (generation !== discoveryGeneration) return;
+        if (generation !== discoveryGeneration || !discoveryInputMatches(service, baseUrl, apiKey)) return;
         setMessage(result, `Connected to ${tested.name}${tested.version ? ` ${tested.version}` : ''}. Loading options…`, 'success');
       } else {
         setMessage(result, 'Loading saved-server options…');
@@ -303,13 +307,13 @@ async function discoverOptions(service, { testConnection = false, force = false 
         method: 'POST',
         body: JSON.stringify({ baseUrl, apiKey })
       });
-      if (generation !== discoveryGeneration) return;
+      if (generation !== discoveryGeneration || !discoveryInputMatches(service, baseUrl, apiKey)) return;
 
       applyArrOptions(service, options);
       discoveredServices.add(service);
       setMessage(result, `Connected. Found ${options.rootFolders.length} root folder(s) and ${options.qualityProfiles.length} quality profile(s).`, 'success');
     } catch (error) {
-      if (generation !== discoveryGeneration) return;
+      if (generation !== discoveryGeneration || !discoveryInputMatches(service, baseUrl, apiKey)) return;
       const message = error instanceof Error ? error.message : String(error);
       setMessage(
         result,
