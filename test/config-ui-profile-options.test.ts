@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { Script } from 'node:vm';
 import { createApp } from '../src/index.js';
 import { baseConfig, withServer } from './_helpers.js';
 
@@ -33,6 +34,7 @@ test.afterEach(() => {
 test('Configure client renders named Arr profiles while preserving numeric IDs', async () => {
   const source = await fs.readFile(path.resolve('assets/configure.js'), 'utf8');
 
+  assert.doesNotThrow(() => new Script(source));
   assert.match(source, /return `\$\{name\} \[\$\{item\.id\}\]`;/);
   assert.match(source, /Unavailable profile \[\$\{selectedProfile\}\]/);
   assert.match(source, /Unavailable profile \[\$\{selectedLanguage\}\]/);
