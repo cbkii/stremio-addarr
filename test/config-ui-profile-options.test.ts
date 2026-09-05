@@ -38,6 +38,9 @@ test('Configure client renders named Arr profiles while preserving numeric IDs',
   assert.match(source, /Unavailable profile \[\$\{selectedLanguage\}\]/);
   assert.match(source, /if \(page === 'arr'\) void discoverConfiguredArrOptions\(\);/);
   assert.match(source, /Test connection & refresh options/);
+  assert.match(source, /if \(existing && !force\) return existing;/);
+  assert.match(source, /function discoveryInputMatches\(service, baseUrl, apiKey\)/);
+  assert.match(source, /generation !== discoveryGeneration \|\| !discoveryInputMatches\(service, baseUrl, apiKey\)/);
   assert.match(source, /qualityProfileId: readNumber\('radarr-profile'\)/);
   assert.match(source, /qualityProfileId: readNumber\('sonarr-profile'\)/);
 });
