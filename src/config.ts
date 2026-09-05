@@ -457,7 +457,7 @@ function loadCacheConfig(): Pick<AppConfig,
 function loadFileStreamingConfig(): AppConfig['fileStreaming'] {
   const fileStreamingEnabled = readBoolean('FILE_STREAMING_ENABLED', false);
   const fileStreamingSecret = readString('FILE_STREAMING_SECRET');
-  const tokenTtlSec = Math.floor(readNumber('FILE_STREAM_TOKEN_TTL_SEC', 3600));
+  const tokenTtlSec = Math.floor(readNumber('FILE_STREAM_TOKEN_TTL_SEC', 28_800));
   if (tokenTtlSec < 60 || tokenTtlSec > 86_400) {
     throw new Error('FILE_STREAM_TOKEN_TTL_SEC must be between 60 and 86400.');
   }

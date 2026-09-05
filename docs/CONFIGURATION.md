@@ -136,8 +136,13 @@ The manifest advertises matching `skip` steps, so Stremio pagination follows the
 | `FILE_STREAMING_ENABLED` | Enables direct media-file streaming from this host. |
 | `FILE_STREAMING_SECRET` | Signing secret required before direct streaming can be enabled. Configure it outside the UI. |
 | `FILE_STREAMING_PLAYBACK_MODE` | `direct` or `kodi`. |
+| `FILE_STREAM_TOKEN_TTL_SEC` | Signed direct-file URL lifetime in seconds. Default `28800` (8 hours); accepted range 60–86400. |
 
 Media paths must resolve beneath the configured Radarr/Sonarr root folders from the add-on's filesystem namespace.
+
+In `direct` mode, Addarr follows Stremio's stream-response contract: an HTTPS MP4 file is advertised as web-ready, while non-MP4 or non-HTTPS files retain `behaviorHints.notWebReady=true`. Filename and size hints are still supplied when available for subtitle matching. Signed file URLs remain HMAC-authenticated and finite-lived; the 8-hour default is intended to cover long films, pauses, seeks and short reconnects without making links permanent.
+
+Existing installations that explicitly contain `FILE_STREAM_TOKEN_TTL_SEC=3600` keep that value after upgrade. Set it to `28800` if one-hour expiry can interrupt long direct-play sessions.
 
 ## Trakt and TMDB
 

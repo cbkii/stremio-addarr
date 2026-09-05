@@ -1,6 +1,7 @@
 import { addonBuilder } from 'stremio-addon-sdk';
 import type { AppConfig } from './config.js';
 import type { Logger } from './logger.js';
+import { isWebReadyHttpsMp4 } from './lib/stream-readiness.js';
 import { parseStremioId } from './lib/stremio-ids.js';
 import type { StatusTile } from './types.js';
 import { CatalogService, type CatalogFilter } from './services/catalog.js';
@@ -8,16 +9,28 @@ import { ArrStatusService } from './services/status.js';
 import { NoopWatchedLookup } from './services/watched.js';
 import type { WatchedLookup } from './services/watched.js';
 
+function streamBehaviorHints(tile: StatusTile): StatusTile['behaviorHints'] | undefined {
+  const hints = tile.behaviorHints;
+  if (!hints || !tile.url || !hints.notWebReady || !isWebReadyHttpsMp4(tile.url, hints.filename)) {
+    return hints;
+  }
+
+  const webReadyHints = { ...hints };
+  delete webReadyHints.notWebReady;
+  return Object.keys(webReadyHints).length > 0 ? webReadyHints : undefined;
+}
+
 export function streamFromTile(tile: StatusTile) {
   if (!tile.url && !tile.externalUrl) {
     throw new Error(`Invalid status tile without a Stremio stream source: ${tile.name}`);
   }
+  const behaviorHints = streamBehaviorHints(tile);
   return {
     name: tile.name,
     ...(tile.description ? { description: tile.description } : {}),
     ...(tile.url ? { url: tile.url } : {}),
     ...(tile.externalUrl ? { externalUrl: tile.externalUrl } : {}),
-    ...(tile.behaviorHints ? { behaviorHints: tile.behaviorHints } : {})
+    ...(behaviorHints ? { behaviorHints } : {})
   };
 }
 

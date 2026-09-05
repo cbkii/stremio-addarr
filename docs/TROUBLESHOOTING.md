@@ -206,6 +206,20 @@ Check:
 2. The service account can traverse and read the media path.
 3. Symlinks and bind mounts resolve beneath the allowed root.
 4. The service was restarted after `.env` changes.
+5. For older installations, confirm `FILE_STREAM_TOKEN_TTL_SEC` is long enough for the playback session. The current default is `28800` seconds (8 hours); an explicitly retained `3600` value still expires after one hour.
+
+## Torrent streams fail after Addarr direct playback
+
+Some Stremio Android TV versions/devices have upstream reports of persistent local streaming-server state and later stream initialisation failures that recover after Stremio is force-stopped or restarted. See [Stremio/stremio-bugs#2461](https://github.com/Stremio/stremio-bugs/issues/2461) and [Stremio/stremio-bugs#2741](https://github.com/Stremio/stremio-bugs/issues/2741). These reports do not prove that Addarr causes the Stremio bug, and Addarr cannot reset Stremio's internal torrent/P2P engine.
+
+Use this controlled comparison if torrent-addon streams work before an Addarr file but fail afterwards:
+
+1. Force-stop Stremio, relaunch it and confirm one known torrent stream starts.
+2. Stop that playback normally, then play one downloaded file through Addarr in `direct` mode.
+3. Stop the Addarr playback with Back and immediately retry the same torrent.
+4. Repeat after setting `FILE_STREAMING_PLAYBACK_MODE=kodi` and restarting `stremio-addarr`.
+
+If the failure reproduces only after `direct` Addarr playback and not after the Kodi control, that is useful evidence of a Stremio direct-stream/streaming-engine lifecycle interaction rather than a Radarr/Sonarr or individual torrent-addon failure. HTTPS MP4 direct files are advertised as web-ready; MKV, other non-MP4 formats and non-HTTPS URLs retain Stremio's required `notWebReady` hint.
 
 ## Stale settings or stale Stremio metadata
 

@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Advertise downloaded HTTPS MP4 files as web-ready Stremio URL streams while retaining `notWebReady` for MKV, other non-MP4 formats, non-HTTPS URLs and uncertain file metadata.
+- Extend the default signed direct-file URL lifetime from one hour to eight hours so long playback, pauses, seeks and short reconnects do not fail at the former one-hour boundary; existing explicit TTL overrides remain respected.
 - Preserve existing Radarr/Sonarr profiles and monitoring by default while still queueing an exact movie/episode search for every action tile click.
 - Stop existing-series episode actions from unmonitoring unrelated episodes or falling back to broad season/missing searches.
 - Require positive Arr command IDs and matching command names, when supplied, before reporting a targeted search as queued.
