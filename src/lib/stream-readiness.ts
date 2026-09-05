@@ -10,6 +10,6 @@ export function isWebReadyHttpsMp4(url: string | undefined, filename: string | u
 
   if (parsed.protocol !== 'https:') return false;
 
-  const cleanFilename = filename.trim().split(/[?#]/, 1)[0] ?? '';
+  const cleanFilename = filename.trim().split(/[?#]/, 1)[0];
   return /\.mp4$/i.test(cleanFilename);
 }
