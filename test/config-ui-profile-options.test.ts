@@ -42,7 +42,10 @@ test('Configure client renders named Arr profiles while preserving numeric IDs',
   assert.match(source, /Test connection & refresh options/);
   assert.match(source, /if \(existing && !force\) return existing;/);
   assert.match(source, /function discoveryInputMatches\(service, baseUrl, apiKey\)/);
-  assert.match(source, /generation !== discoveryGeneration \|\| !discoveryInputMatches\(service, baseUrl, apiKey\)/);
+  assert.match(source, /const requestToken = Symbol\(service\);/);
+  assert.match(source, /discoveryRequestTokens\.get\(service\) === requestToken/);
+  assert.match(source, /!discoveryRequestIsCurrent\(service, requestToken, generation, baseUrl, apiKey\)/);
+  assert.match(source, /addEventListener\('input', \(\) => invalidateDiscovery\(service\)\)/);
   assert.match(source, /qualityProfileId: readNumber\('radarr-profile'\)/);
   assert.match(source, /qualityProfileId: readNumber\('sonarr-profile'\)/);
 });
