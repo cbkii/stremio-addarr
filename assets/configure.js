@@ -10,6 +10,7 @@ let currentConfig = null;
 let discoveryGeneration = 0;
 const discoveredServices = new Set();
 const discoveryInFlight = new Map();
+const discoveryRequestTokens = new Map();
 
 function byId(id) {
   const element = document.getElementById(id);
@@ -70,6 +71,18 @@ function discoveryInputMatches(service, baseUrl, apiKey) {
   return byId(`${service}-url`).value === baseUrl && byId(`${service}-key`).value === apiKey;
 }
 
+function discoveryRequestIsCurrent(service, requestToken, generation, baseUrl, apiKey) {
+  return discoveryRequestTokens.get(service) === requestToken
+    && generation === discoveryGeneration
+    && discoveryInputMatches(service, baseUrl, apiKey);
+}
+
+function invalidateDiscovery(service) {
+  discoveredServices.delete(service);
+  discoveryInFlight.delete(service);
+  discoveryRequestTokens.delete(service);
+}
+
 function setBooleanValue(id, value) {
   byId(id).value = value ? 'true' : 'false';
 }
@@ -87,6 +100,7 @@ function populate(config) {
   discoveryGeneration += 1;
   discoveredServices.clear();
   discoveryInFlight.clear();
+  discoveryRequestTokens.clear();
   const { catalog, radarr, sonarr, playback, trakt, tmdb } = config;
 
   byId('catalog-page-size').value = catalog.pageSize;
@@ -289,6 +303,8 @@ async function discoverOptions(service, { testConnection = false, force = false 
   const baseUrl = byId(`${service}-url`).value;
   const apiKey = byId(`${service}-key`).value;
   const generation = discoveryGeneration;
+  const requestToken = Symbol(service);
+  discoveryRequestTokens.set(service, requestToken);
 
   const task = (async () => {
     try {
@@ -298,7 +314,7 @@ async function discoverOptions(service, { testConnection = false, force = false 
           method: 'POST',
           body: JSON.stringify({ baseUrl, apiKey })
         });
-        if (generation !== discoveryGeneration || !discoveryInputMatches(service, baseUrl, apiKey)) return;
+        if (!discoveryRequestIsCurrent(service, requestToken, generation, baseUrl, apiKey)) return;
         setMessage(result, `Connected to ${tested.name}${tested.version ? ` ${tested.version}` : ''}. Loading options…`, 'success');
       } else {
         setMessage(result, 'Loading saved-server options…');
@@ -308,13 +324,13 @@ async function discoverOptions(service, { testConnection = false, force = false 
         method: 'POST',
         body: JSON.stringify({ baseUrl, apiKey })
       });
-      if (generation !== discoveryGeneration || !discoveryInputMatches(service, baseUrl, apiKey)) return;
+      if (!discoveryRequestIsCurrent(service, requestToken, generation, baseUrl, apiKey)) return;
 
       applyArrOptions(service, options);
       discoveredServices.add(service);
       setMessage(result, `Connected. Found ${options.rootFolders.length} root folder(s) and ${options.qualityProfiles.length} quality profile(s).`, 'success');
     } catch (error) {
-      if (generation !== discoveryGeneration || !discoveryInputMatches(service, baseUrl, apiKey)) return;
+      if (!discoveryRequestIsCurrent(service, requestToken, generation, baseUrl, apiKey)) return;
       const message = error instanceof Error ? error.message : String(error);
       setMessage(
         result,
@@ -383,7 +399,7 @@ byId('test-radarr').addEventListener('click', () => testAndDiscover('radarr'));
 byId('test-sonarr').addEventListener('click', () => testAndDiscover('sonarr'));
 for (const service of ['radarr', 'sonarr']) {
   for (const field of ['url', 'key']) {
-    byId(`${service}-${field}`).addEventListener('input', () => discoveredServices.delete(service));
+    byId(`${service}-${field}`).addEventListener('input', () => invalidateDiscovery(service));
   }
 }
 byId('copy-manifest').addEventListener('click', async () => {
@@ -402,6 +418,7 @@ byId('logout').addEventListener('click', async () => {
     discoveryGeneration += 1;
     discoveredServices.clear();
     discoveryInFlight.clear();
+    discoveryRequestTokens.clear();
     csrf = '';
     currentConfig = null;
     dashboard.hidden = true;
