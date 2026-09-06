@@ -7,6 +7,10 @@ const configForm = document.querySelector('#config-form');
 const saveBanner = document.querySelector('#save-banner');
 let csrf = '';
 let currentConfig = null;
+let discoveryGeneration = 0;
+const discoveredServices = new Set();
+const discoveryInFlight = new Map();
+const discoveryRequestTokens = new Map();
 
 function byId(id) {
   const element = document.getElementById(id);
@@ -43,10 +47,40 @@ function option(select, value, label) {
   return existing;
 }
 
+function hasOption(select, value) {
+  const stringValue = String(value);
+  return [...select.options].some((item) => item.value === stringValue);
+}
+
 function selectValue(id, value, fallbackLabel) {
   const select = byId(id);
-  option(select, value ?? '', fallbackLabel || String(value ?? ''));
-  select.value = String(value ?? '');
+  const stringValue = String(value ?? '');
+  if (!hasOption(select, stringValue)) {
+    option(select, stringValue, fallbackLabel || stringValue);
+  }
+  select.value = stringValue;
+}
+
+function arrOptionLabel(item) {
+  const rawName = item?.name;
+  const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : 'Profile';
+  return `${name} [${item.id}]`;
+}
+
+function discoveryInputMatches(service, baseUrl, apiKey) {
+  return byId(`${service}-url`).value === baseUrl && byId(`${service}-key`).value === apiKey;
+}
+
+function discoveryRequestIsCurrent(service, requestToken, generation, baseUrl, apiKey) {
+  return discoveryRequestTokens.get(service) === requestToken
+    && generation === discoveryGeneration
+    && discoveryInputMatches(service, baseUrl, apiKey);
+}
+
+function invalidateDiscovery(service) {
+  discoveredServices.delete(service);
+  discoveryInFlight.delete(service);
+  discoveryRequestTokens.delete(service);
 }
 
 function setBooleanValue(id, value) {
@@ -63,6 +97,10 @@ function readBooleanValue(id) {
 
 function populate(config) {
   currentConfig = config;
+  discoveryGeneration += 1;
+  discoveredServices.clear();
+  discoveryInFlight.clear();
+  discoveryRequestTokens.clear();
   const { catalog, radarr, sonarr, playback, trakt, tmdb } = config;
 
   byId('catalog-page-size').value = catalog.pageSize;
@@ -74,7 +112,7 @@ function populate(config) {
   byId('radarr-key').value = '';
   byId('radarr-key-state').textContent = radarr.apiKeyConfigured ? 'configured' : 'not configured';
   selectValue('radarr-root', radarr.rootFolderPath, radarr.rootFolderPath || 'Test connection to discover');
-  selectValue('radarr-profile', radarr.qualityProfileId, `Profile ${radarr.qualityProfileId}`);
+  selectValue('radarr-profile', radarr.qualityProfileId, `Profile [${radarr.qualityProfileId}]`);
   byId('radarr-minimum').value = radarr.minimumAvailability;
   byId('radarr-tags').value = radarr.tags;
   setBooleanValue('radarr-search', radarr.searchOnAdd);
@@ -87,8 +125,8 @@ function populate(config) {
   byId('sonarr-key').value = '';
   byId('sonarr-key-state').textContent = sonarr.apiKeyConfigured ? 'configured' : 'not configured';
   selectValue('sonarr-root', sonarr.rootFolderPath, sonarr.rootFolderPath || 'Test connection to discover');
-  selectValue('sonarr-profile', sonarr.qualityProfileId, `Profile ${sonarr.qualityProfileId}`);
-  selectValue('sonarr-language', sonarr.languageProfileId ?? 0, sonarr.languageProfileId ? `Profile ${sonarr.languageProfileId}` : 'Not used');
+  selectValue('sonarr-profile', sonarr.qualityProfileId, `Profile [${sonarr.qualityProfileId}]`);
+  selectValue('sonarr-language', sonarr.languageProfileId ?? 0, sonarr.languageProfileId ? `Profile [${sonarr.languageProfileId}]` : 'Not used');
   byId('sonarr-monitor').value = sonarr.seriesMonitor;
   byId('sonarr-new-items').value = sonarr.monitorNewItems;
   byId('sonarr-tags').value = sonarr.tags;
@@ -219,50 +257,110 @@ function showPage(page) {
     button.setAttribute('aria-current', active ? 'page' : 'false');
   });
   document.querySelector(`.config-section[data-page="${page}"]`)?.querySelector('h2')?.scrollIntoView({ block: 'start' });
+  if (page === 'arr') void discoverConfiguredArrOptions();
 }
 
-async function testAndDiscover(service) {
+function applyArrOptions(service, options) {
+  const root = byId(`${service}-root`);
+  const profile = byId(`${service}-profile`);
+  const selectedRoot = root.value;
+  const selectedProfile = profile.value;
+  root.replaceChildren();
+  profile.replaceChildren();
+
+  for (const item of options.rootFolders) option(root, item.path, item.path);
+  for (const item of options.qualityProfiles) option(profile, item.id, arrOptionLabel(item));
+
+  if (selectedRoot && !hasOption(root, selectedRoot)) {
+    option(root, selectedRoot, selectedRoot);
+  }
+  if (selectedProfile && !hasOption(profile, selectedProfile)) {
+    option(profile, selectedProfile, `Unavailable profile [${selectedProfile}]`);
+  }
+
+  root.value = selectedRoot || root.options[0]?.value || '';
+  profile.value = selectedProfile || profile.options[0]?.value || '';
+
+  if (service === 'sonarr') {
+    const language = byId('sonarr-language');
+    const selectedLanguage = language.value;
+    language.replaceChildren();
+    option(language, 0, 'Not used');
+    for (const item of options.languageProfiles) option(language, item.id, arrOptionLabel(item));
+    if (selectedLanguage && !hasOption(language, selectedLanguage)) {
+      option(language, selectedLanguage, `Unavailable profile [${selectedLanguage}]`);
+    }
+    language.value = selectedLanguage || '0';
+  }
+}
+
+async function discoverOptions(service, { testConnection = false, force = false } = {}) {
+  if (!force && discoveredServices.has(service)) return;
+  const existing = discoveryInFlight.get(service);
+  if (existing && !force) return existing;
+
   const result = byId(`${service}-result`);
   const baseUrl = byId(`${service}-url`).value;
   const apiKey = byId(`${service}-key`).value;
-  setMessage(result, 'Testing connection…');
-  try {
-    const tested = await request(`/api/config/test/${service}`, {
-      method: 'POST',
-      body: JSON.stringify({ baseUrl, apiKey })
-    });
-    setMessage(result, `Connected to ${tested.name}${tested.version ? ` ${tested.version}` : ''}. Loading options…`, 'success');
-    const options = await request(`/api/config/options/${service}`, {
-      method: 'POST',
-      body: JSON.stringify({ baseUrl, apiKey })
-    });
-    const root = byId(`${service}-root`);
-    const profile = byId(`${service}-profile`);
-    const selectedRoot = root.value;
-    const selectedProfile = profile.value;
-    root.replaceChildren();
-    profile.replaceChildren();
-    for (const item of options.rootFolders) option(root, item.path, item.path);
-    for (const item of options.qualityProfiles) option(profile, item.id, item.name);
-    if (selectedRoot) option(root, selectedRoot, selectedRoot);
-    if (selectedProfile) option(profile, selectedProfile, `Profile ${selectedProfile}`);
-    root.value = selectedRoot || root.options[0]?.value || '';
-    profile.value = selectedProfile || profile.options[0]?.value || '';
-    if (service === 'sonarr') {
-      const language = byId('sonarr-language');
-      const selectedLanguage = language.value;
-      language.replaceChildren();
-      option(language, 0, 'Not used');
-      for (const item of options.languageProfiles) option(language, item.id, item.name);
-      if (selectedLanguage && ![...language.options].some((item) => item.value === selectedLanguage)) {
-        option(language, selectedLanguage, `Profile ${selectedLanguage}`);
+  const generation = discoveryGeneration;
+  const requestToken = Symbol(service);
+  discoveryRequestTokens.set(service, requestToken);
+
+  const task = (async () => {
+    try {
+      if (testConnection) {
+        setMessage(result, 'Testing connection…');
+        const tested = await request(`/api/config/test/${service}`, {
+          method: 'POST',
+          body: JSON.stringify({ baseUrl, apiKey })
+        });
+        if (!discoveryRequestIsCurrent(service, requestToken, generation, baseUrl, apiKey)) return;
+        setMessage(result, `Connected to ${tested.name}${tested.version ? ` ${tested.version}` : ''}. Loading options…`, 'success');
+      } else {
+        setMessage(result, 'Loading saved-server options…');
       }
-      language.value = selectedLanguage || '0';
+
+      const options = await request(`/api/config/options/${service}`, {
+        method: 'POST',
+        body: JSON.stringify({ baseUrl, apiKey })
+      });
+      if (!discoveryRequestIsCurrent(service, requestToken, generation, baseUrl, apiKey)) return;
+
+      applyArrOptions(service, options);
+      discoveredServices.add(service);
+      setMessage(result, `Connected. Found ${options.rootFolders.length} root folder(s) and ${options.qualityProfiles.length} quality profile(s).`, 'success');
+    } catch (error) {
+      if (!discoveryRequestIsCurrent(service, requestToken, generation, baseUrl, apiKey)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setMessage(
+        result,
+        testConnection ? message : `Options could not be loaded automatically: ${message}. Use Test connection & refresh options.`,
+        testConnection ? 'error' : 'warning'
+      );
     }
-    setMessage(result, `Connected. Found ${options.rootFolders.length} root folder(s) and ${options.qualityProfiles.length} quality profile(s).`, 'success');
-  } catch (error) {
-    setMessage(result, error.message, 'error');
+  })();
+
+  discoveryInFlight.set(service, task);
+  try {
+    await task;
+  } finally {
+    if (discoveryInFlight.get(service) === task) discoveryInFlight.delete(service);
   }
+}
+
+async function discoverConfiguredArrOptions() {
+  if (!currentConfig) return;
+  await Promise.all(['radarr', 'sonarr'].map(async (service) => {
+    const configured = currentConfig[service];
+    const baseUrl = byId(`${service}-url`).value.trim();
+    const hasApiKey = configured?.apiKeyConfigured || Boolean(byId(`${service}-key`).value.trim());
+    if (!baseUrl || !hasApiKey) return;
+    await discoverOptions(service);
+  }));
+}
+
+async function testAndDiscover(service) {
+  await discoverOptions(service, { testConnection: true, force: true });
 }
 
 loginForm?.addEventListener('submit', async (event) => {
@@ -299,6 +397,11 @@ configForm?.addEventListener('submit', async (event) => {
 
 byId('test-radarr').addEventListener('click', () => testAndDiscover('radarr'));
 byId('test-sonarr').addEventListener('click', () => testAndDiscover('sonarr'));
+for (const service of ['radarr', 'sonarr']) {
+  for (const field of ['url', 'key']) {
+    byId(`${service}-${field}`).addEventListener('input', () => invalidateDiscovery(service));
+  }
+}
 byId('copy-manifest').addEventListener('click', async () => {
   const value = byId('manifest-url').textContent;
   try {
@@ -312,6 +415,10 @@ byId('logout').addEventListener('click', async () => {
   try {
     await request('/api/config/session', { method: 'DELETE' });
   } finally {
+    discoveryGeneration += 1;
+    discoveredServices.clear();
+    discoveryInFlight.clear();
+    discoveryRequestTokens.clear();
     csrf = '';
     currentConfig = null;
     dashboard.hidden = true;
@@ -418,6 +525,8 @@ function enhanceConfigurationUi() {
 
   const installLink = byId('install-link');
   installLink.textContent = 'Install / reinstall in Stremio';
+  byId('test-radarr').textContent = 'Test connection & refresh options';
+  byId('test-sonarr').textContent = 'Test connection & refresh options';
   const saveButton = byId('save-configuration');
   saveButton.dataset.tvLast = 'true';
 }

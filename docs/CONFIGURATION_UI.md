@@ -82,9 +82,15 @@ The UI uses native dropdowns for every Enabled/Disabled setting because checkbox
 
 Text-heavy values such as API keys are usually easier to enter from a phone or desktop browser using the same Configure URL. Saved settings apply to every Stremio client using this server.
 
-## Connection tests
+## Arr option discovery
 
-**Test & discover options** checks the entered Radarr/Sonarr URL and API key without saving them. It discovers available root folders, quality profiles, tags and Sonarr language profiles where supported.
+Opening **Radarr & Sonarr** automatically loads options from each configured Arr server when a saved API key is available. The saved key remains server-side; the browser sends an empty key field and the server reuses the stored credential only for the same configured origin.
+
+Quality-profile choices are shown as a human-readable name plus their persisted Arr ID, for example `HD-1080p [7]`. Sonarr v3 language profiles use the same `Name [ID]` format. The numeric ID remains the value written to `.env`, so existing `RADARR_QUALITY_PROFILE_ID`, `SONARR_QUALITY_PROFILE_ID` and `SONARR_LANGUAGE_PROFILE_ID` settings remain compatible.
+
+If the configured profile ID no longer exists on the Arr server, the dashboard keeps it selected as `Unavailable profile [ID]` instead of silently switching to a different profile.
+
+**Test connection & refresh options** explicitly checks the entered Radarr/Sonarr URL and API key, then refreshes available root folders, quality profiles, tags and Sonarr language profiles where supported. Use it after changing a URL/key or after adding, deleting or renaming profiles in Arr.
 
 A successful test does not activate unsaved settings. Select the desired options, then use **Save server settings** and restart when prompted.
 

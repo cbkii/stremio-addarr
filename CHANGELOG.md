@@ -24,6 +24,7 @@
 
 ### Changed
 
+- Make Radarr/Sonarr quality-profile selectors automatically load all available profiles as `Name [ID]`, preserve missing configured IDs without silently switching profiles, and apply the same labels to Sonarr v3 language profiles; the existing numeric `.env` IDs remain unchanged.
 - Simplify maintained quality gates by removing duplicate catalogue runs and obsolete npm aliases, and consolidate task-specific tests into durable security and documentation suites.
 - Remove unsupported Trakt website scraping; release-date fallback now uses documented Trakt API methods only when a Client ID is configured.
 - Add an interactive token wizard to `quick.sh`: keep an existing token, specify an 8-character value, or generate a random 8-character value.
