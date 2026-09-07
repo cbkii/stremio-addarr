@@ -47,15 +47,27 @@ async function withMovieFile(run: (ctx: {
   }
 }
 
-test('repeated Range requests reuse one Arr file-path resolution and avoid the 120/min full-request limit', async () => {
+test('valid signed Range traffic stays unthrottled and reuses one Arr path for the signed session', async () => {
   await withMovieFile(async ({ baseUrl, cfg, getArrCalls }) => {
     const url = signedFileUrl(baseUrl, cfg, 'movie', 42);
-    for (let i = 0; i < 130; i++) {
+    for (let i = 0; i < 610; i++) {
       const res = await ORIGINAL_FETCH(url, { headers: { Range: 'bytes=0-0' } });
       assert.equal(res.status, 206, `range request ${i + 1}`);
       assert.equal(await res.text(), '0');
     }
     assert.equal(getArrCalls(), 1, 'stable file ID should be resolved once during a playback burst');
+  });
+});
+
+test('valid signed full-file retries are not request-count throttled', async () => {
+  await withMovieFile(async ({ baseUrl, cfg, getArrCalls }) => {
+    const url = signedFileUrl(baseUrl, cfg, 'movie', 42);
+    for (let i = 0; i < 130; i++) {
+      const res = await ORIGINAL_FETCH(url);
+      assert.equal(res.status, 200, `full request ${i + 1}`);
+      assert.equal(await res.text(), '0123456789');
+    }
+    assert.equal(getArrCalls(), 1);
   });
 });
 

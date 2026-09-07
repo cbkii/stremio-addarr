@@ -76,8 +76,9 @@ export function streamFromTile(tile: StatusTile) {
 
   // Passive status entries historically pointed at a zero-duration HLS stream
   // only to satisfy Stream Object source requirements. Keep them selectable but
-  // return to the current detail page instead of entering Stremio's player and
-  // local streaming-server lifecycle for non-media UI state.
+  // return to the current detail page instead of starting a non-media player/source
+  // lifecycle. Current Stremio Core keeps ordinary HTTP(S) URL sources direct;
+  // torrent/server state is therefore a separate upstream concern.
   const statusDeepLink = passiveStatusDeepLink(tile.url);
   if (statusDeepLink) {
     return {

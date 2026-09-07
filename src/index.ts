@@ -21,13 +21,12 @@ import { NoopWatchedLookup } from './services/watched.js';
 import { TraktWatchedLookup } from './services/trakt-watched.js';
 
 // Legacy action transport only. Passive status tiles are no longer advertised as
-// HLS streams; see streamFromTile(). Keep this response bounded while the action
-// transport remains the compatibility fallback on Android TV.
+// HLS streams; see streamFromTile(). Plain HTTP(S) URL streams are direct in
+// current Stremio Core unless proxy headers/special-source conversion applies,
+// so this transport is a player/source lifecycle risk rather than evidence that
+// Addarr traffic is proxied through Stremio's torrent streaming server.
 const EMPTY_HLS = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-ENDLIST\n';
-const FILE_PATH_CACHE_TTL_MS = 5 * 60_000;
 const INVALID_FILE_ATTEMPTS_PER_MINUTE = 30;
-const VALID_FULL_FILE_REQUESTS_PER_MINUTE = 120;
-const VALID_RANGE_FILE_REQUESTS_PER_MINUTE = 600;
 
 type SendFileError = Error & {
   status?: number;
@@ -98,9 +97,11 @@ export function createApp(config: AppConfig) {
   const addonPrefix = addonBasePath(config);
   const actionRateLimiter = new SlidingWindowRateLimiter(config.actionRateLimitMax, 60_000);
   const invalidFileRateLimiter = new SlidingWindowRateLimiter(INVALID_FILE_ATTEMPTS_PER_MINUTE, 60_000);
-  const validFullFileRateLimiter = new SlidingWindowRateLimiter(VALID_FULL_FILE_REQUESTS_PER_MINUTE, 60_000);
-  const validRangeFileRateLimiter = new SlidingWindowRateLimiter(VALID_RANGE_FILE_REQUESTS_PER_MINUTE, 60_000);
-  const filePathCache = new FilePathResolverCache(FILE_PATH_CACHE_TTL_MS);
+  // A signed file URL is already the bounded playback capability. Keep its
+  // resolved Arr path for the same lifetime so normal long playback does not
+  // reacquire a Radarr/Sonarr control-plane dependency mid-session.
+  const filePathCacheTtlMs = config.fileStreaming.tokenTtlSec * 1000;
+  const filePathCache = new FilePathResolverCache(filePathCacheTtlMs);
   const fileStreamingDiagnostics = {
     requests: 0,
     rangeRequests: 0,
@@ -111,7 +112,6 @@ export function createApp(config: AppConfig) {
     abortedRequests: 0,
     invalidTokens: 0,
     invalidRateLimited: 0,
-    validRateLimited: 0,
     pathCacheHits: 0,
     pathCacheMisses: 0,
     pathCacheDeduped: 0,
@@ -252,7 +252,7 @@ export function createApp(config: AppConfig) {
       fileStreaming: {
         enabled: config.fileStreaming.enabled,
         playbackMode: config.fileStreaming.playbackMode,
-        pathCacheTtlMs: FILE_PATH_CACHE_TTL_MS,
+        pathCacheTtlMs: filePathCacheTtlMs,
         diagnostics: { ...fileStreamingDiagnostics }
       },
       radarr: {
@@ -398,13 +398,9 @@ export function createApp(config: AppConfig) {
     }
 
     const isRangeRequest = typeof req.headers.range === 'string' && req.headers.range.length > 0;
-    const validLimiter = isRangeRequest ? validRangeFileRateLimiter : validFullFileRateLimiter;
-    if (validLimiter.isLimited(clientIp)) {
-      fileStreamingDiagnostics.validRateLimited += 1;
-      res.status(429).end();
-      return;
-    }
-
+    // Do not count-throttle authenticated media requests. A valid HMAC URL can
+    // already transfer the complete file, so request-count limits do not bound
+    // bandwidth; they only risk turning player retries/seeks into false 429s.
     fileStreamingDiagnostics.requests += 1;
     if (isRangeRequest) fileStreamingDiagnostics.rangeRequests += 1;
     if (req.method === 'HEAD') fileStreamingDiagnostics.headRequests += 1;

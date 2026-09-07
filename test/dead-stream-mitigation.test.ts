@@ -78,6 +78,13 @@ test('single-episode filename classifier accepts common Sonarr names', () => {
   assert.equal(isConfidentSingleEpisodeFilename('Show Name - 1x02 - Title.mp4'), true);
 });
 
+test('shared Sonarr file cannot receive bingeGroup even with a single-episode-looking filename', () => {
+  const tile = directSeriesTile('Show.Name.S01E02.mkv');
+  tile.bingeEligible = false;
+  const stream = streamFromTile(tile);
+  assert.equal(stream.behaviorHints?.bingeGroup, undefined);
+});
+
 test('file path cache collapses concurrent resolution and supports invalidation', async () => {
   const cache = new FilePathResolverCache(60_000);
   let calls = 0;
