@@ -121,3 +121,59 @@ test('file path cache collapses concurrent resolution and supports invalidation'
   assert.equal(refreshed.value, '/media/show/replaced.mkv');
   assert.equal(calls, 2);
 });
+
+test('file path cache uses sliding inactivity expiry for active playback', async () => {
+  let now = 0;
+  let calls = 0;
+  const cache = new FilePathResolverCache(100, 4, () => now);
+  const resolver = async () => {
+    calls += 1;
+    return `/media/show/episode-${calls}.mkv`;
+  };
+
+  const first = await cache.getOrResolve('series:88', resolver);
+  assert.equal(first.source, 'miss');
+  assert.equal(first.value, '/media/show/episode-1.mkv');
+
+  now = 90;
+  const firstHit = await cache.getOrResolve('series:88', resolver);
+  assert.equal(firstHit.source, 'hit');
+
+  now = 180;
+  const secondHit = await cache.getOrResolve('series:88', resolver);
+  assert.equal(secondHit.source, 'hit');
+  assert.equal(calls, 1, 'active hits should keep the resolved path alive without re-querying Arr');
+
+  now = 281;
+  const afterInactivity = await cache.getOrResolve('series:88', resolver);
+  assert.equal(afterInactivity.source, 'miss');
+  assert.equal(afterInactivity.value, '/media/show/episode-2.mkv');
+  assert.equal(calls, 2, 'entry should expire after a full TTL with no use');
+});
+
+test('file path cache is bounded and evicts the least recently used path', async () => {
+  let now = 0;
+  const calls = new Map<string, number>();
+  const cache = new FilePathResolverCache(1_000, 2, () => now);
+  const resolve = (key: string) => async () => {
+    calls.set(key, (calls.get(key) ?? 0) + 1);
+    return `/media/${key}.mkv`;
+  };
+
+  await cache.getOrResolve('a', resolve('a'));
+  now = 1;
+  await cache.getOrResolve('b', resolve('b'));
+  now = 2;
+  assert.equal((await cache.getOrResolve('a', resolve('a'))).source, 'hit', 'touch a so b becomes least recently used');
+
+  now = 3;
+  await cache.getOrResolve('c', resolve('c'));
+
+  now = 4;
+  assert.equal((await cache.getOrResolve('a', resolve('a'))).source, 'hit', 'recently used a should remain cached');
+  assert.equal(calls.get('a'), 1);
+
+  now = 5;
+  assert.equal((await cache.getOrResolve('b', resolve('b'))).source, 'miss', 'least recently used b should have been evicted');
+  assert.equal(calls.get('b'), 2);
+});
