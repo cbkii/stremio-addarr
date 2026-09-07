@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Stop passive Addarr status entries from opening zero-duration HLS playback; current stream responses return to the matching Stremio detail/video view instead, avoiding unnecessary player/streaming-server lifecycle transitions.
+- Add stable Stremio `bingeGroup` continuity for confidently single-episode Sonarr direct-file streams so Play Next can keep using Addarr when the next episode is already downloaded; ambiguous and common multi-episode filenames remain opt-out for safety.
+- Decouple normal Range playback from low-rate token-guessing protection: invalid signed-file attempts now use their own tighter bucket while valid Range traffic has a higher media-appropriate allowance.
+- Cache and deduplicate Arr file-ID-to-path resolution for five minutes, with one-shot invalidation/re-resolution after a stale filesystem path, so every byte-range request no longer depends on a fresh Radarr/Sonarr API call.
+- Add privacy-safe direct-file lifecycle diagnostics for starts, finishes, early closes, aborts, Range/HEAD usage and path-cache behaviour without logging media tokens or file paths.
+- Preserve HTTP 416 errors from the media sender, expose HEAD/Range through CORS, and mark signed media responses `private, no-store`.
 - Advertise downloaded HTTPS MP4 files as web-ready Stremio URL streams while retaining `notWebReady` for MKV, other non-MP4 formats, non-HTTPS URLs and uncertain file metadata.
 - Extend the default signed direct-file URL lifetime from one hour to eight hours so long playback, pauses, seeks and short reconnects do not fail at the former one-hour boundary; existing explicit TTL overrides remain respected.
 - Preserve existing Radarr/Sonarr profiles and monitoring by default while still queueing an exact movie/episode search for every action tile click.
@@ -24,6 +30,7 @@
 
 ### Changed
 
+- Keep the zero-duration HLS transport isolated to signed Add/Search action tiles as a compatibility boundary; passive statuses and genuine direct-file playback no longer use it, and action use is now explicitly logged for Android TV A/B diagnosis.
 - Make Radarr/Sonarr quality-profile selectors automatically load all available profiles as `Name [ID]`, preserve missing configured IDs without silently switching profiles, and apply the same labels to Sonarr v3 language profiles; the existing numeric `.env` IDs remain unchanged.
 - Simplify maintained quality gates by removing duplicate catalogue runs and obsolete npm aliases, and consolidate task-specific tests into durable security and documentation suites.
 - Remove unsupported Trakt website scraping; release-date fallback now uses documented Trakt API methods only when a Client ID is configured.
