@@ -3,27 +3,90 @@ import type { AppConfig } from './config.js';
 import type { Logger } from './logger.js';
 import { isWebReadyHttpsMp4 } from './lib/stream-readiness.js';
 import { parseStremioId } from './lib/stremio-ids.js';
+import { buildStremioDetailDeepLink } from './lib/stremio-links.js';
 import type { StatusTile } from './types.js';
 import { CatalogService, type CatalogFilter } from './services/catalog.js';
 import { ArrStatusService } from './services/status.js';
 import { NoopWatchedLookup } from './services/watched.js';
 import type { WatchedLookup } from './services/watched.js';
 
+const DIRECT_SERIES_BINGE_GROUP = 'org.cbkii.stremio-addarr|sonarr|direct|v1';
+
+function passiveStatusDeepLink(rawUrl: string | undefined): string | undefined {
+  if (!rawUrl) return undefined;
+  try {
+    const parsedUrl = new URL(rawUrl);
+    const match = parsedUrl.pathname.match(/\/status\/(movie|series)\/([^/]+)\.m3u8$/);
+    if (!match) return undefined;
+    const kind = match[1] as 'movie' | 'series';
+    const rawId = decodeURIComponent(match[2]);
+    return buildStremioDetailDeepLink(parseStremioId(kind, rawId));
+  } catch {
+    return undefined;
+  }
+}
+
+function isSeriesDirectFileUrl(rawUrl: string | undefined): boolean {
+  if (!rawUrl) return false;
+  try {
+    return /\/files\/series\/\d+$/.test(new URL(rawUrl).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Binge continuity is safe only when the filename confidently describes one
+ * logical episode. Common multi-episode names are deliberately excluded so a
+ * shared Sonarr episode file is not reopened from the start as "next episode".
+ */
+export function isConfidentSingleEpisodeFilename(filename: string | undefined): boolean {
+  if (!filename) return false;
+  const value = filename.trim().split(/[?#]/, 1)[0];
+  if (!value) return false;
+
+  if (/S\d{1,2}E\d{1,3}(?:[-_. ]?E\d{1,3}|-\d{1,3})/i.test(value)) return false;
+  if (/(?:^|[ ._-])\d{1,2}x\d{1,3}-\d{1,3}(?:[ ._-]|$)/i.test(value)) return false;
+
+  const seasonEpisodeMatches = value.match(/S\d{1,2}E\d{1,3}/gi) ?? [];
+  const xEpisodeMatches = value.match(/(?:^|[ ._-])\d{1,2}x\d{1,3}(?=[ ._-]|$)/gi) ?? [];
+  return seasonEpisodeMatches.length + xEpisodeMatches.length === 1;
+}
+
 function streamBehaviorHints(tile: StatusTile): StatusTile['behaviorHints'] | undefined {
-  const hints = tile.behaviorHints;
-  if (!hints || !tile.url || !hints.notWebReady || !isWebReadyHttpsMp4(tile.url, hints.filename)) {
-    return hints;
+  const original = tile.behaviorHints;
+  if (!original) return undefined;
+
+  const hints = { ...original };
+  if (isSeriesDirectFileUrl(tile.url) && isConfidentSingleEpisodeFilename(hints.filename)) {
+    hints.bingeGroup = DIRECT_SERIES_BINGE_GROUP;
   }
 
-  const webReadyHints = { ...hints };
-  delete webReadyHints.notWebReady;
-  return Object.keys(webReadyHints).length > 0 ? webReadyHints : undefined;
+  if (tile.url && hints.notWebReady && isWebReadyHttpsMp4(tile.url, hints.filename)) {
+    delete hints.notWebReady;
+  }
+
+  return Object.keys(hints).length > 0 ? hints : undefined;
 }
 
 export function streamFromTile(tile: StatusTile) {
   if (!tile.url && !tile.externalUrl) {
     throw new Error(`Invalid status tile without a Stremio stream source: ${tile.name}`);
   }
+
+  // Passive status entries historically pointed at a zero-duration HLS stream
+  // only to satisfy Stream Object source requirements. Keep them selectable but
+  // return to the current detail page instead of entering Stremio's player and
+  // local streaming-server lifecycle for non-media UI state.
+  const statusDeepLink = passiveStatusDeepLink(tile.url);
+  if (statusDeepLink) {
+    return {
+      name: tile.name,
+      ...(tile.description ? { description: tile.description } : {}),
+      externalUrl: statusDeepLink
+    };
+  }
+
   const behaviorHints = streamBehaviorHints(tile);
   return {
     name: tile.name,
