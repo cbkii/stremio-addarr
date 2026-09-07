@@ -1,0 +1,141 @@
+name: PR81 multi-episode hardening
+
+on:
+  push:
+    branches:
+      - fix/dead-stream-mitigation-binge-continuity
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/dead-stream-mitigation-binge-continuity
+          fetch-depth: 1
+      - name: Apply exact cross-file hardening
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path_name: str, old: str, new: str) -> None:
+            path = Path(path_name)
+            text = path.read_text()
+            if text.count(old) != 1:
+              raise SystemExit(f'{path_name}: expected target exactly once, found {text.count(old)}')
+            path.write_text(text.replace(old, new))
+
+          replace_once(
+            'src/types.ts',
+            """  behaviorHints?: {
+              notWebReady?: boolean;
+              filename?: string;
+              videoSize?: number;
+              bingeGroup?: string;
+            };
+            isAction?: boolean;""",
+            """  behaviorHints?: {
+              notWebReady?: boolean;
+              filename?: string;
+              videoSize?: number;
+              bingeGroup?: string;
+            };
+            bingeEligible?: boolean;
+            isAction?: boolean;"""
+          )
+
+          replace_once(
+            'src/types.ts',
+            """  seriesMonitored?: boolean;
+            seasonMonitored?: boolean;
+            monitorNewItems?: 'all' | 'none';
+          }""",
+            """  seriesMonitored?: boolean;
+            seasonMonitored?: boolean;
+            monitorNewItems?: 'all' | 'none';
+            sharedEpisodeFile?: boolean;
+          }"""
+          )
+
+          replace_once(
+            'src/services/sonarr.ts',
+            """      if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
+                const rawFileName = match.episodeFile?.relativePath ?? match.episodeFile?.path;
+                const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
+                return {
+                  state: 'episode_downloaded',
+                  ...episodeCommon,
+                  episodeFileId: match.episodeFileId,
+                  hasFile: true,
+                  fileName,
+                  fileSizeBytes: match.episodeFile?.size
+                };
+              }""",
+            """      if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
+                const rawFileName = match.episodeFile?.relativePath ?? match.episodeFile?.path;
+                const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
+                const sharedEpisodeFile = match.episodeFileId != null && match.episodeFileId > 0
+                  ? episodes.some((item) => item.id !== match.id && item.episodeFileId === match.episodeFileId)
+                  : false;
+                return {
+                  state: 'episode_downloaded',
+                  ...episodeCommon,
+                  episodeFileId: match.episodeFileId,
+                  hasFile: true,
+                  fileName,
+                  fileSizeBytes: match.episodeFile?.size,
+                  sharedEpisodeFile
+                };
+              }"""
+          )
+
+          status_path = Path('src/services/status.ts')
+          status_text = status_path.read_text()
+          marker = "case 'episode_downloaded':"
+          marker_pos = status_text.find(marker)
+          if marker_pos < 0:
+            raise SystemExit('status.ts: episode_downloaded marker not found')
+          external = "          externalUrl: kodiExternalUrl"
+          external_pos = status_text.find(external, marker_pos)
+          if external_pos < 0:
+            raise SystemExit('status.ts: episode downloaded externalUrl target not found')
+          status_text = status_text[:external_pos] + "          bingeEligible: fileUrl ? !status.sharedEpisodeFile : undefined,\n" + status_text[external_pos:]
+          status_path.write_text(status_text)
+
+          replace_once(
+            'src/addon.ts',
+            """  if (isSeriesDirectFileUrl(tile.url) && isConfidentSingleEpisodeFilename(hints.filename)) {
+              hints.bingeGroup = DIRECT_SERIES_BINGE_GROUP;
+            }""",
+            """  if (tile.bingeEligible && isSeriesDirectFileUrl(tile.url) && isConfidentSingleEpisodeFilename(hints.filename)) {
+              hints.bingeGroup = DIRECT_SERIES_BINGE_GROUP;
+            }"""
+          )
+
+          replace_once(
+            'test/dead-stream-mitigation.test.ts',
+            """  return {
+              name: 'File Ready',
+              url: `${extensionUrl}/token/files/series/${fileId}?exp=9999999999&t=signed`,""",
+            """  return {
+              name: 'File Ready',
+              bingeEligible: true,
+              url: `${extensionUrl}/token/files/series/${fileId}?exp=9999999999&t=signed`,"""
+          )
+      - name: Remove one-shot helper and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr81-multiepisode-hardening.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/types.ts src/services/sonarr.ts src/services/status.ts src/addon.ts test/dead-stream-mitigation.test.ts .github/workflows/pr81-multiepisode-hardening.yml
+          git diff --cached --check
+          git diff --cached --quiet && { echo 'No hardening changes produced' >&2; exit 1; }
+          git commit -m 'fix: suppress binge matching for shared Sonarr files'
+          git push origin HEAD:fix/dead-stream-mitigation-binge-continuity
