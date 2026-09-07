@@ -1,0 +1,141 @@
+name: PR81 baseline test update
+
+on:
+  push:
+    branches:
+      - fix/dead-stream-mitigation-binge-continuity
+
+permissions:
+  contents: write
+
+jobs:
+  migrate-tests:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/dead-stream-mitigation-binge-continuity
+          fetch-depth: 1
+      - name: Update exact passive-status regression expectations
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('test/addon.test.ts')
+          text = path.read_text()
+
+          old_one = """test('downloaded tile has no externalUrl when Kodi is disabled', async () => {
+            const cfg = baseConfig();
+            cfg.kodi.enabled = false;
+            cfg.radarr.enabled = true;
+
+            globalThis.fetch = (async (input: RequestInfo | URL) => {
+              const path = new URL(String(input)).pathname;
+              if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+              if (path === '/api/v3/movie') return new Response('[{\"id\":9,\"imdbId\":\"tt1234567\",\"hasFile\":true,\"monitored\":true}]', { status: 200 });
+              return new Response('{}', { status: 200 });
+            }) as typeof fetch;
+
+            const app = createApp(cfg);
+            await withServer(app, async (baseUrl) => {
+              const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
+              const body = (await response.json()) as { streams: Array<{ externalUrl?: string }> };
+              assert.equal(body.streams[0].externalUrl ? 1 : 0, 0);
+            });
+          });"""
+
+          new_one = """test('downloaded tile returns to Stremio detail when Kodi and direct playback are unavailable', async () => {
+            const cfg = baseConfig();
+            cfg.kodi.enabled = false;
+            cfg.radarr.enabled = true;
+
+            globalThis.fetch = (async (input: RequestInfo | URL) => {
+              const path = new URL(String(input)).pathname;
+              if (path === '/api/v3/system/status') return new Response('{}', { status: 200 });
+              if (path === '/api/v3/movie') return new Response('[{\"id\":9,\"imdbId\":\"tt1234567\",\"hasFile\":true,\"monitored\":true}]', { status: 200 });
+              return new Response('{}', { status: 200 });
+            }) as typeof fetch;
+
+            const app = createApp(cfg);
+            await withServer(app, async (baseUrl) => {
+              const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
+              const body = (await response.json()) as { streams: Array<{ url?: string; externalUrl?: string }> };
+              assert.equal(body.streams[0].url, undefined);
+              assert.equal(body.streams[0].externalUrl, 'stremio:///detail/movie/tt1234567/tt1234567?autoPlay=false');
+            });
+          });"""
+
+          old_two = """test('downloaded tile has no url when file streaming is disabled', async () => {
+            const cfg = baseConfig();
+            cfg.fileStreaming.enabled = false;
+            cfg.radarr.enabled = true;
+
+            globalThis.fetch = (async (input: RequestInfo | URL) => {
+              const urlPath = new URL(String(input)).pathname;
+              if (urlPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
+              if (urlPath === '/api/v3/movie') {
+                return new Response(
+                  '[{\"id\":9,\"imdbId\":\"tt1234567\",\"title\":\"Test Movie\",\"year\":2020,\"movieFile\":{\"id\":77},\"monitored\":true}]',
+                  { status: 200 }
+                );
+              }
+              return new Response('{}', { status: 200 });
+            }) as typeof fetch;
+
+            const app = createApp(cfg);
+            await withServer(app, async (baseUrl) => {
+              const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
+              const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string }> };
+              assert.ok(body.streams[0].name?.includes('✅'), 'downloaded tile name should include ✅');
+              assert.ok(body.streams[0].description?.includes('UNWATCHED'));
+              assert.match(body.streams[0].url ?? '', /\\/status\\/movie\\/tt1234567\\.m3u8$/, 'status fallback keeps the stream object protocol-valid');
+            });
+          });"""
+
+          new_two = """test('downloaded tile uses non-player Stremio detail fallback when file streaming is disabled', async () => {
+            const cfg = baseConfig();
+            cfg.fileStreaming.enabled = false;
+            cfg.radarr.enabled = true;
+
+            globalThis.fetch = (async (input: RequestInfo | URL) => {
+              const urlPath = new URL(String(input)).pathname;
+              if (urlPath === '/api/v3/system/status') return new Response('{}', { status: 200 });
+              if (urlPath === '/api/v3/movie') {
+                return new Response(
+                  '[{\"id\":9,\"imdbId\":\"tt1234567\",\"title\":\"Test Movie\",\"year\":2020,\"movieFile\":{\"id\":77},\"monitored\":true}]',
+                  { status: 200 }
+                );
+              }
+              return new Response('{}', { status: 200 });
+            }) as typeof fetch;
+
+            const app = createApp(cfg);
+            await withServer(app, async (baseUrl) => {
+              const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
+              const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string; externalUrl?: string }> };
+              assert.ok(body.streams[0].name?.includes('✅'), 'downloaded tile name should include ✅');
+              assert.ok(body.streams[0].description?.includes('UNWATCHED'));
+              assert.equal(body.streams[0].url, undefined);
+              assert.equal(body.streams[0].externalUrl, 'stremio:///detail/movie/tt1234567/tt1234567?autoPlay=false');
+            });
+          });"""
+
+          if text.count(old_one) != 1 or text.count(old_two) != 1:
+            raise SystemExit('expected baseline test blocks were not found exactly once')
+
+          text = text.replace(old_one, new_one).replace(old_two, new_two)
+          path.write_text(text)
+      - name: Remove one-shot helper and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr81-baseline-test-update.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add test/addon.test.ts .github/workflows/pr81-baseline-test-update.yml
+          git diff --cached --check
+          git diff --cached --quiet && { echo 'No migration changes produced' >&2; exit 1; }
+          git commit -m 'test: align passive status fallback expectations'
+          git push origin HEAD:fix/dead-stream-mitigation-binge-continuity
