@@ -7,6 +7,7 @@ import type { StatusTile } from '../src/types.js';
 function directSeriesTile(filename: string, fileId = 88, extensionUrl = 'https://pi.example.com'): StatusTile {
   return {
     name: 'File Ready',
+    bingeEligible: true,
     url: `${extensionUrl}/token/files/series/${fileId}?exp=9999999999&t=signed`,
     behaviorHints: {
       notWebReady: true,

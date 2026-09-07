@@ -58,7 +58,7 @@ function streamBehaviorHints(tile: StatusTile): StatusTile['behaviorHints'] | un
   if (!original) return undefined;
 
   const hints = { ...original };
-  if (isSeriesDirectFileUrl(tile.url) && isConfidentSingleEpisodeFilename(hints.filename)) {
+  if (tile.bingeEligible && isSeriesDirectFileUrl(tile.url) && isConfidentSingleEpisodeFilename(hints.filename)) {
     hints.bingeGroup = DIRECT_SERIES_BINGE_GROUP;
   }
 

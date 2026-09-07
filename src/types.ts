@@ -24,6 +24,7 @@ export interface StatusTile {
     videoSize?: number;
     bingeGroup?: string;
   };
+  bingeEligible?: boolean;
   isAction?: boolean;
 }
 
@@ -69,6 +70,7 @@ export interface ArrEpisodeStatus {
   seriesMonitored?: boolean;
   seasonMonitored?: boolean;
   monitorNewItems?: 'all' | 'none';
+  sharedEpisodeFile?: boolean;
 }
 
 export interface AddActionResult {
