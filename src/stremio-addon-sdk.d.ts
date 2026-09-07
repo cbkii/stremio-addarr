@@ -21,7 +21,12 @@ declare module 'stremio-addon-sdk' {
     description?: string;
     url?: string;
     externalUrl?: string;
-    behaviorHints?: { notWebReady?: boolean };
+    behaviorHints?: {
+      notWebReady?: boolean;
+      filename?: string;
+      videoSize?: number;
+      bingeGroup?: string;
+    };
   }
 
   export interface StreamHandlerArgs {
