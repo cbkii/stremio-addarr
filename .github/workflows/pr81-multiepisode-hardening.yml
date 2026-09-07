@@ -18,7 +18,7 @@ jobs:
         with:
           ref: fix/dead-stream-mitigation-binge-continuity
           fetch-depth: 1
-      - name: Apply exact cross-file hardening
+      - name: Apply bounded cross-file hardening
         shell: python
         run: |
           from pathlib import Path
@@ -32,89 +32,72 @@ jobs:
 
           replace_once(
             'src/types.ts',
-            """  behaviorHints?: {
-              notWebReady?: boolean;
-              filename?: string;
-              videoSize?: number;
-              bingeGroup?: string;
-            };
-            isAction?: boolean;""",
-            """  behaviorHints?: {
-              notWebReady?: boolean;
-              filename?: string;
-              videoSize?: number;
-              bingeGroup?: string;
-            };
+            """  };
+            isAction?: boolean;
+          }
+
+          export interface ArrMovieStatus""",
+            """  };
             bingeEligible?: boolean;
-            isAction?: boolean;"""
+            isAction?: boolean;
+          }
+
+          export interface ArrMovieStatus"""
           )
 
           replace_once(
             'src/types.ts',
-            """  seriesMonitored?: boolean;
-            seasonMonitored?: boolean;
+            """  seasonMonitored?: boolean;
             monitorNewItems?: 'all' | 'none';
-          }""",
-            """  seriesMonitored?: boolean;
-            seasonMonitored?: boolean;
+          }
+
+          export interface AddActionResult""",
+            """  seasonMonitored?: boolean;
             monitorNewItems?: 'all' | 'none';
             sharedEpisodeFile?: boolean;
-          }"""
+          }
+
+          export interface AddActionResult"""
           )
 
-          replace_once(
-            'src/services/sonarr.ts',
-            """      if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
-                const rawFileName = match.episodeFile?.relativePath ?? match.episodeFile?.path;
-                const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
-                return {
-                  state: 'episode_downloaded',
-                  ...episodeCommon,
-                  episodeFileId: match.episodeFileId,
-                  hasFile: true,
-                  fileName,
-                  fileSizeBytes: match.episodeFile?.size
-                };
-              }""",
-            """      if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
-                const rawFileName = match.episodeFile?.relativePath ?? match.episodeFile?.path;
-                const fileName = rawFileName ? rawFileName.split(/[\\/]/).pop() : undefined;
-                const sharedEpisodeFile = match.episodeFileId != null && match.episodeFileId > 0
-                  ? episodes.some((item) => item.id !== match.id && item.episodeFileId === match.episodeFileId)
-                  : false;
-                return {
-                  state: 'episode_downloaded',
-                  ...episodeCommon,
-                  episodeFileId: match.episodeFileId,
-                  hasFile: true,
-                  fileName,
-                  fileSizeBytes: match.episodeFile?.size,
-                  sharedEpisodeFile
-                };
-              }"""
-          )
+          sonarr_path = Path('src/services/sonarr.ts')
+          sonarr = sonarr_path.read_text()
+          block_start = sonarr.find("      if (match.hasFile || (match.episodeFileId ?? 0) > 0) {")
+          if block_start < 0:
+            raise SystemExit('sonarr.ts: downloaded block not found')
+          return_marker = "        return {\n          state: 'episode_downloaded',"
+          return_pos = sonarr.find(return_marker, block_start)
+          if return_pos < 0:
+            raise SystemExit('sonarr.ts: downloaded return not found')
+          shared_code = """        const sharedEpisodeFile = match.episodeFileId != null && match.episodeFileId > 0
+            ? episodes.some((item) => item.id !== match.id && item.episodeFileId === match.episodeFileId)
+            : false;
+          """
+          sonarr = sonarr[:return_pos] + shared_code + sonarr[return_pos:]
+          size_marker = "          fileSizeBytes: match.episodeFile?.size\n        };"
+          size_pos = sonarr.find(size_marker, return_pos + len(shared_code))
+          if size_pos < 0:
+            raise SystemExit('sonarr.ts: downloaded size return not found')
+          sonarr = sonarr[:size_pos] + "          fileSizeBytes: match.episodeFile?.size,\n          sharedEpisodeFile\n        };" + sonarr[size_pos + len(size_marker):]
+          sonarr_path.write_text(sonarr)
 
           status_path = Path('src/services/status.ts')
-          status_text = status_path.read_text()
-          marker = "case 'episode_downloaded':"
-          marker_pos = status_text.find(marker)
-          if marker_pos < 0:
+          status = status_path.read_text()
+          episode_marker = "case 'episode_downloaded':"
+          episode_pos = status.find(episode_marker)
+          if episode_pos < 0:
             raise SystemExit('status.ts: episode_downloaded marker not found')
           external = "          externalUrl: kodiExternalUrl"
-          external_pos = status_text.find(external, marker_pos)
+          external_pos = status.find(external, episode_pos)
           if external_pos < 0:
             raise SystemExit('status.ts: episode downloaded externalUrl target not found')
-          status_text = status_text[:external_pos] + "          bingeEligible: fileUrl ? !status.sharedEpisodeFile : undefined,\n" + status_text[external_pos:]
-          status_path.write_text(status_text)
+          status = status[:external_pos] + "          bingeEligible: fileUrl ? !status.sharedEpisodeFile : undefined,\n" + status[external_pos:]
+          status_path.write_text(status)
 
           replace_once(
             'src/addon.ts',
-            """  if (isSeriesDirectFileUrl(tile.url) && isConfidentSingleEpisodeFilename(hints.filename)) {
-              hints.bingeGroup = DIRECT_SERIES_BINGE_GROUP;
-            }""",
-            """  if (tile.bingeEligible && isSeriesDirectFileUrl(tile.url) && isConfidentSingleEpisodeFilename(hints.filename)) {
-              hints.bingeGroup = DIRECT_SERIES_BINGE_GROUP;
-            }"""
+            "if (isSeriesDirectFileUrl(tile.url) && isConfidentSingleEpisodeFilename(hints.filename)) {",
+            "if (tile.bingeEligible && isSeriesDirectFileUrl(tile.url) && isConfidentSingleEpisodeFilename(hints.filename)) {"
           )
 
           replace_once(
