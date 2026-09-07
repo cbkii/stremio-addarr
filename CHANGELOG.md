@@ -6,7 +6,7 @@
 
 - Stop passive Addarr status entries from opening zero-duration HLS playback; current stream responses return to the matching Stremio detail/video view instead, avoiding unnecessary non-media player/source lifecycle transitions.
 - Add stable Stremio `bingeGroup` continuity for confidently single-episode Sonarr direct-file streams so Play Next can keep using Addarr when the next episode is already downloaded; ambiguous filenames, common multi-episode names, and files that Sonarr links to more than one logical episode remain opt-out for safety.
-- Keep token-guessing protection on invalid signed-file attempts without request-count throttling already-authenticated media traffic, so legitimate player retries, seeks and Range bursts cannot create false 429 playback failures.
+- Keep brute-force/log-flood protection on invalid signed-file attempts without request-count throttling already-authenticated media traffic, so legitimate player retries, seeks and Range bursts cannot create false 429 playback failures; the limiter remains isolated per trusted client IP.
 - Cache and deduplicate Arr file-ID-to-path resolution for the signed direct-file URL lifetime, with one-shot invalidation/re-resolution after a stale filesystem path, so an established playback capability does not reacquire a Radarr/Sonarr API dependency part-way through a long session.
 - Add privacy-safe direct-file lifecycle diagnostics for starts, finishes, early closes, aborts, Range/HEAD usage and path-cache behaviour without logging media tokens or file paths.
 - Preserve HTTP 416 errors from the media sender, expose HEAD/Range through CORS, and mark signed media responses `private, no-store`.
