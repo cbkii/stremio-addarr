@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
@@ -10,7 +10,9 @@ import { createLogger } from './logger.js';
 import { createAddonInterface } from './addon.js';
 import { addonBasePath } from './lib/addon-access.js';
 import { verifyActionToken } from './lib/action-tokens.js';
+import { FilePathResolverCache } from './lib/file-path-cache.js';
 import { parseStremioId } from './lib/stremio-ids.js';
+import { buildStremioDetailDeepLink } from './lib/stremio-links.js';
 import { verifyFileToken } from './lib/file-tokens.js';
 import { SlidingWindowRateLimiter } from './lib/rate-limiter.js';
 import type { ParsedStremioId } from './types.js';
@@ -18,9 +20,20 @@ import { ActionOrchestrator } from './services/action-orchestrator.js';
 import { NoopWatchedLookup } from './services/watched.js';
 import { TraktWatchedLookup } from './services/trakt-watched.js';
 
-// Minimal valid HLS end-of-stream playlist. Stremio's player resolves this as a
-// zero-duration stream that completes immediately — no browser is opened.
+// Legacy action transport only. Passive status tiles are no longer advertised as
+// HLS streams; see streamFromTile(). Keep this response bounded while the action
+// transport remains the compatibility fallback on Android TV.
 const EMPTY_HLS = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-ENDLIST\n';
+const FILE_PATH_CACHE_TTL_MS = 5 * 60_000;
+const INVALID_FILE_ATTEMPTS_PER_MINUTE = 30;
+const VALID_FULL_FILE_REQUESTS_PER_MINUTE = 120;
+const VALID_RANGE_FILE_REQUESTS_PER_MINUTE = 600;
+
+type SendFileError = Error & {
+  status?: number;
+  statusCode?: number;
+  headers?: Record<string, string>;
+};
 
 function redactUrl(rawUrl: string): string {
   try {
@@ -61,6 +74,10 @@ function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function fileSessionId(kind: 'movie' | 'series', fileId: number, token: string): string {
+  return createHash('sha256').update(`${kind}:${fileId}:${token}`).digest('hex').slice(0, 12);
+}
+
 export function redactAddonRequestPath(requestPath: string, addonPrefix: string): string {
   return requestPath === addonPrefix || requestPath.startsWith(`${addonPrefix}/`)
     ? `/<protected>${requestPath.slice(addonPrefix.length)}`
@@ -80,27 +97,36 @@ export function createApp(config: AppConfig) {
   const actionOrchestrator = new ActionOrchestrator(statusService, logger, config.actionQueueMax);
   const addonPrefix = addonBasePath(config);
   const actionRateLimiter = new SlidingWindowRateLimiter(config.actionRateLimitMax, 60_000);
+  const invalidFileRateLimiter = new SlidingWindowRateLimiter(INVALID_FILE_ATTEMPTS_PER_MINUTE, 60_000);
+  const validFullFileRateLimiter = new SlidingWindowRateLimiter(VALID_FULL_FILE_REQUESTS_PER_MINUTE, 60_000);
+  const validRangeFileRateLimiter = new SlidingWindowRateLimiter(VALID_RANGE_FILE_REQUESTS_PER_MINUTE, 60_000);
+  const filePathCache = new FilePathResolverCache(FILE_PATH_CACHE_TTL_MS);
+  const fileStreamingDiagnostics = {
+    requests: 0,
+    rangeRequests: 0,
+    headRequests: 0,
+    activeResponses: 0,
+    finishedResponses: 0,
+    closedEarlyResponses: 0,
+    abortedRequests: 0,
+    invalidTokens: 0,
+    invalidRateLimited: 0,
+    validRateLimited: 0,
+    pathCacheHits: 0,
+    pathCacheMisses: 0,
+    pathCacheDeduped: 0,
+    pathRevalidations: 0
+  };
 
-  // Simple in-memory token-bucket rate limiter for the /files route.
-  // Limits each IP to at most 120 file requests per minute to deter brute-force
-  // token guessing while allowing normal buffered video playback.
-  const fileRateMap = new Map<string, { count: number; resetAt: number }>();
-  const FILE_RATE_MAX = 120;
-  const FILE_RATE_WINDOW_MS = 60_000;
-
-  function isFilesRateLimited(ip: string): boolean {
-    const now = Date.now();
-    // Evict expired entries on each check to prevent unbounded memory growth from unique IPs.
-    for (const [key, entry] of fileRateMap) {
-      if (now >= entry.resetAt) fileRateMap.delete(key);
-    }
-    const entry = fileRateMap.get(ip);
-    if (!entry || now >= entry.resetAt) {
-      fileRateMap.set(ip, { count: 1, resetAt: now + FILE_RATE_WINDOW_MS });
-      return false;
-    }
-    entry.count++;
-    return entry.count > FILE_RATE_MAX;
+  async function resolveArrFilePath(kind: 'movie' | 'series', fileId: number) {
+    const key = `${kind}:${fileId}`;
+    const result = await filePathCache.getOrResolve(key, () => kind === 'movie'
+      ? statusService.getMovieFilePath(fileId)
+      : statusService.getEpisodeFilePath(fileId));
+    if (result.source === 'hit') fileStreamingDiagnostics.pathCacheHits += 1;
+    if (result.source === 'miss') fileStreamingDiagnostics.pathCacheMisses += 1;
+    if (result.source === 'deduped') fileStreamingDiagnostics.pathCacheDeduped += 1;
+    return { ...result, key };
   }
 
   const app = express();
@@ -146,8 +172,8 @@ export function createApp(config: AppConfig) {
       req.path.startsWith(`${addonPrefix}/files/`);
     if (isStremioRoute) {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type, Range');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
       if (req.method === 'OPTIONS') {
         res.status(204).end();
         return;
@@ -223,6 +249,12 @@ export function createApp(config: AppConfig) {
       catalogCacheMaxAgeSec: config.catalogCacheMaxAgeSec,
       catalogStaleRevalidateSec: config.catalogStaleRevalidateSec,
       catalogStaleErrorSec: config.catalogStaleErrorSec,
+      fileStreaming: {
+        enabled: config.fileStreaming.enabled,
+        playbackMode: config.fileStreaming.playbackMode,
+        pathCacheTtlMs: FILE_PATH_CACHE_TTL_MS,
+        diagnostics: { ...fileStreamingDiagnostics }
+      },
       radarr: {
         enabled: config.radarr.enabled,
         reachable: serviceHealth.radarr.reachable,
@@ -251,6 +283,9 @@ export function createApp(config: AppConfig) {
     res.status(202).json({ ok: true, watched: watchedLookup.getDiagnostics?.() });
   });
 
+  // Compatibility endpoint for stream responses cached before passive status
+  // entries moved to Stremio deep links. Current stream responses do not expose
+  // this URL, so normal status navigation no longer enters the player lifecycle.
   app.get(`${addonPrefix}/status/:kind/:encodedId.m3u8`, (_req, res) => {
     res.type('application/vnd.apple.mpegurl');
     res.setHeader('Cache-Control', 'no-store');
@@ -261,8 +296,6 @@ export function createApp(config: AppConfig) {
     const action = req.params.action;
     const kind = req.params.kind;
     const encodedId = req.params.encodedId;
-    // Capture the correlation ID set by the request-logging middleware above so
-    // it can be included in background log entries emitted after the response.
     const reqId = typeof res.locals['reqId'] === 'string' ? res.locals['reqId'] : undefined;
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -319,7 +352,15 @@ export function createApp(config: AppConfig) {
       res.status(429).send(EMPTY_HLS);
       return;
     }
-    // Respond immediately so Stremio's player is never blocked waiting on Arr.
+    logger.info('Action transport completed', {
+      reqId,
+      action,
+      kind,
+      transport: 'legacy-empty-hls',
+      returnTarget: buildStremioDetailDeepLink(parsed)
+    });
+    // This is deliberately isolated as the remaining compatibility boundary.
+    // Passive status entries and genuine file playback no longer use EMPTY_HLS.
     res.send(EMPTY_HLS);
   });
 
@@ -328,12 +369,6 @@ export function createApp(config: AppConfig) {
 
     if (!config.fileStreaming.enabled) {
       res.status(404).end();
-      return;
-    }
-
-    const clientIp = (req.ips.length > 0 ? req.ips[0] : req.ip) ?? req.socket.remoteAddress ?? 'unknown';
-    if (isFilesRateLimited(clientIp)) {
-      res.status(429).end();
       return;
     }
 
@@ -352,29 +387,49 @@ export function createApp(config: AppConfig) {
       return;
     }
 
+    const clientIp = (req.ips.length > 0 ? req.ips[0] : req.ip) ?? req.socket.remoteAddress ?? 'unknown';
     if (!verifyFileToken(config.fileStreaming.secret, kind, fileId, expiresAtSec, token)) {
-      logger.warn('File streaming: invalid token', { reqId, kind, fileId });
-      res.status(403).end();
+      fileStreamingDiagnostics.invalidTokens += 1;
+      const limited = invalidFileRateLimiter.isLimited(clientIp);
+      if (limited) fileStreamingDiagnostics.invalidRateLimited += 1;
+      logger.warn('File streaming: invalid token', { reqId, kind, fileId, rateLimited: limited });
+      res.status(limited ? 429 : 403).end();
       return;
     }
 
-    let filePath: string | null = null;
-    try {
-      filePath = kind === 'movie'
-        ? await statusService.getMovieFilePath(fileId)
-        : await statusService.getEpisodeFilePath(fileId);
-    } catch (error) {
-      logger.warn('File streaming: path lookup failed', { reqId, kind, fileId, error: error instanceof Error ? error.message : String(error) });
+    const isRangeRequest = typeof req.headers.range === 'string' && req.headers.range.length > 0;
+    const validLimiter = isRangeRequest ? validRangeFileRateLimiter : validFullFileRateLimiter;
+    if (validLimiter.isLimited(clientIp)) {
+      fileStreamingDiagnostics.validRateLimited += 1;
+      res.status(429).end();
+      return;
     }
 
-    if (!filePath) {
+    fileStreamingDiagnostics.requests += 1;
+    if (isRangeRequest) fileStreamingDiagnostics.rangeRequests += 1;
+    if (req.method === 'HEAD') fileStreamingDiagnostics.headRequests += 1;
+
+    let pathResult: Awaited<ReturnType<typeof resolveArrFilePath>>;
+    try {
+      pathResult = await resolveArrFilePath(kind, fileId);
+    } catch (error) {
+      logger.warn('File streaming: path lookup failed', {
+        reqId,
+        kind,
+        fileId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      res.status(404).end();
+      return;
+    }
+
+    if (!pathResult.value) {
       res.status(404).end();
       return;
     }
 
     const allowedRootRaw = kind === 'movie' ? config.radarr.rootFolderPath : config.sonarr.rootFolderPath;
     let allowedRootReal: string;
-    let resolvedPathReal: string;
     try {
       allowedRootReal = await fsPromises.realpath(allowedRootRaw);
     } catch (error) {
@@ -382,37 +437,115 @@ export function createApp(config: AppConfig) {
         reqId,
         kind,
         fileId,
-        allowedRoot: allowedRootRaw,
         error: error instanceof Error ? error.message : String(error)
       });
       res.status(500).end();
       return;
     }
 
+    let resolvedPathReal: string;
     try {
-      resolvedPathReal = await fsPromises.realpath(filePath);
+      resolvedPathReal = await fsPromises.realpath(pathResult.value);
     } catch {
-      res.status(404).end();
-      return;
+      // A cached Arr path may become stale after a rename/replacement. Invalidate
+      // only this capability and resolve once more before returning 404.
+      filePathCache.invalidate(pathResult.key);
+      fileStreamingDiagnostics.pathRevalidations += 1;
+      try {
+        const refreshed = await resolveArrFilePath(kind, fileId);
+        if (!refreshed.value) {
+          res.status(404).end();
+          return;
+        }
+        resolvedPathReal = await fsPromises.realpath(refreshed.value);
+      } catch {
+        res.status(404).end();
+        return;
+      }
     }
 
     if (!isPathInsideRoot(allowedRootReal, resolvedPathReal)) {
-      logger.warn('File streaming: path outside allowed root', {
-        reqId,
-        kind,
-        fileId,
-        allowedRoot: allowedRootReal,
-        resolvedFilePath: resolvedPathReal
-      });
+      logger.warn('File streaming: path outside allowed root', { reqId, kind, fileId });
       res.status(403).end();
       return;
     }
 
-    res.sendFile(resolvedPathReal, (err) => {
-      if (err && !res.headersSent) {
-        logger.warn('File streaming: send error', { reqId, kind, fileId, error: err instanceof Error ? err.message : String(err) });
-        res.status(404).end();
+    const sessionId = fileSessionId(kind, fileId, token);
+    const startedAt = Date.now();
+    let settled = false;
+    let aborted = false;
+    fileStreamingDiagnostics.activeResponses += 1;
+
+    const settle = (event: 'finish' | 'close') => {
+      if (settled) return;
+      settled = true;
+      fileStreamingDiagnostics.activeResponses = Math.max(0, fileStreamingDiagnostics.activeResponses - 1);
+      if (event === 'finish') {
+        fileStreamingDiagnostics.finishedResponses += 1;
+      } else {
+        fileStreamingDiagnostics.closedEarlyResponses += 1;
       }
+      logger.info('File streaming response lifecycle', {
+        reqId,
+        sessionId,
+        kind,
+        fileId,
+        method: req.method,
+        range: isRangeRequest,
+        status: res.statusCode,
+        event,
+        aborted,
+        durationMs: Date.now() - startedAt
+      });
+    };
+
+    req.once('aborted', () => {
+      aborted = true;
+      fileStreamingDiagnostics.abortedRequests += 1;
+    });
+    res.once('finish', () => settle('finish'));
+    res.once('close', () => {
+      if (!res.writableFinished) settle('close');
+    });
+
+    res.setHeader('Cache-Control', 'private, no-store');
+    logger.info('File streaming response start', {
+      reqId,
+      sessionId,
+      kind,
+      fileId,
+      method: req.method,
+      range: isRangeRequest,
+      pathCache: pathResult.source
+    });
+
+    res.sendFile(resolvedPathReal, (rawError) => {
+      if (!rawError) return;
+      const err = rawError as SendFileError;
+      if (res.headersSent) {
+        logger.debug('File streaming: send ended after headers', {
+          reqId,
+          sessionId,
+          kind,
+          fileId,
+          error: err.message
+        });
+        return;
+      }
+
+      const statusCode = err.statusCode ?? err.status ?? 404;
+      if (statusCode === 416 && err.headers) {
+        for (const [header, value] of Object.entries(err.headers)) res.setHeader(header, value);
+      }
+      logger.warn('File streaming: send error', {
+        reqId,
+        sessionId,
+        kind,
+        fileId,
+        status: statusCode,
+        error: err.message
+      });
+      res.status(statusCode).end();
     });
   });
 
@@ -440,8 +573,8 @@ if (isEntryPoint) {
     fileStreamingPlaybackMode: config.fileStreaming.playbackMode,
     radarrEnabled: config.radarr.enabled,
     sonarrEnabled: config.sonarr.enabled,
-    radarrRootFolderPath: config.radarr.rootFolderPath || null,
-    sonarrRootFolderPath: config.sonarr.rootFolderPath || null,
+    radarrRootFolderConfigured: Boolean(config.radarr.rootFolderPath),
+    sonarrRootFolderConfigured: Boolean(config.sonarr.rootFolderPath),
     catalogPageSize: config.catalogPageSize,
     catalogCacheTtlMs: config.catalogCacheTtlMs
   });
