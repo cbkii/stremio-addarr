@@ -128,13 +128,17 @@ export class SonarrClient {
       if (match.hasFile || (match.episodeFileId ?? 0) > 0) {
         const rawFileName = match.episodeFile?.relativePath ?? match.episodeFile?.path;
         const fileName = rawFileName ? rawFileName.split(/[\/]/).pop() : undefined;
+        const sharedEpisodeFile = match.episodeFileId != null && match.episodeFileId > 0
+          ? episodes.some((item) => item.id !== match.id && item.episodeFileId === match.episodeFileId)
+          : false;
         return {
           state: 'episode_downloaded',
           ...episodeCommon,
           episodeFileId: match.episodeFileId,
           hasFile: true,
           fileName,
-          fileSizeBytes: match.episodeFile?.size
+          fileSizeBytes: match.episodeFile?.size,
+          sharedEpisodeFile
         };
       }
 

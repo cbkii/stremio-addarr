@@ -64,6 +64,27 @@ test('episode downloaded status includes episodeFileId', async () => {
   assert.equal(status.episodeFileId, 55);
 });
 
+test('episode downloaded status identifies a file shared by multiple logical episodes', async () => {
+  const cfg = baseConfig();
+  cfg.sonarr.enabled = true;
+  const client = new SonarrClient(
+    cfg,
+    new FakeHttp({
+      get: {
+        '/api/v3/series': [{ id: 22, imdbId: 'tt9', title: 'Show' }],
+        '/api/v3/episode?seriesId=22': [
+          { id: 7, seasonNumber: 1, episodeNumber: 2, episodeFileId: 55, monitored: true },
+          { id: 8, seasonNumber: 1, episodeNumber: 3, episodeFileId: 55, monitored: true }
+        ]
+      }
+    }) as never
+  );
+
+  const status = await client.getEpisodeStatus('tt9', 1, 2);
+  assert.equal(status.state, 'episode_downloaded');
+  assert.equal(status.sharedEpisodeFile, true);
+});
+
 test('episode release date prefers airDate (broadcast date) over airDateUtc', async () => {
   const cfg = baseConfig();
   cfg.sonarr.enabled = true;

@@ -338,6 +338,7 @@ export class ArrStatusService {
             filename: status.fileName,
             videoSize: status.fileSizeBytes
           } : (kodiExternalUrl ? undefined : { notWebReady: true }),
+          bingeEligible: fileUrl ? !status.sharedEpisodeFile : undefined,
           externalUrl: kodiExternalUrl
         }];
       }

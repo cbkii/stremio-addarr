@@ -18,7 +18,13 @@ export interface StatusTile {
   description?: string;
   url?: string;
   externalUrl?: string;
-  behaviorHints?: { notWebReady?: boolean; filename?: string; videoSize?: number };
+  behaviorHints?: {
+    notWebReady?: boolean;
+    filename?: string;
+    videoSize?: number;
+    bingeGroup?: string;
+  };
+  bingeEligible?: boolean;
   isAction?: boolean;
 }
 
@@ -64,6 +70,7 @@ export interface ArrEpisodeStatus {
   seriesMonitored?: boolean;
   seasonMonitored?: boolean;
   monitorNewItems?: 'all' | 'none';
+  sharedEpisodeFile?: boolean;
 }
 
 export interface AddActionResult {

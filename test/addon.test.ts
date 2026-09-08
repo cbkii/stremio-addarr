@@ -166,7 +166,7 @@ test('downloaded tile launches Kodi via externalUrl when enabled', async () => {
   });
 });
 
-test('downloaded tile has no externalUrl when Kodi is disabled', async () => {
+test('downloaded tile returns to Stremio detail when Kodi and direct playback are unavailable', async () => {
   const cfg = baseConfig();
   cfg.kodi.enabled = false;
   cfg.radarr.enabled = true;
@@ -181,8 +181,9 @@ test('downloaded tile has no externalUrl when Kodi is disabled', async () => {
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
-    const body = (await response.json()) as { streams: Array<{ externalUrl?: string }> };
-    assert.equal(body.streams[0].externalUrl ? 1 : 0, 0);
+    const body = (await response.json()) as { streams: Array<{ url?: string; externalUrl?: string }> };
+    assert.equal(body.streams[0].url, undefined);
+    assert.equal(body.streams[0].externalUrl, 'stremio:///detail/movie/tt1234567/tt1234567?autoPlay=false');
   });
 });
 
@@ -362,7 +363,7 @@ test('downloaded tile includes playback url and omits Kodi fallback when file st
   });
 });
 
-test('downloaded tile has no url when file streaming is disabled', async () => {
+test('downloaded tile uses non-player Stremio detail fallback when file streaming is disabled', async () => {
   const cfg = baseConfig();
   cfg.fileStreaming.enabled = false;
   cfg.radarr.enabled = true;
@@ -382,10 +383,11 @@ test('downloaded tile has no url when file streaming is disabled', async () => {
   const app = createApp(cfg);
   await withServer(app, async (baseUrl) => {
     const response = await ORIGINAL_FETCH(`${addonUrl(baseUrl, cfg)}/stream/movie/tt1234567.json`);
-    const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string }> };
+    const body = (await response.json()) as { streams: Array<{ name: string; description?: string; url?: string; externalUrl?: string }> };
     assert.ok(body.streams[0].name?.includes('✅'), 'downloaded tile name should include ✅');
     assert.ok(body.streams[0].description?.includes('UNWATCHED'));
-    assert.match(body.streams[0].url ?? '', /\/status\/movie\/tt1234567\.m3u8$/, 'status fallback keeps the stream object protocol-valid');
+    assert.equal(body.streams[0].url, undefined);
+    assert.equal(body.streams[0].externalUrl, 'stremio:///detail/movie/tt1234567/tt1234567?autoPlay=false');
   });
 });
 

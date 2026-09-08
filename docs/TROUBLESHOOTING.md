@@ -210,7 +210,9 @@ Check:
 
 ## Torrent streams fail after Addarr direct playback
 
-Some Stremio Android TV versions/devices have upstream reports of persistent local streaming-server state and later stream initialisation failures that recover after Stremio is force-stopped or restarted. See [Stremio/stremio-bugs#2461](https://github.com/Stremio/stremio-bugs/issues/2461) and [Stremio/stremio-bugs#2741](https://github.com/Stremio/stremio-bugs/issues/2741). These reports do not prove that Addarr causes the Stremio bug, and Addarr cannot reset Stremio's internal torrent/P2P engine.
+Stremio Android TV has upstream reports of app/player state becoming unhealthy across multiple sources or players, plus separate reports of a persistent `stremio_server_process`. See [Stremio/stremio-bugs#2461](https://github.com/Stremio/stremio-bugs/issues/2461), [#2540](https://github.com/Stremio/stremio-bugs/issues/2540), [#2738](https://github.com/Stremio/stremio-bugs/issues/2738), and [#2741](https://github.com/Stremio/stremio-bugs/issues/2741). These reports do not establish one root cause or prove that Addarr causes the failures.
+
+Current Stremio Core keeps an ordinary HTTP(S) `url` stream direct unless `proxyHeaders` or a special source conversion requires the local streaming server; torrent sources do use the local streaming server. Addarr direct files and its legacy empty-HLS action URL are ordinary URL sources. A failure that appears after Addarr playback can therefore indicate an app/player lifecycle interaction without showing that Addarr traffic passed through or corrupted Stremio's torrent server. Android TV may still keep its server process alive independently of the selected source, so process-level ADB evidence remains useful.
 
 Use this controlled comparison if torrent-addon streams work before an Addarr file but fail afterwards:
 
@@ -219,7 +221,9 @@ Use this controlled comparison if torrent-addon streams work before an Addarr fi
 3. Stop the Addarr playback with Back and immediately retry the same torrent.
 4. Repeat after setting `FILE_STREAMING_PLAYBACK_MODE=kodi` and restarting `stremio-addarr`.
 
-If the failure reproduces only after `direct` Addarr playback and not after the Kodi control, that is useful evidence of a Stremio direct-stream/streaming-engine lifecycle interaction rather than a Radarr/Sonarr or individual torrent-addon failure. HTTPS MP4 direct files are advertised as web-ready; MKV, other non-MP4 formats and non-HTTPS URLs retain Stremio's required `notWebReady` hint.
+If the failure reproduces only after `direct` Addarr playback and not after the Kodi control, that is useful evidence of a Stremio app/player lifecycle interaction correlated with direct playback rather than a Radarr/Sonarr or individual torrent-addon failure. It is **not** evidence that Addarr altered Stremio's torrent engine. HTTPS MP4 direct files are advertised as web-ready; MKV, other non-MP4 formats and non-HTTPS URLs retain Stremio's required `notWebReady` hint.
+
+When reproducing, capture `/status.json` before Addarr playback, immediately after stopping it, and after the later stream failure. The `fileStreaming.diagnostics` counters show whether Addarr finished its HTTP response, saw an early close/abort, reused its path capability, or was still serving a response when Stremio became unhealthy. This separates Addarr's HTTP lifecycle from Stremio process/player state without exposing media paths or signed tokens.
 
 ## Stale settings or stale Stremio metadata
 
