@@ -19,12 +19,15 @@ const DEFAULT_MAX_ENTRIES = 1024;
  * Successful hits use sliding expiry so an actively used/new playback session
  * does not inherit only the remainder of an older entry's TTL. Entries are kept
  * in least-recently-used order and bounded to prevent stale file IDs from
- * accumulating indefinitely in a long-running service.
+ * accumulating indefinitely in a long-running service. Clearing the cache also
+ * advances a generation so resolutions started before the clear cannot repopulate
+ * stale entries when they complete later.
  */
 export class FilePathResolverCache {
   private readonly entries = new Map<string, Entry>();
   private readonly inFlight = new Map<string, Promise<string | null>>();
   private readonly maxEntries: number;
+  private generation = 0;
 
   constructor(
     private readonly ttlMs: number,
@@ -55,11 +58,12 @@ export class FilePathResolverCache {
       return { value, source: 'deduped' };
     }
 
+    const generation = this.generation;
     const promise = resolver();
     this.inFlight.set(key, promise);
     try {
       const value = await promise;
-      if (value) this.store(key, value, now);
+      if (value && generation === this.generation) this.store(key, value, now);
       return { value, source: 'miss' };
     } finally {
       if (this.inFlight.get(key) === promise) this.inFlight.delete(key);
@@ -71,6 +75,7 @@ export class FilePathResolverCache {
   }
 
   clear(): void {
+    this.generation += 1;
     this.entries.clear();
     this.inFlight.clear();
   }
